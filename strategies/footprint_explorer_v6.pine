@@ -1,0 +1,40 @@
+//@version=6
+// @description: 基於 Pine Script v6 的實體買賣壓力感知器 (Footprint Explorer)
+// @author: TeleNexus AI
+
+indicator("TeleNexus Footprint Explorer v6", overlay = true)
+
+// 1. 利用 v6 的 Enum (列舉) 定義模式
+enum Mode
+    POC = "Point of Control"
+    VA = "Value Area"
+    Both = "Both"
+
+Mode calculationMode = input.enum(Mode.Both, "顯示模式")
+
+// 2. 配置參數
+int numTicks = input.int(100, "每行價格間隔 (Ticks)", minval = 1)
+int vaPercent = input.int(70, "Value Area 比例", minval = 1, maxval = 100)
+
+// 3. 獲取 Footprint 數據 (v6 新特性)
+footprint data = request.footprint(numTicks, vaPercent)
+
+// 4. 解析數據與繪圖
+if not na(data)
+    volume_row pocRow = data.poc()
+    volume_row vahRow = data.vah()
+    volume_row valRow = data.val()
+
+    // 獲取價格邊界
+    float pocHigh = pocRow.up_price()
+    float pocLow = pocRow.down_price()
+    
+    // 繪製 POC 區域
+    if calculationMode == Mode.POC or calculationMode == Mode.Both
+        box.new(bar_index, pocHigh, bar_index, pocLow, bgcolor=color.new(color.purple, 80), border_color=color.purple)
+
+    // 輸出 Debug 標籤
+    if barstate.islast
+        label.new(bar_index, high, "Delta: " + str.tostring(data.delta()), yloc=yloc.abovebar, color=color.green, textcolor=color.white)
+
+plot(close, "Price", color=color.new(color.gray, 50))

@@ -1,0 +1,1 @@
+indicator('My v6 Strategy', overlay=true)\nplot(close)
