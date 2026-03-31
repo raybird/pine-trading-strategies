@@ -1,0 +1,67 @@
+//@version=6
+// @description: 改良版東京區間突破策略 - TeleNexus v6 規訓實作
+// @author: TeleNexus AI
+// @strategy: 監測東京時段的高低點，並在倫敦/紐約時段尋找具備成交量與動能支撐的突破信號。
+
+strategy("TN Tokyo Breakout Refined v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義交易時段
+enum SessionType
+    London = "London"
+    NY     = "New York"
+    Both   = "Both"
+
+SessionType tradeSession = input.enum(SessionType.Both, "目標交易時段")
+
+// 2. 輸入參數
+rsiLength  = input.int(14, "RSI 長度")
+rsiLevel   = input.int(50, "RSI 過濾位階")
+volatility = input.float(1.5, "ATR 波動率乘數", step=0.1)
+
+// 3. 時段定義
+TOKYO_TIME  = "0000-0800"
+LONDON_TIME = "0800-1600"
+NY_TIME     = "1300-2100"
+
+inTokyo  = not na(time(timeframe.period, TOKYO_TIME, "UTC"))
+inLondon = not na(time(timeframe.period, LONDON_TIME, "UTC"))
+inNY     = not na(time(timeframe.period, NY_TIME, "UTC"))
+
+// 判斷是否在可交易時段
+isActionTime = switch tradeSession
+    SessionType.London => inLondon
+    SessionType.NY     => inNY
+    SessionType.Both   => inLondon or inNY
+
+// 4. 東京區間追蹤 (v6 變數管理)
+var float tHigh = na
+var float tLow  = na
+
+if inTokyo
+    tHigh := na(tHigh) ? high : math.max(tHigh, high)
+    tLow  := na(tLow)  ? low  : math.min(tLow, low)
+else if not isActionTime and not inTokyo
+    tHigh := na
+    tLow  := na
+
+// 5. 技術指標
+vwapVal = ta.vwap(close)
+rsiVal  = ta.rsi(close, rsiLength)
+atrVal  = ta.atr(14)
+
+// 6. 突破邏輯與執行 (v6 嚴格類型檢查)
+longCondition  = isActionTime and ta.crossover(close, tHigh) and close > vwapVal and rsiVal > rsiLevel
+shortCondition = isActionTime and ta.crossunder(close, tLow) and close < vwapVal and rsiVal < (100 - rsiLevel)
+
+if longCondition
+    strategy.entry("Long", strategy.long, comment="Tokyo High Breakout")
+    strategy.exit("Exit Long", "Long", stop=close - (atrVal * volatility), limit=close + (atrVal * volatility * 2))
+
+if shortCondition
+    strategy.entry("Short", strategy.short, comment="Tokyo Low Breakout")
+    strategy.exit("Exit Short", "Short", stop=close + (atrVal * volatility), limit=close - (atrVal * volatility * 2))
+
+// 7. 視覺化
+plot(tHigh, "Tokyo High", color=color.new(color.blue, 50), style=plot.style_linebr, linewidth=2)
+plot(tLow, "Tokyo Low", color=color.new(color.red, 50), style=plot.style_linebr, linewidth=2)
+bgcolor(inTokyo ? color.new(color.gray, 90) : na)
