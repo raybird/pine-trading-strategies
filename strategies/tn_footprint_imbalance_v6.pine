@@ -1,0 +1,66 @@
+//@version=6
+// @description: TeleNexus 訂單流失衡主權策略 - v6 實體化
+// @author: TeleNexus AI
+// @strategy: 利用 request.footprint() 偵測 POC (控制點) 的買賣失衡，結合動態 ATR 止損進行高勝率執行。
+
+strategy("TN Footprint Imbalance Sovereign v6", overlay = true, initial_capital = 10000, currency = currency.USD)
+
+// 1. 利用 v6 Enum 定義規訓模式
+enum RiskProfile
+    Aggressive = "Aggressive (3:1 Imbalance)"
+    Balanced   = "Balanced (4:1 Imbalance)"
+    Sovereign  = "Sovereign (5:1 Imbalance)"
+
+RiskProfile profile = input.enum(RiskProfile.Balanced, "因果風險規訓")
+
+// 2. 參數配置
+int ticksPerRow = input.int(10, "每行價格 Tick 數", minval = 1)
+float vaPercent = input.float(70.0, "Value Area 比例", minval = 0, maxval = 100)
+float atrMult   = input.float(1.5, "ATR 止損乘數", step = 0.1)
+
+// 根據 Enum 動態決定失衡比例
+float imbThreshold = switch profile
+    RiskProfile.Aggressive => 300.0
+    RiskProfile.Balanced   => 400.0
+    RiskProfile.Sovereign  => 500.0
+
+// 3. 獲取 v6 原生 Footprint 數據
+footprint fbData = request.footprint(ticksPerRow, vaPercent, imbThreshold)
+
+// 4. 核心邏輯處理
+if not na(fbData)
+    // 獲取 POC (Point of Control) 行對象
+    volume_row pocRow = fbData.poc()
+    
+    // 提取物理數據
+    float pocPrice = pocRow.avg_price()
+    float buyVol   = pocRow.buy_volume()
+    float sellVol  = pocRow.sell_volume()
+    float delta    = fbData.delta()
+    
+    // 判斷失衡與因果強度
+    bool isBullishImbalance = buyVol > (sellVol * (imbThreshold / 100))
+    bool isBearishImbalance = sellVol > (buyVol * (imbThreshold / 100))
+    
+    float atr = ta.atr(14)
+
+    // 5. 策略執行
+    // 多頭：POC 看漲失衡 + 整根 Bar Delta 為正
+    if isBullishImbalance and delta > 0 and strategy.position_size == 0
+        strategy.entry("Long", strategy.long, comment = "POC Bullish Imb")
+        strategy.exit("SL/TP", "Long", stop = close - (atr * atrMult), limit = close + (atr * atrMult * 2.5))
+
+    // 空頭：POC 看跌失衡 + 整根 Bar Delta 為負
+    if isBearishImbalance and delta < 0 and strategy.position_size == 0
+        strategy.entry("Short", strategy.short, comment = "POC Bearish Imb")
+        strategy.exit("SL/TP", "Short", stop = close + (atr * atrMult), limit = close - (atr * atrMult * 2.5))
+
+    // 6. 視覺化地板
+    plot(pocPrice, "POC Level", color = isBullishImbalance ? color.green : isBearishImbalance ? color.red : color.orange, style = plot.style_linebr, linewidth = 2)
+    bgcolor(isBullishImbalance ? color.new(color.green, 90) : isBearishImbalance ? color.new(color.red, 90) : na)
+
+// 7. 即時數據標籤 (v6 str.format)
+if barstate.islast and not na(fbData)
+    var label info = label.new(bar_index, high, "", color = color.new(color.black, 20), textcolor = color.white, style = label.style_label_down)
+    label.set_xy(info, bar_index, high)
+    label.set_text(info, str.format("TN Sovereign Metrics:\nDelta: {0,number,#.##}\nMode: {1}\nImbalance Hit: {2}", fbData.delta(), profile, isBullishImbalance ? "BULL" : isBearishImbalance ? "BEAR" : "NONE"))
