@@ -1,0 +1,53 @@
+//@version=6
+// @description: TeleNexus 主權 FVG & 訂單塊共振策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 偵測「公平價值缺口 (FVG)」與「訂單塊 (OB)」的物理重疊，以此定義具備高因果強度的進場位階。
+
+strategy("TN Sovereign FVG & OB v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 15)
+
+// 1. 利用 v6 Enum 定義規訓深度
+enum ConfirmationLevel
+    Aggressive = "FVG Only"
+    Standard   = "FVG + OB"
+    Sovereign  = "FVG + OB + Dynamic HTF"
+
+ConfirmationLevel level = input.enum(ConfirmationLevel.Standard, "因果確認等級")
+
+// 2. 核心參數
+atrMult = input.float(2.0, "ATR 止損乘數", step = 0.1)
+htfTimeframe = input.timeframe("240", "HTF 參考時區")
+
+// 3. FVG 與 OB 偵測邏輯 (v6 方法論封裝建議)
+// Bullish FVG: Bar 0 Low > Bar 2 High
+bullFVG = low > high[2] and close[1] > high[2]
+bearFVG = high < low[2] and close[1] < low[2]
+
+// OB: 突破前的高成交量反向 K 線 (簡化版)
+bullOB = close > high[1] and volume > ta.sma(volume, 20)
+bearOB = close < low[1] and volume > ta.sma(volume, 20)
+
+// 4. 動態時區感知 (v6 Series String 支援)
+htfBull = request.security(syminfo.tickerid, htfTimeframe, bullFVG)
+
+// 5. 策略合成
+longCondition = switch level
+    ConfirmationLevel.Aggressive => bullFVG
+    ConfirmationLevel.Standard   => bullFVG and bullOB
+    ConfirmationLevel.Sovereign  => bullFVG and bullOB and htfBull
+
+if longCondition
+    strategy.entry("Long", strategy.long, comment = "Sovereign Buy")
+    atrVal = ta.atr(14)
+    strategy.exit("Exit", "Long", stop = close - (atrVal * atrMult), limit = close + (atrVal * atrMult * 3))
+
+// 6. 視覺化地板 (v6 Box 繪圖)
+if bullFVG
+    box.new(bar_index[2], high[2], bar_index, low, bgcolor = color.new(color.green, 85), border_color = color.green)
+
+if bearFVG
+    box.new(bar_index[2], low[2], bar_index, high, bgcolor = color.new(color.red, 85), border_color = color.red)
+
+// 7. 物理狀態標籤
+if barstate.islast
+    var label status = label.new(bar_index, high, "", color = color.black, textcolor = color.white)
+    label.set_text(status, str.format("TN System Status:\nMode: {0}\nHTF Filter: {1}", level, htfTimeframe))
