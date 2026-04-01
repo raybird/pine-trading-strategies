@@ -1,0 +1,64 @@
+//@version=6
+// @description: TeleNexus 多資產主權相關性矩陣 - v6 實體化
+// @author: TeleNexus AI
+// @strategy: 利用 v6 動態請求與矩陣運算，同步監測多個資產的相關性位移，捕捉因果脫鉤（Decoupling）引發的對沖機會。
+
+strategy("TN Multilateral Sovereign Corr v6", overlay = false, precision = 2)
+
+// 1. 利用 v6 Enum 定義監測矩陣預設值
+enum AssetCluster
+    Crypto = "BTC, ETH, SOL, BNB"
+    Macro  = "GOLD, BRENT, DXY, SPX"
+    Custom = "Manual Input"
+
+AssetCluster cluster = input.enum(AssetCluster.Crypto, "資產集群選擇")
+
+// 2. 動態符號輸入 (利用 v6 series string 潛力)
+s1 = input.symbol("BINANCE:BTCUSDT", "資產 1")
+s2 = input.symbol("BINANCE:ETHUSDT", "資產 2")
+s3 = input.symbol("BINANCE:SOLUSDT", "資產 3")
+s4 = input.symbol("BINANCE:BNBUSDT", "資產 4")
+
+int corrLength = input.int(20, "相關性計算長度")
+float decoupleThresh = input.float(0.5, "脫鉤警戒閾值")
+
+// 3. 矩陣與陣列初始化
+var string[] tickers = array.from(s1, s2, s3, s4)
+int n = array.size(tickers)
+var matrix<float> corr_matrix = matrix.new<float>(n, n, 0.0)
+
+// 4. 動態感知邏輯 (v6 原生支援在循環中使用 request.security)
+if barstate.islast
+    for i = 0 to n - 1
+        string t_i = array.get(tickers, i)
+        float p_i = request.security(t_i, timeframe.period, close)
+        for j = 0 to n - 1
+            string t_j = array.get(tickers, j)
+            float p_j = request.security(t_j, timeframe.period, close)
+            // 皮爾森相關係數演算
+            float c_val = ta.correlation(p_i, p_j, corrLength)
+            matrix.set(corr_matrix, i, j, c_val)
+
+// 5. 核心策略邏輯：因果脫鉤對沖
+// 以資產 1 與 資產 2 為例的簡單示範
+float main_corr = ta.correlation(request.security(s1, timeframe.period, close), request.security(s2, timeframe.period, close), corrLength)
+bool is_decoupled = main_corr < decoupleThresh and main_corr[1] >= decoupleThresh
+
+if is_decoupled
+    strategy.entry("Hedge", strategy.long, comment = "Correlation Decoupling Detected")
+
+// 6. 視覺化：v6 矩陣熱圖 (Table API)
+var table heatmap = table.new(position.top_right, n + 1, n + 1, border_width = 1, frame_color = color.gray)
+
+if barstate.islast
+    for i = 0 to n - 1
+        table.cell(heatmap, i + 1, 0, array.get(tickers, i), bgcolor = color.new(color.gray, 50), text_color = color.white, text_size = size.small)
+        table.cell(heatmap, 0, i + 1, array.get(tickers, i), bgcolor = color.new(color.gray, 50), text_color = color.white, text_size = size.small)
+        for j = 0 to n - 1
+            float val = matrix.get(corr_matrix, i, j)
+            color bg = val > 0 ? color.new(color.green, 100 - int(val * 100)) : color.new(color.red, 100 - int(math.abs(val) * 100))
+            table.cell(heatmap, j + 1, i + 1, str.tostring(val, "#.##"), bgcolor = bg, text_color = color.white)
+
+// 7. 狀態標籤
+plot(main_corr, "Main Pair Correlation", color = is_decoupled ? color.red : color.blue, linewidth = 2)
+hline(decoupleThresh, "Decouple Line", color = color.gray, linestyle = hline.style_dashed)
