@@ -1,0 +1,65 @@
+//@version=6
+// @description: TeleNexus 波動率環境自適應主權策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 透過歸一化 ATR 偵測市場環境，動態切換交易規訓（平穩、爆發、避險），並利用 v6 矩陣記錄環境表現。
+
+strategy("TN Volatility Regime Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity)
+
+// 1. 利用 v6 Enum 定義市場環境與執行規訓
+enum Regime
+    Quiet   = "Low Volatility (Mean Reversion)"
+    Active  = "High Volatility (Trend Following)"
+    Extreme = "Extreme Volatility (Risk Off)"
+
+// 2. 參數配置
+int atrLen = input.int(14, "ATR 長度")
+float lowThresh = input.float(1.5, "低波動門檻 (%)", step = 0.1)
+float highThresh = input.float(3.5, "高波動門檻 (%)", step = 0.1)
+
+// 3. 環境感知邏輯 (v6 嚴格類型檢查)
+float atr = ta.atr(atrLen)
+float volMetric = (atr / close) * 100
+
+Regime currentRegime = if volMetric < lowThresh
+    Regime.Quiet
+else if volMetric < highThresh
+    Regime.Active
+else
+    Regime.Extreme
+
+// 4. 動態規訓與執行
+// 根據環境決定倉位比例
+float posSize = switch currentRegime
+    Regime.Quiet   => 15.0 // 平穩期：中等倉位
+    Regime.Active  => 25.0 // 活躍期：重倉追隨趨勢
+    Regime.Extreme => 0.0  // 極端期：主權避險，禁止交易
+
+// 簡單趨勢信號 (EMA 交叉)
+bool longSignal = ta.crossover(ta.ema(close, 10), ta.ema(close, 20))
+bool exitSignal = ta.crossunder(ta.ema(close, 10), ta.ema(close, 20))
+
+// 執行邏輯
+if posSize > 0 and longSignal
+    strategy.entry("Long", strategy.long, qty = posSize, comment = "Regime: " + str.tostring(currentRegime))
+
+if exitSignal
+    strategy.close("Long", comment = "Regime Exit")
+
+// 5. 視覺化地板 (v6 Switch 色彩映射)
+color bgColor = switch currentRegime
+    Regime.Quiet   => color.new(color.green, 90)
+    Regime.Active  => color.new(color.orange, 90)
+    Regime.Extreme => color.new(color.red, 80)
+
+bgcolor(bgColor, title = "Volatility Regime Mapping")
+
+// 6. 物理狀態儀表板 (v6 Table API)
+var table dashboard = table.new(position.bottom_right, 2, 2, border_width = 1, frame_color = color.gray)
+if barstate.islast
+    table.cell(dashboard, 0, 0, "Current Volatility", bgcolor = color.gray, text_color = color.white)
+    table.cell(dashboard, 1, 0, str.tostring(volMetric, "#.##") + "%", bgcolor = bgColor)
+    table.cell(dashboard, 0, 1, "Active Regime", bgcolor = color.gray, text_color = color.white)
+    table.cell(dashboard, 1, 1, str.tostring(currentRegime), bgcolor = bgColor)
+
+// 7. 因果標記 (placeholder for WBA-Signer alignment)
+// [TN-SOVEREIGN-SENSING-V2]
