@@ -1,0 +1,83 @@
+//@version=6
+// @description: TeleNexus 矩陣自適應 kNN 機器學習策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 matrix 儲存歷史特徵空間，透過 kNN 演算法動態預測市場極性，並結合 EMA 共振執行。
+
+strategy("TN Matrix kNN ML Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義機器學習規訓強度
+enum MLStrictness
+    Loose    = "Aggressive (0.4 Confidence)"
+    Balanced = "Balanced (0.6 Confidence)"
+    Strict   = "Sovereign (0.8 Confidence)"
+
+MLStrictness strictness = input.enum(MLStrictness.Balanced, "ML 因果規訓等級")
+
+// 2. 配置參數
+int lookback = input.int(200, "矩陣訓練回顧 (Bars)", minval = 50)
+int k        = input.int(5, "k-最近鄰居數", minval = 1)
+
+// 根據 Enum 動態決定信心門檻
+float confidenceThreshold = switch strictness
+    MLStrictness.Loose    => 0.4
+    MLStrictness.Balanced => 0.6
+    MLStrictness.Strict   => 0.8
+
+// 3. 特徵工程 (Feature Engineering)
+// 歸一化特徵至 0-1 區間
+f_rsi = ta.rsi(close, 14) / 100
+f_vol = ta.atr(14) / close
+f_mom = ta.roc(close, 14) / 100
+
+// 4. 矩陣初始化與更新 (v6 Matrix API)
+// 矩陣結構：[lookback rows] x [3 features + 1 outcome]
+var matrix<float> ml_matrix = matrix.new<float>(lookback, 4, 0.0)
+
+// 更新矩陣 (手動滾動窗口，v6 效能優化版)
+if not na(f_rsi) and not na(f_vol) and not na(f_mom)
+    // 移除最舊的一行並插入最新數據
+    matrix.remove_row(ml_matrix, 0)
+    float outcome = close > close[1] ? 1.0 : -1.0
+    matrix.add_row(ml_matrix, matrix.rows(ml_matrix), array.from(f_rsi, f_vol, f_mom, outcome))
+
+// 5. kNN 預測邏輯
+predict_trend() =>
+    float score = 0.0
+    int found_neighbors = 0
+    if matrix.rows(ml_matrix) >= lookback
+        for i = 0 to lookback - 1
+            float d_rsi = f_rsi - matrix.get(ml_matrix, i, 0)
+            float d_vol = f_vol - matrix.get(ml_matrix, i, 1)
+            float d_mom = f_mom - matrix.get(ml_matrix, i, 2)
+            float dist = math.sqrt(d_rsi * d_rsi + d_vol * d_vol + d_mom * d_mom)
+            
+            if dist < 0.1 // 相似度閾值
+                score += matrix.get(ml_matrix, i, 3)
+                found_neighbors += 1
+    
+    found_neighbors > 0 ? (score / math.max(k, found_neighbors)) : 0.0
+
+float ml_confidence = predict_trend()
+
+// 6. 策略合成與執行 (v6 嚴格 Boolean handling)
+emaFast = ta.ema(close, 12)
+emaSlow = ta.ema(close, 26)
+
+longCondition  = ml_confidence > confidenceThreshold and ta.crossover(emaFast, emaSlow)
+shortCondition = ml_confidence < -confidenceThreshold and ta.crossunder(emaFast, emaSlow)
+
+if longCondition
+    strategy.entry("ML Long", strategy.long, comment = "ML Conf: " + str.tostring(ml_confidence, "#.##"))
+
+if shortCondition
+    strategy.entry("ML Short", strategy.short, comment = "ML Conf: " + str.tostring(ml_confidence, "#.##"))
+
+// 7. 視覺化地板
+plot(ml_confidence, "ML Confidence", color = ml_confidence > 0 ? color.green : color.red, style = plot.style_columns, display = display.pane)
+hline(confidenceThreshold, "Upper Threshold", color = color.gray, linestyle = hline.style_dashed)
+hline(-confidenceThreshold, "Lower Threshold", color = color.gray, linestyle = hline.style_dashed)
+
+// 狀態標籤
+if barstate.islast
+    var label status = label.new(bar_index, high, "", color = color.black, textcolor = color.white)
+    label.set_text(status, str.format("TN ML Status:\nConfidence: {0,number,#.##}\nStrictness: {1}", ml_confidence, strictness))
