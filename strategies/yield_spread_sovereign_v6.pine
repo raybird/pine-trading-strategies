@@ -1,0 +1,61 @@
+//@version=6
+// @description: TeleNexus 主權利差動態策略 - v6 實體化
+// @author: TeleNexus AI
+// @strategy: 監測美債收益率曲線位移（如 T10Y2Y），利用動態請求與 v6 引擎執行宏觀對沖規訓。
+
+strategy("TN Yield Spread Sovereign v6", overlay = false, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+
+// 1. 利用 v6 Enum 定義因果監測模式
+enum SpreadMode
+    Manual = "Manual (Long - Short)"
+    Direct = "Direct (FRED Symbol)"
+
+enum SignalRegime
+    Reversion = "Steepening Trigger"
+    Momentum  = "SMA Cross"
+
+// 2. 配置參數 (v6 動態符號支援)
+mode    = input.enum(SpreadMode.Manual, "數據獲取模式")
+longSym = input.symbol("TVC:US10Y", "長期債券收益率")
+shortSym= input.symbol("TVC:US02Y", "短期債券收益率")
+fredSym = input.symbol("FRED:T10Y2Y", "FRED 直接利差代號")
+
+regime  = input.enum(SignalRegime.Reversion, "訊號規訓路徑")
+thresh  = input.float(0.0, "倒掛閾值")
+smaLen  = input.int(20, "動能 SMA 長度")
+
+// 3. 動態感知邏輯 (v6 原生支援 Series String)
+float yLong  = request.security(longSym, timeframe.period, close)
+float yShort = request.security(shortSym, timeframe.period, close)
+float yDirect = request.security(fredSym, timeframe.period, close)
+
+// 計算利差
+float spread = mode == SpreadMode.Manual ? (yLong - yShort) : yDirect
+float spreadSma = ta.sma(spread, smaLen)
+
+// 4. 核心執行規訓
+bool isSteepening = spread > thresh and spread[1] <= thresh
+bool isMomentum   = ta.crossover(spread, spreadSma)
+
+longCondition = regime == SignalRegime.Reversion ? isSteepening : isMomentum
+exitCondition = regime == SignalRegime.Reversion ? (spread < thresh) : ta.crossunder(spread, spreadSma)
+
+if longCondition
+    strategy.entry("SovereignHedge", strategy.long, comment = str.format("Spread: {0,number,#.##}", spread))
+
+if exitCondition
+    strategy.close("SovereignHedge", comment = "Decoupling/Inversion")
+
+// 5. 視覺化地板
+plot(spread, "Yield Spread", color = spread > thresh ? color.green : color.red, linewidth = 2)
+plot(regime == SignalRegime.Momentum ? spreadSma : na, "Momentum Base", color = color.gray)
+hline(thresh, "Inversion Level", color = color.new(color.white, 50), linestyle = hline.style_dashed)
+
+// 6. v6 環境日誌規訓
+if barstate.islastconfirmedhistory
+    log.info("TN System Calibration - Current Spread: {0,number,#.###}", spread)
+
+// 7. 物理狀態標籤 (v6 str.format)
+if barstate.islast
+    var label info = label.new(bar_index, spread, "", color = color.black, textcolor = color.white)
+    label.set_text(info, str.format("TN Sovereign Macro:\nMode: {0}\nSpread: {1,number,#.###}%", regime, spread))
