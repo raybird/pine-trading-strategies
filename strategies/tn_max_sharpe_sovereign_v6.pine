@@ -1,0 +1,85 @@
+//@version=6
+// @description: TeleNexus 最大夏普比率主權優化器 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用矩陣代數 (w = Sigma^-1 * mu) 求解切線投資組合，實現風險調整後收益的最大化。
+
+strategy("TN Max Sharpe Sovereign v6", overlay = true, initial_capital = 100000, currency = currency.USD)
+
+// 1. 利用 v6 Enum 定義規訓時框
+enum OptimizationWindow
+    ShortTerm = 60
+    Standard  = 120
+    LongTerm  = 252
+
+OptimizationWindow optWin = input.enum(OptimizationWindow.Standard, "優化回顧窗口")
+float rf_annual = input.float(3.5, "無風險年利率 (%)") / 100
+
+// 2. 資產集群與動態感知 (v6 Method Syntax)
+method get_ret(string sym) =>
+    float p = request.security(sym, timeframe.period, close)
+    (p - p[1]) / p[1]
+
+s1 = input.symbol("BINANCE:BTCUSDT", "資產 1")
+s2 = input.symbol("BINANCE:ETHUSDT", "資產 2")
+s3 = input.symbol("BINANCE:SOLUSDT", "資產 3")
+
+r1 = s1.get_ret(), r2 = s2.get_ret(), r3 = s3.get_ret()
+
+// 3. 矩陣代數優化 (The Sovereign Math)
+int lookback = switch optWin
+    OptimizationWindow.ShortTerm => 60
+    OptimizationWindow.Standard  => 120
+    OptimizationWindow.LongTerm  => 252
+
+float rf_daily = rf_annual / 252
+
+// 計算超額收益向量 (mu) 與 協方差矩陣 (Sigma)
+float mu1 = ta.sma(r1, lookback) - rf_daily
+float mu2 = ta.sma(r2, lookback) - rf_daily
+float mu3 = ta.sma(r3, lookback) - rf_daily
+
+c11 = ta.covariance(r1, r1, lookback), c12 = ta.covariance(r1, r2, lookback), c13 = ta.covariance(r1, r3, lookback)
+c22 = ta.covariance(r2, r2, lookback), c23 = ta.covariance(r2, r3, lookback)
+c33 = ta.covariance(r3, r3, lookback)
+
+// 4. 執行矩陣運算
+var matrix<float> Sigma  = matrix.new<float>(3, 3)
+var matrix<float> Mu_Vec = matrix.new<float>(3, 1)
+
+// 持久化權重
+var float w1 = 0.0, var float w2 = 0.0, var float w3 = 0.0
+
+if bar_index % 10 == 0 and not na(c33)
+    Mu_Vec.set(0, 0, mu1), Mu_Vec.set(1, 0, mu2), Mu_Vec.set(2, 0, mu3)
+    Sigma.set(0, 0, c11), Sigma.set(0, 1, c12), Sigma.set(0, 2, c13)
+    Sigma.set(1, 0, c12), Sigma.set(1, 1, c22), Sigma.set(1, 2, c23)
+    Sigma.set(2, 0, c13), Sigma.set(2, 1, c23), Sigma.set(2, 2, c33)
+    
+    // 求解：w = Sigma^-1 * Mu
+    matrix<float> SigmaInv = Sigma.inverse()
+    if not na(SigmaInv)
+        matrix<float> W_Vec = SigmaInv.mult(Mu_Vec)
+        // 歸一化權重 (絕對值之和為 1)
+        float total = math.abs(W_Vec.get(0, 0)) + math.abs(W_Vec.get(1, 0)) + math.abs(W_Vec.get(2, 0))
+        if total > 0
+            w1 := W_Vec.get(0, 0) / total
+            w2 := W_Vec.get(1, 0) / total
+            w3 := W_Vec.get(2, 0) / total
+
+// 5. 執行主權倉位對齊
+float current_w = syminfo.tickerid == s1 ? w1 : syminfo.tickerid == s2 ? w2 : syminfo.tickerid == s3 ? w3 : 0.0
+
+if current_w != 0
+    strategy.entry("MaxSharpe", current_w > 0 ? strategy.long : strategy.short, qty = math.abs(strategy.equity * current_w / close))
+
+// 6. 視覺化診斷表
+var table dashboard = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 20), border_width=1)
+if barstate.islast
+    table.cell(dashboard, 0, 0, "Asset", text_color=color.white)
+    table.cell(dashboard, 1, 0, "Sharpe Weight", text_color=color.white)
+    table.cell(dashboard, 0, 1, s1, text_color=color.blue)
+    table.cell(dashboard, 1, 1, str.tostring(w1, "#.##"), bgcolor=color.new(color.blue, 80))
+    table.cell(dashboard, 0, 2, s2, text_color=color.red)
+    table.cell(dashboard, 1, 2, str.tostring(w2, "#.##"), bgcolor=color.new(color.red, 80))
+    table.cell(dashboard, 0, 3, s3, text_color=color.green)
+    table.cell(dashboard, 1, 3, str.tostring(w3, "#.##"), bgcolor=color.new(color.green, 80))
