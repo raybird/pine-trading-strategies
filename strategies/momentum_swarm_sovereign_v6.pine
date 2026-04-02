@@ -1,0 +1,71 @@
+//@version=6
+// @description: TeleNexus 多資產動能蜂群策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 同步監測多個資產的動能位移 (Swarm Momentum)，利用陣列排名自動執行資產輪動，確保資金始終位於最強因果地板。
+
+strategy("TN Momentum Swarm Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+
+// 1. 利用 v6 Enum 定義輪動速度
+enum RotationSpeed
+    Aggressive = 5
+    Balanced   = 10
+    Sovereign  = 20
+
+RotationSpeed speed = input.enum(RotationSpeed.Balanced, "資產輪動頻率 (Bars)")
+int lookback = input.int(14, "動能回顧長度", minval = 1)
+
+// 2. 資產蜂群定義 (v6 動態符號對焦)
+s1 = input.symbol("BINANCE:BTCUSDT", "資產 1 (核心)")
+s2 = input.symbol("BINANCE:ETHUSDT", "資產 2")
+s3 = input.symbol("TVC:GOLD", "資產 3")
+s4 = input.symbol("TVC:USOIL", "資產 4")
+s5 = input.symbol("TVC:DXY", "資產 5")
+
+// 3. 動能演算方法 (Method Syntax)
+method calc_roc(string sym, int len) =>
+    p_now = request.security(sym, timeframe.period, close[1])
+    p_old = request.security(sym, timeframe.period, close[len+1])
+    (p_now - p_old) / p_old * 100
+
+// 4. 蜂群排名邏輯 (v6 Array/Matrix Processing)
+var string[] swarm = array.from(s1, s2, s3, s4, s5)
+float[] scores = array.new_float(5)
+
+int f_val = switch speed
+    RotationSpeed.Aggressive => 5
+    RotationSpeed.Balanced   => 10
+    RotationSpeed.Sovereign  => 20
+
+bool is_rotation_bar = bar_index % f_val == 0
+
+if is_rotation_bar
+    array.set(scores, 0, s1.calc_roc(lookback))
+    array.set(scores, 1, s2.calc_roc(lookback))
+    array.set(scores, 2, s3.calc_roc(lookback))
+    array.set(scores, 3, s4.calc_roc(lookback))
+    array.set(scores, 4, s5.calc_roc(lookback))
+
+// 尋找當前蜂群領袖
+int leader_idx = array.indexof(scores, array.max(scores))
+string leader_ticker = array.get(swarm, leader_idx)
+
+// 5. 執行主權輪動
+bool need_rotation = leader_ticker != strategy.opentrades.entry_id(0)
+
+if is_rotation_bar and need_rotation
+    strategy.close_all(comment = "TN Rotation: Exit Old Base")
+    strategy.entry(leader_ticker, strategy.long, comment = "TN Swarm Leader: " + leader_ticker)
+
+// 6. 蜂群狀態儀表板 (v6 Table API)
+var table swarm_ui = table.new(position.top_right, 2, 6, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(swarm_ui, 0, 0, "Asset Swarm", text_color = color.white)
+    table.cell(swarm_ui, 1, 0, "Momentum %", text_color = color.white)
+    for i = 0 to 4
+        string t = array.get(swarm, i)
+        float s = array.get(scores, i)
+        table.cell(swarm_ui, 0, i+1, t, text_color = t == leader_ticker ? color.yellow : color.gray)
+        table.cell(swarm_ui, 1, i+1, str.tostring(s, "#.##"), text_color = s > 0 ? color.green : color.red)
+
+// 7. 視覺化
+plotshape(is_rotation_bar and need_rotation, "Swarm Rotation", shape.circle, location.top, color.yellow, size = size.tiny)
