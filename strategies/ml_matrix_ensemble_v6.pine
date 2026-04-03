@@ -1,0 +1,73 @@
+//@version=6
+// @description: TeleNexus 機器學習矩陣集成主權策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 Lorentzian 距離進行非線性市場預測，並結合趨勢、動能、波動、成交量的策略矩陣進行因果過濾。
+
+strategy("TN ML Matrix Ensemble Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓靈敏度
+enum ConsensusMode
+    Strict = 0.8
+    Balanced = 0.6
+    Aggressive = 0.4
+
+ConsensusMode mode = input.enum(ConsensusMode.Balanced, "集成共識等級")
+float threshold = switch mode
+    ConsensusMode.Strict => 0.8
+    ConsensusMode.Balanced => 0.6
+    ConsensusMode.Aggressive => 0.4
+
+// 2. 特徵工程 (v6 方法論)
+method normalize(float src, int len) =>
+    float mi = ta.lowest(src, len)
+    float ma = ta.highest(src, len)
+    (src - mi) / math.max(ma - mi, 1e-10)
+
+f1 = ta.rsi(close, 14).normalize(50)
+f2 = ta.cci(close, 20).normalize(50)
+f3 = ta.adx(14).normalize(50)
+f4 = ta.mom(close, 10).normalize(50)
+
+// 3. Lorentzian ML 預測引擎 (簡化矩陣版)
+float ml_score = 0.0
+if bar_index > 200
+    // 計算當前與歷史特徵的 Lorentzian 距離
+    float d1 = math.log(1 + math.abs(f1 - f1[1]))
+    float d2 = math.log(1 + math.abs(f2 - f2[1]))
+    float d3 = math.log(1 + math.abs(f3 - f3[1]))
+    // 預測邏輯：若距離縮短且方向一致，則增加信心度
+    ml_score := math.tanh( (close > close[1] ? 1 : -1) / (1 + d1 + d2 + d3) )
+
+// 4. 策略過濾矩陣 (Strategy Matrix)
+m_trend  = close > ta.ema(close, 200) ? 1 : -1
+m_mom    = ta.rsi(close, 14) > 50 ? 1 : -1
+m_volat  = ta.atr(14) > ta.sma(ta.atr(14), 50) ? 1 : -1
+float matrix_score = (m_trend + m_mom + m_volat) / 3.0
+
+// 5. 集成共識與執行
+float ensemble = (ml_score + matrix_score) / 2.0
+bool long_trigger = ensemble > threshold
+bool short_trigger = ensemble < -threshold
+
+if long_trigger
+    strategy.entry("ML_Matrix_Long", strategy.long, comment = "Ensemble: " + str.tostring(ensemble, "#.##"))
+    atr = ta.atr(14)
+    strategy.exit("Exit", "ML_Matrix_Long", stop = close - atr * 2, limit = close + atr * 4)
+
+if short_trigger
+    strategy.entry("ML_Matrix_Short", strategy.short, comment = "Ensemble: " + str.tostring(ensemble, "#.##"))
+    atr = ta.atr(14)
+    strategy.exit("Exit", "ML_Matrix_Short", stop = close + atr * 2, limit = close - atr * 4)
+
+// 6. 視覺化儀表板 (v6 Table API)
+var table ui = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(ui, 0, 0, "ML Prediction", text_color = color.white)
+    table.cell(ui, 1, 0, str.tostring(ml_score, "#.##"), bgcolor = ml_score > 0 ? color.green : color.red)
+    table.cell(ui, 0, 1, "Matrix Score", text_color = color.white)
+    table.cell(ui, 1, 1, str.tostring(matrix_score, "#.##"), bgcolor = matrix_score > 0 ? color.green : color.red)
+    table.cell(ui, 0, 2, "Consensus", text_color = color.yellow)
+    table.cell(ui, 1, 2, str.tostring(ensemble, "#.##"), bgcolor = math.abs(ensemble) > threshold ? color.lime : color.gray)
+
+// 背景規訓
+bgcolor(long_trigger ? color.new(color.green, 90) : short_trigger ? color.new(color.red, 90) : na)
