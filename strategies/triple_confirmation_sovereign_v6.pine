@@ -1,0 +1,71 @@
+//@version=6
+// @description: 三重確認趨勢主權策略 - v5 to v6 AI 重構實例
+// @author: TeleNexus AI
+// @strategy: 整合 EMA 200 (長期趨勢)、Supertrend (中期波段) 與 Zero-Lag MACD (短期動能)。
+
+strategy("TN Triple Confirmation Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. [主權優化] 利用 v6 Enum 定義風險規訓等級
+enum RiskRegime
+    Safe     = "Conservative (ST 4.0)"
+    Standard = "Balanced (ST 3.0)"
+    Hyper    = "Aggressive (ST 2.0)"
+
+RiskRegime regime = input.enum(RiskRegime.Standard, "因果風險規訓")
+
+// 2. 參數配置 (v6 嚴格類型)
+int emaLen = input.int(200, "長期趨勢 (EMA 200)")
+int stPeriod = input.int(10, "Supertrend 週期")
+float stMult = switch regime
+    RiskRegime.Safe     => 4.0
+    RiskRegime.Standard => 3.0
+    RiskRegime.Hyper    => 2.0
+
+// 3. 核心指標計算
+// [語法對位] v6 標準呼叫
+ema200 = ta.ema(close, emaLen)
+[stValue, stDir] = ta.supertrend(stMult, stPeriod)
+
+// Zero-Lag MACD (ZLMACD) 邏輯重構
+calc_zl_ema(source, len) =>
+    e1 = ta.ema(source, len)
+    e2 = ta.ema(e1, len)
+    2 * e1 - e2
+
+fastZl = calc_zl_ema(close, 12)
+slowZl = calc_zl_ema(close, 26)
+zlMacd = fastZl - slowZl
+zlSig  = ta.ema(zlMacd, 9)
+
+// 4. [邏輯規訓] 顯式布林斷言與條件處理
+// v6 禁止隱式轉換，所有條件必須為確切的 bool
+bool isAboveEma  = close > ema200
+bool isStBullish = stDir < 0
+bool isMacdCross = ta.crossover(zlMacd, zlSig)
+
+bool longCondition  = isAboveEma and isStBullish and isMacdCross
+bool shortCondition = close < ema200 and stDir > 0 and ta.crossunder(zlMacd, zlSig)
+
+// 5. 執行規訓 (移除 when 參數，使用標準 if 區塊)
+if longCondition
+    strategy.entry("Long", strategy.long, comment = "Triple Alpha Buy")
+    // 動態止損邏輯
+    atr = ta.atr(14)
+    strategy.exit("Exit", "Long", stop = close - (atr * 1.5), limit = close + (atr * 3.0))
+
+if shortCondition
+    strategy.entry("Short", strategy.short, comment = "Triple Alpha Sell")
+    atr = ta.atr(14)
+    strategy.exit("Exit", "Short", stop = close + (atr * 1.5), limit = close - (atr * 3.0))
+
+// 6. 視覺化 (v6 color.new 規訓)
+plot(ema200, color = color.new(color.gray, 50), title = "Trend Floor")
+plot(stValue, color = isStBullish ? color.new(color.green, 0) : color.new(color.red, 0), style = plot.style_linebr, linewidth = 2)
+
+// 7. [主權注入] 環境日誌與狀態標籤
+if barstate.islastconfirmedhistory
+    log.info("TN Sovereign Deployment - Regime: {0}, Time: {1}", regime, str.tostring(time, "yyyy-MM-dd HH:mm"))
+
+var table statusTab = table.new(position.bottom_right, 1, 1, border_width = 1)
+if barstate.islast
+    table.cell(statusTab, 0, 0, "Sovereign: " + str.tostring(regime), bgcolor = color.black, text_color = color.white)
