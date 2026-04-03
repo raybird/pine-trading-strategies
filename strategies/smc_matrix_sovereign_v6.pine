@@ -1,0 +1,76 @@
+//@version=6
+// @description: TeleNexus 高階 SMC 流動性矩陣策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 偵測流動性獵取 (Liquidity Sweep) 與結構轉折 (BOS)，利用 v6 矩陣動態管理多層級訂單塊 (Order Blocks)。
+
+strategy("TN SMC Matrix Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓靈敏度
+enum SMCMode
+    Scalping = 10
+    Standard = 20
+    Swing    = 50
+
+SMCMode mode = input.enum(SMCMode.Standard, "SMC 結構靈敏度")
+int lookback = switch mode
+    SMCMode.Scalping => 10
+    SMCMode.Standard => 20
+    SMCMode.Swing    => 50
+
+// 2. 市場結構監測 (BOS/CHoCH)
+hi = ta.highest(high, lookback)
+lo = ta.lowest(low, lookback)
+
+var bool is_bullish = false
+var float last_structure_high = na
+var float last_structure_low = na
+
+if ta.crossover(close, hi[1])
+    is_bullish := true
+    last_structure_high := hi
+    label.new(bar_index, high, "BOS", color=color.green, style=label.style_label_down, textcolor=color.white, size=size.tiny)
+
+if ta.crossunder(close, lo[1])
+    is_bullish := false
+    last_structure_low := lo
+    label.new(bar_index, low, "BOS", color=color.red, style=label.style_label_up, textcolor=color.white, size=size.tiny)
+
+// 3. 流動性獵取矩陣 (Liquidity Sweep Matrix)
+// 定義：價格突破前高/低但收盤回歸
+bull_sweep = low < lo[1] and close > lo[1]
+bear_sweep = high > hi[1] and close < hi[1]
+
+plotshape(bull_sweep, "Bull Sweep", shape.triangleup, location.belowbar, color.teal, size=size.small)
+plotshape(bear_sweep, "Bear Sweep", shape.triangledown, location.abovebar, color.orange, size=size.small)
+
+// 4. v6 矩陣管理：訂單塊 (Order Blocks)
+// 使用矩陣記錄 OB 的 [Price, BarIndex, IsActive]
+var matrix<float> bull_ob_matrix = matrix.new<float>(5, 3, na) // 存儲最近 5 個 Bull OB
+
+if bull_sweep and is_bullish
+    // 發現潛在 OB：將數據推入矩陣
+    matrix.remove_row(bull_ob_matrix, 0)
+    matrix.add_row(bull_ob_matrix, matrix.rows(bull_ob_matrix), array.from(low, float(bar_index), 1.0))
+    box.new(bar_index, high, bar_index + 10, low, bgcolor=color.new(color.teal, 90), border_color=color.teal)
+
+// 5. 策略執行邏輯 (v6 Strict Type Handling)
+atr = ta.atr(14)
+long_condition  = bull_sweep and is_bullish
+short_condition = bear_sweep and not is_bullish
+
+if long_condition
+    strategy.entry("Long", strategy.long, comment="Sweep + Bull Bias")
+    strategy.exit("Exit", "Long", stop=low - (atr * 1.5), limit=close + (close - (low - (atr * 1.5))) * 2.5)
+
+if short_condition
+    strategy.entry("Short", strategy.short, comment="Sweep + Bear Bias")
+    strategy.exit("Exit", "Short", stop=high + (atr * 1.5), limit=close - ((high + (atr * 1.5)) - close) * 2.5)
+
+// 6. 物理狀態標籤
+if barstate.islast
+    var label status = label.new(bar_index, high, "", color=color.black, textcolor=color.white)
+    label.set_text(status, str.format("TN SMC Matrix Status:\nRegime: {0}\nLookback: {1}", is_bullish ? "BULL" : "BEAR", lookback))
+
+// 視覺化區間
+plot(hi, "Matrix Ceiling", color=color.new(color.red, 80), style=plot.style_stepline)
+plot(lo, "Matrix Floor", color=color.new(color.green, 80), style=plot.style_stepline)
