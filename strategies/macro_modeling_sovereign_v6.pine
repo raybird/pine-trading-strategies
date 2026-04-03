@@ -1,0 +1,60 @@
+//@version=6
+// @description: TeleNexus 宏觀建模主權策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 request.seed() 注入外部宏觀因果數據（如流動性或鏈上指標），並透過 v6 Enum 狀態機執行動態避險規訓。
+
+strategy("TN Macro Modeling Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+
+// 1. 利用 v6 Enum 定義市場宏觀主權狀態
+enum MarketRegime
+    RiskOn  = "Risk-On (Expansive)"
+    RiskOff = "Risk-Off (Protective)"
+    Neutral = "Neutral (Observing)"
+
+// 2. 宏觀數據建模 (v6 Dynamic request.seed)
+// 範例：從 TeleNexus 指定的 GitHub Repo 獲取「因果流動性指標」
+string macro_source = input.string("telenexus_data", "GitHub 數據源 (Pine Seeds)")
+string macro_ticker = input.string("SOVEREIGN_LIQUIDITY_INDEX", "宏觀指標代碼")
+
+// v6 原生支持在 request.seed 中使用 series string
+float macro_val = request.seed(macro_source, macro_ticker, close)
+
+// 3. 規訓邏輯：計算宏觀趨勢並決定 Regime
+float macro_sma = ta.sma(macro_val, 20)
+Regime current_regime = if na(macro_val)
+    Regime.Neutral
+else if macro_val > macro_sma
+    Regime.RiskOn
+else
+    Regime.RiskOff
+
+// 4. 核心策略邏輯：技術面與宏觀面共振
+// 技術面：12/26 EMA 交叉
+float fast_ema = ta.ema(close, 12)
+float slow_ema = ta.ema(close, 26)
+
+// 多頭規訓：技術金叉 且 宏觀環境為 Risk-On
+bool long_condition = ta.crossover(fast_ema, slow_ema) and current_regime == Regime.RiskOn
+
+// 離場規訓：技術死叉 或 宏觀環境轉為 Risk-Off
+bool exit_condition = ta.crossunder(fast_ema, slow_ema) or current_regime == Regime.RiskOff
+
+// 5. 執行主權 (v6 Trimmed Backtesting)
+if long_condition
+    strategy.entry("SovereignLong", strategy.long, comment = "Macro: Risk-On")
+
+if exit_condition
+    strategy.close("SovereignLong", comment = "Exit: Regime Shift")
+
+// 6. 視覺化地板
+bgcolor(current_regime == Regime.RiskOn ? color.new(color.green, 90) : current_regime == Regime.RiskOff ? color.new(color.red, 90) : na)
+plot(fast_ema, color = color.blue, title = "Fast EMA")
+plot(slow_ema, color = color.orange, title = "Slow EMA")
+
+// 7. 物理狀態儀表板 (v6 Table API)
+var table status_table = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(status_table, 0, 0, "Macro Value", text_color = color.white)
+    table.cell(status_table, 1, 0, str.tostring(macro_val, "#.##"), text_color = color.yellow)
+    table.cell(status_table, 0, 1, "Regime", text_color = color.white)
+    table.cell(status_table, 1, 1, str.tostring(current_regime), text_color = current_regime == Regime.RiskOn ? color.green : color.red)
