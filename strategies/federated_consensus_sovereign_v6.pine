@@ -1,0 +1,66 @@
+//@version=6
+// @description: TeleNexus 聯邦共識主權策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 同步檢索多個聯邦資產（Symbol Swarm），利用共識比例觸發交易，並採用聯邦平均 ATR 進行全局風險規訓。
+
+strategy("TN Federated Consensus Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義共識嚴格度
+enum ConsensusRigor
+    Loose    = 0.5
+    Standard = 0.7
+    Sovereign = 0.9
+
+ConsensusRigor rigor = input.enum(ConsensusRigor.Standard, "共識規訓等級")
+float threshold = switch rigor
+    ConsensusRigor.Loose     => 0.5
+    ConsensusRigor.Standard  => 0.7
+    ConsensusRigor.Sovereign => 0.9
+
+// 2. 聯邦資產清單 (v6 TextArea 支援)
+string symList = input.text_area("BINANCE:BTCUSDT,BINANCE:ETHUSDT,BINANCE:SOLUSDT,TVC:GOLD,TVC:DXY", "聯邦驗證清單")
+int rsiLen = input.int(14, "動能深度")
+
+// 3. 聯邦感知邏輯 (v6 原生支援在 Loop 中進行動態 Security 呼叫)
+string[] symbols = str.split(symList, ",")
+int bullVotes = 0
+float federatedAtr = 0.0
+int validNodes = 0
+
+if barstate.islast
+    for i = 0 to array.size(symbols) - 1
+        string s = array.get(symbols, i)
+        // [v6 主權特性] 直接傳入變數 s
+        float r = request.security(s, timeframe.period, ta.rsi(close, rsiLen))
+        float a = request.security(s, timeframe.period, ta.atr(14))
+        
+        if not na(r)
+            validNodes += 1
+            federatedAtr += a
+            if r > 50
+                bullVotes += 1
+
+// 4. 因果結算：共識比例與全局風險
+float consensusRatio = bullVotes / math.max(validNodes, 1)
+float globalAtr = federatedAtr / math.max(validNodes, 1)
+
+// 5. 執行規訓
+bool isConsensusReached = consensusRatio >= threshold
+float stopDist = globalAtr * 2.0
+
+if isConsensusReached
+    strategy.entry("FedBuy", strategy.long, comment = str.format("Nodes: {0}, Consensus: {1,number,#%}", validNodes, consensusRatio))
+    strategy.exit("FedExit", "FedBuy", stop = close - stopDist, limit = close + stopDist * 2.5)
+
+// 6. 視覺化：聯邦 HUD
+var table hud = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Active Nodes", text_color = color.white)
+    table.cell(hud, 1, 0, str.tostring(validNodes), text_color = color.aqua)
+    table.cell(hud, 0, 1, "Consensus %", text_color = color.white)
+    table.cell(hud, 1, 1, str.tostring(consensusRatio * 100, "#.#") + "%", bgcolor = isConsensusReached ? color.green : color.red)
+    table.cell(hud, 0, 2, "Federated ATR", text_color = color.white)
+    table.cell(hud, 1, 2, str.tostring(globalAtr, "#.##"), text_color = color.yellow)
+
+// 7. 物理背景規訓
+bgcolor(isConsensusReached ? color.new(color.green, 90) : na)
