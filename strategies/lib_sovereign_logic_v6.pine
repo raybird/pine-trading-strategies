@@ -1,0 +1,26 @@
+//@version=6
+// @description: TeleNexus 主權模組化核心庫 - v6 實體化
+// @author: TeleNexus AI
+library("TNSovereignLib", overlay = true)
+
+// 1. 導出型別安全的規訓模式
+export enum ExecutionRegime
+    Aggressive = "High Frequency"
+    Balanced   = "Standard Risk"
+    Sovereign  = "Identity Protected"
+
+// 2. 導出具備「因果標籤」的訊號數據結構
+export type SignalPayload
+    float price
+    bool  isValid
+    string tag
+
+// 3. 導出動能演算模組
+export get_momentum_signal(int len) =>
+    float rsi = ta.rsi(close, len)
+    bool isLong = ta.crossover(rsi, 50)
+    SignalPayload.new(close, isLong, "Momentum_Alpha")
+
+// 4. 導出動態風險模組
+export calc_dynamic_stop(float mult) =>
+    ta.atr(14) * mult

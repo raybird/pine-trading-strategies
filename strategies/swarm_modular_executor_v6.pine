@@ -1,0 +1,34 @@
+//@version=6
+// @description: TeleNexus 蜂群模組化執行器 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 透過導入 TNSovereignLib 實現「邏輯與執行」的主權解耦，支援動態規訓切換。
+
+strategy("TN Swarm Modular Executor v6", overlay = true, initial_capital = 10000)
+
+// 1. 導入本地主權庫 (此處路徑為模擬實際發布後的調用)
+// 註：在 TradingView 中需先發布 Library 並獲取 ID
+import TeleNexus/TNSovereignLib/1 as core
+
+// 2. 利用庫中導出的 Enum 建立 UI
+core.ExecutionRegime regime = input.enum(core.ExecutionRegime.Balanced, "蜂群規訓等級")
+int signalLen = input.int(14, "動能深度")
+float riskMult = input.float(2.0, "主權停損倍數")
+
+// 3. 調用模組化邏輯
+core.SignalPayload alpha = core.get_momentum_signal(signalLen)
+float stopGap = core.calc_dynamic_stop(riskMult)
+
+// 4. 執行規訓
+// v6 嚴格布林檢查
+if alpha.isValid
+    strategy.entry("SwarmTrade", strategy.long, comment = alpha.tag)
+    strategy.exit("SovereignExit", "SwarmTrade", stop = close - stopGap, limit = close + stopGap * 2.5)
+
+// 5. 視覺化地板
+plot(ta.ema(close, signalLen), "Sovereign Floor", color = color.new(color.blue, 50))
+bgcolor(alpha.isValid ? color.new(color.green, 90) : na)
+
+// 6. 物理狀態標籤
+if barstate.islast
+    var label status = label.new(bar_index, high, "", color = color.black, textcolor = color.white)
+    label.set_text(status, str.format("TN Swarm Status:\nRegime: {0}\nPayload Tag: {1}", regime, alpha.tag))
