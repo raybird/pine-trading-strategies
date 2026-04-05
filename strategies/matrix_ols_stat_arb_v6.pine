@@ -1,0 +1,86 @@
+//@version=6
+// @description: TeleNexus 矩陣 OLS 統計套利策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用矩陣代數動態求解 OLS 回歸係數 (Alpha & Beta)，建立兩個相關資產間的平穩價差組合，透過 Z-Score 執行均值回歸交易。
+
+strategy("TN Matrix OLS Stat Arb Sovereign v6", overlay = false, initial_capital = 10000, default_qty_type = strategy.cash, currency = currency.USD)
+
+// 1. 利用 v6 Enum 定義規訓靈敏度
+enum ArbitrageMode
+    Tight    = 2.5 // 極端偏離才進場
+    Standard = 2.0 // 標準統計偏離
+    Scalp    = 1.5 // 高頻微小价差
+
+ArbitrageMode mode = input.enum(ArbitrageMode.Standard, "套利規訓等級")
+float zThresh = switch mode
+    ArbitrageMode.Tight    => 2.5
+    ArbitrageMode.Standard => 2.0
+    ArbitrageMode.Scalp    => 1.5
+
+// 2. 配對資產與數據感知
+pairSym = input.symbol("BINANCE:ETHUSDT", "對沖資產 (Asset 2)")
+lookback = input.int(60, "OLS 矩陣回顧長度", minval = 20)
+
+float p1 = close
+float p2 = request.security(pairSym, timeframe.period, close)
+
+// 3. 矩陣 OLS 求解器 (v6 Matrix Logic)
+// 目標：求解 Beta = (X^T * X)^-1 * X^T * Y
+f_calc_beta(float y_src, float x_src, int len) =>
+    matrix<float> Y = matrix.new<float>(len, 1)
+    matrix<float> X = matrix.new<float>(len, 2)
+    for i = 0 to len - 1
+        Y.set(i, 0, y_src[i])
+        X.set(i, 0, 1.0) // 截距項
+        X.set(i, 1, x_src[i]) // 變量項
+    
+    matrix<float> XT = X.transpose()
+    matrix<float> XTX = XT.mult(X)
+    matrix<float> XTX_inv = XTX.inv()
+    
+    float beta_val = na
+    float alpha_val = na
+    if not na(XTX_inv)
+        matrix<float> XTY = XT.mult(Y)
+        matrix<float> Beta = XTX_inv.mult(XTY)
+        alpha_val := Beta.get(0, 0)
+        beta_val  := Beta.get(1, 0)
+    [alpha_val, beta_val]
+
+[alpha, beta] = f_calc_beta(p1, p2, lookback)
+
+// 4. 因果價差與 Z-Score 演算
+float spread = p1 - (nz(beta) * p2 + nz(alpha))
+float spreadMean = ta.sma(spread, lookback)
+float spreadStd  = ta.stdev(spread, lookback)
+float zScore = (spread - spreadMean) / spreadStd
+
+// 5. 執行規訓
+longCondition  = ta.crossunder(zScore, -zThresh)
+shortCondition = ta.crossover(zScore, zThresh)
+exitLong       = zScore >= 0
+exitShort      = zScore <= 0
+
+if longCondition
+    strategy.entry("LongSpread", strategy.long, comment = "OLS Buy")
+if shortCondition
+    strategy.entry("ShortSpread", strategy.short, comment = "OLS Sell")
+
+if strategy.position_size > 0 and exitLong
+    strategy.close("LongSpread", comment = "Reverted")
+if strategy.position_size < 0 and exitShort
+    strategy.close("ShortSpread", comment = "Reverted")
+
+// 6. 視覺化地板
+plot(zScore, "Spread Z-Score", color = zScore > 0 ? color.red : color.green, style = plot.style_columns)
+hline(zThresh, "Entry High", color = color.new(color.red, 50), linestyle = hline.style_dashed)
+hline(-zThresh, "Entry Low", color = color.new(color.green, 50), linestyle = hline.style_dashed)
+hline(0, "Mean Baseline", color = color.gray)
+
+// 7. 物理數據儀表板
+var table monitor = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(monitor, 0, 0, "Hedge Ratio (Beta)", text_color = color.white)
+    table.cell(monitor, 1, 0, str.tostring(beta, "#.###"), text_color = color.yellow)
+    table.cell(monitor, 0, 1, "Causal Drift (Alpha)", text_color = color.white)
+    table.cell(monitor, 1, 1, str.tostring(alpha, "#.###"), text_color = color.yellow)
