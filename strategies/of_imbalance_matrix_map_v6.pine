@@ -1,0 +1,89 @@
+//@version=6
+// @description: TeleNexus 訂單流失衡矩陣地圖策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 v6 原生 footprint 數據掃描買賣失衡層級，透過 box 矩陣在地圖上標註機構堆疊區位，實現因果級聯過濾。
+
+strategy("TN OF Imbalance Matrix Map Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓靈敏度
+enum ImbalanceRigor
+    Scalp    = 3.0 // 300% 失衡
+    Standard = 4.0 // 400% 失衡
+    Sovereign = 5.0 // 500% 失衡 (機構級)
+
+ImbalanceRigor rigor = input.enum(ImbalanceRigor.Standard, "失衡規訓等級")
+int minStacked       = input.int(3, "最小堆疊層數", minval = 1)
+
+// 2. 獲取 v6 原生 Footprint 數據與處理
+fp = request.footprint(syminfo.tickerid)
+
+// 定義失衡物理結構 (v6 Type)
+type ImbalanceNode
+    float price
+    bool  isBuy
+    int   barIdx
+
+// 矩陣存儲與掃描邏輯 (v6 Array/Method Syntax)
+var imbalanceSwarm = array.new<ImbalanceNode>()
+
+method process_footprint(footprint _fp, float _ratio, int _stacked) =>
+    bool _bullTrigger = false
+    bool _bearTrigger = false
+    if not na(_fp)
+        array.clear(imbalanceSwarm)
+        volume_row[] _rows = _fp.rows()
+        int _cBuy = 0, int _cSell = 0
+        
+        for i = 0 to array.size(_rows) - 1
+            volume_row _r = array.get(_rows, i)
+            float _bv = _r.buy_vol(), float _sv = _r.sell_vol(), float _price = _r.price_low()
+            
+            // 買方堆疊偵測
+            if _bv > _sv * _ratio and _sv > 0
+                _cBuy += 1, _cSell := 0
+                if _cBuy >= _stacked
+                    array.push(imbalanceSwarm, ImbalanceNode.new(_price, true, bar_index))
+                    _bullTrigger := true
+            // 賣方堆疊偵測
+            else if _sv > _bv * _ratio and _bv > 0
+                _cSell += 1, _cBuy := 0
+                if _cSell >= _stacked
+                    array.push(imbalanceSwarm, ImbalanceNode.new(_price, false, bar_index))
+                    _bearTrigger := true
+            else
+                _cBuy := 0, _cSell := 0
+    [_bullTrigger, _bearTrigger]
+
+float ratioValue = switch rigor
+    ImbalanceRigor.Scalp     => 3.0
+    ImbalanceRigor.Standard  => 4.0
+    ImbalanceRigor.Sovereign => 5.0
+
+[bullish, bearish] = fp.process_footprint(ratioValue, minStacked)
+
+// 3. 執行規訓與物理地板
+if bullish and strategy.position_size <= 0
+    strategy.entry("Long_Imb", strategy.long, comment = "Stacked Buy")
+    // v6 Box 矩陣視覺化
+    box.new(bar_index, high, bar_index + 5, low, bgcolor = color.new(color.green, 85), border_color = color.green)
+
+if bearish and strategy.position_size >= 0
+    strategy.entry("Short_Imb", strategy.short, comment = "Stacked Sell")
+    box.new(bar_index, high, bar_index + 5, low, bgcolor = color.new(color.red, 85), border_color = color.red)
+
+// 4. 物理狀態儀表板 (v6 Table API)
+var table dashboard = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(dashboard, 0, 0, "Consensus", text_color = color.white)
+    table.cell(dashboard, 1, 0, bullish ? "BULL" : bearish ? "BEAR" : "NONE", bgcolor = bullish ? color.green : bearish ? color.red : color.gray)
+    table.cell(dashboard, 0, 1, "Rigor", text_color = color.white)
+    table.cell(dashboard, 1, 1, str.tostring(rigor), text_color = color.yellow)
+    table.cell(dashboard, 0, 2, "Delta", text_color = color.white)
+    table.cell(dashboard, 1, 2, str.tostring(fp.delta(), "#.##"), text_color = color.aqua)
+
+// 5. 動態風險規訓
+atr = ta.atr(14)
+if strategy.position_size > 0
+    strategy.exit("Exit", "Long_Imb", stop = close - atr * 2, limit = close + atr * 4)
+if strategy.position_size < 0
+    strategy.exit("Exit", "Short_Imb", stop = close + atr * 2, limit = close - atr * 4)
