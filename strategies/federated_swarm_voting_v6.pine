@@ -1,0 +1,79 @@
+//@version=6
+// @description: TeleNexus 聯邦蜂群投票主權策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 透過五個獨立 Agent 執行去中心化投票（趨勢、動能、波動、量能、時框），利用 v6 矩陣共識引擎決定進出場規訓。
+
+strategy("TN Federated Swarm Voting v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義共識規訓等級 (Quorum)
+enum QuorumRigor
+    Low      = 2 // 2/5 贊成即觸發
+    Standard = 3 // 3/5 贊成
+    Sovereign = 4 // 4/5 贊成 (極端嚴謹)
+
+QuorumRigor rigor = input.enum(QuorumRigor.Standard, "共識規訓等級")
+int threshold = switch rigor
+    QuorumRigor.Low       => 2
+    QuorumRigor.Standard  => 3
+    QuorumRigor.Sovereign  => 4
+
+// 2. 定義 Agent 投票方法論 (v6 Method Syntax)
+method get_vote_trend(float src) =>
+    emaFast = ta.ema(src, 50)
+    emaSlow = ta.ema(src, 200)
+    src > emaFast and emaFast > emaSlow ? 1 : src < emaFast and emaFast < emaSlow ? -1 : 0
+
+method get_vote_mom(float src) =>
+    rsiVal = ta.rsi(src, 14)
+    rsiVal > 55 ? 1 : rsiVal < 45 ? -1 : 0
+
+method get_vote_vol(float src) =>
+    [mid, up, lo] = ta.bb(src, 20, 2)
+    src > mid ? 1 : -1
+
+method get_vote_vwap(float src) =>
+    src > ta.vwap(src) ? 1 : -1
+
+method get_vote_mtf(string sym, string tf) =>
+    htfClose = request.security(sym, tf, close)
+    htfEma   = request.security(sym, tf, ta.ema(close, 50))
+    htfClose > htfEma ? 1 : -1
+
+// 3. 蜂群投票執行
+int v1 = close.get_vote_trend()
+int v2 = close.get_vote_mom()
+int v3 = close.get_vote_vol()
+int v4 = close.get_vote_vwap()
+int v5 = syminfo.tickerid.get_vote_mtf("D")
+
+// 4. 共識引擎結算
+int totalLongVotes = (v1==1?1:0) + (v2==1?1:0) + (v3==1?1:0) + (v4==1?1:0) + (v5==1?1:0)
+int totalShortVotes = (v1==-1?1:0) + (v2==-1?1:0) + (v3==-1?1:0) + (v4==-1?1:0) + (v5==-1?1:0)
+
+bool longConsensus = totalLongVotes >= threshold
+bool shortConsensus = totalShortVotes >= threshold
+
+// 5. 執行主權規訓 (v6 log.info 審計)
+if longConsensus
+    strategy.entry("SwarmLong", strategy.long, comment = str.format("Votes: {0}/5", totalLongVotes))
+    if barstate.islastconfirmedhistory
+        log.info("Sovereign Buy: Consensus Reached ({0} votes)", totalLongVotes)
+
+if shortConsensus
+    strategy.entry("SwarmShort", strategy.short, comment = str.format("Votes: {0}/5", totalShortVotes))
+    if barstate.islastconfirmedhistory
+        log.info("Sovereign Sell: Consensus Reached ({0} votes)", totalShortVotes)
+
+// 6. 視覺化：蜂群投票 HUD (v6 Table API)
+var table hud = table.new(position.top_right, 2, 6, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Agent", text_color = color.white)
+    table.cell(hud, 1, 0, "Vote", text_color = color.white)
+    table.cell(hud, 0, 1, "Trend", text_color = color.gray), table.cell(hud, 1, 1, str.tostring(v1), bgcolor = v1==1?color.green:v1==-1?color.red:color.gray)
+    table.cell(hud, 0, 2, "Mom", text_color = color.gray), table.cell(hud, 1, 2, str.tostring(v2), bgcolor = v2==1?color.green:v2==-1?color.red:color.gray)
+    table.cell(hud, 0, 3, "Vol", text_color = color.gray), table.cell(hud, 1, 3, str.tostring(v3), bgcolor = v3==1?color.green:v3==-1?color.red:color.gray)
+    table.cell(hud, 0, 4, "VWAP", text_color = color.gray), table.cell(hud, 1, 4, str.tostring(v4), bgcolor = v4==1?color.green:v4==-1?color.red:color.gray)
+    table.cell(hud, 0, 5, "MTF", text_color = color.gray), table.cell(hud, 1, 5, str.tostring(v5), bgcolor = v5==1?color.green:v5==-1?color.red:color.gray)
+
+// 7. 物理背景規訓
+bgcolor(longConsensus ? color.new(color.green, 90) : shortConsensus ? color.new(color.red, 90) : na)
