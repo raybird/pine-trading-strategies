@@ -1,0 +1,82 @@
+//@version=6
+// @description: TeleNexus 流動性獵取與動態規訓策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 透過偵測關鍵價格位（Pivot High/Low）的流動性掃描，結合動態 ATR 追蹤規訓與日線級別趨勢過濾，實現具備物理主權的進場保護。
+
+strategy("TN Liquidity Sweep Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義執行規訓強度
+enum SovereignRegime
+    Protective = "High Security"
+    Standard   = "Balanced Causal"
+    Aggressive = "Momentum Pursuit"
+
+SovereignRegime regime = input.enum(SovereignRegime.Standard, "執行主權規訓模式")
+
+// 2. 流動性參數
+lookback = input.int(20, "流動性回顧長度 (Pivots)")
+float atrMult = input.float(2.5, "動態追蹤倍數 (ATR)")
+
+// 3. 高時框規訓對位 (v6 Dynamic Request)
+// 實時對位日線 EMA 200 作為「主權生命線」
+float lifeLine = request.security(syminfo.tickerid, "D", ta.ema(close, 200))
+bool isBullishContext = close > lifeLine
+bool isBearishContext = close < lifeLine
+
+// 4. 流動性掃描邏輯 (Smart Money Concepts v6)
+float pH = ta.pivothigh(high, lookback, lookback)
+float pL = ta.pivotlow(low, lookback, lookback)
+
+var float lastHighLiq = na
+var float lastLowLiq  = na
+
+if not na(pH)
+    lastHighLiq := pH
+if not na(pL)
+    lastLowLiq  := pL
+
+// 掃描行為定義：價格突破前高後迅速拉回 (Bearish Sweep) / 突破前低後迅速拉回 (Bullish Sweep)
+bool bullishSweep = low < lastLowLiq and close > lastLowLiq and isBullishContext
+bool bearishSweep = high > lastHighLiq and close < lastHighLiq and isBearishContext
+
+// 5. 動態 ATR 追蹤止損 (v6 Variable Management)
+float atr = ta.atr(14)
+var float trailPrice = na
+
+if strategy.position_size > 0
+    float newTrail = close - (atr * atrMult)
+    trailPrice := na(trailPrice) ? newTrail : math.max(trailPrice, newTrail)
+else if strategy.position_size < 0
+    float newTrail = close + (atr * atrMult)
+    trailPrice := na(trailPrice) ? newTrail : math.min(trailPrice, newTrail)
+else
+    trailPrice := na
+
+// 6. 執行規訓
+// v6 強制顯式布林檢查
+if bullishSweep and strategy.position_size == 0
+    strategy.entry("Long_Liq", strategy.long, comment = "Bullish Liq Sweep")
+
+if bearishSweep and strategy.position_size == 0
+    strategy.entry("Short_Liq", strategy.short, comment = "Bearish Liq Sweep")
+
+// 物理退出規訓
+if strategy.position_size > 0
+    strategy.exit("Exit_L", "Long_Liq", stop = trailPrice, comment = "Sovereign TSL")
+
+if strategy.position_size < 0
+    strategy.exit("Exit_S", "Short_Liq", stop = trailPrice, comment = "Sovereign TSL")
+
+// 7. 視覺化地板
+plot(lastHighLiq, "Buy-side Liquidity", color = color.new(color.red, 60), style = plot.style_linebr)
+plot(lastLowLiq, "Sell-side Liquidity", color = color.new(color.green, 60), style = plot.style_linebr)
+plot(trailPrice, "Dynamic Floor", color = color.new(color.orange, 40), linewidth = 2, style = plot.style_linebr)
+bgcolor(isBullishContext ? color.new(color.green, 95) : color.new(color.red, 95))
+
+// 8. 物理狀態標籤 (v6 Table API)
+var table dash = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(dash, 0, 0, "Regime", text_color = color.white)
+    table.cell(dash, 1, 0, str.tostring(regime), text_color = color.yellow)
+    table.cell(dash, 0, 1, "Life Line", text_color = color.white)
+    table.cell(dash, 1, 1, close > lifeLine ? "Above" : "Below", bgcolor = close > lifeLine ? color.green : color.red)
