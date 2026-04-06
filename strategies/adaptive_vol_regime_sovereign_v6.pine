@@ -1,0 +1,71 @@
+//@version=6
+// @description: TeleNexus 自適應波動率規訓策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 ta.percentrank 檢測市場波動率百分位，動態切換趨勢與震盪邏輯，並整合日線級別基準過濾。
+
+strategy("TN Adaptive Vol Regime Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義市場規訓狀態
+enum MarketRegime
+    LowVol  = "Quiet (Mean Reversion)"
+    MidVol  = "Stable (Trend Following)"
+    HighVol = "Crisis (Risk-Off)"
+
+// 2. 波動率感知與百分位排名
+volLookback = input.int(200, "波動率回測深度", group = "規訓參數")
+lowThresh   = input.int(25, "低波動門檻 (%)", group = "規訓參數")
+highThresh  = input.int(75, "高波動門檻 (%)", group = "規訓參數")
+
+natr = (ta.atr(14) / close) * 100
+volRank = ta.percentrank(natr, volLookback)
+
+MarketRegime regime = MarketRegime.MidVol
+if volRank < lowThresh
+    regime := MarketRegime.LowVol
+else if volRank > highThresh
+    regime := MarketRegime.HighVol
+
+// 3. 基準過濾規訓 (v6 Dynamic Request)
+benchmarkEma = request.security("AMEX:SPY", "D", ta.ema(close, 200))
+isSovereignSafe = close > benchmarkEma
+
+// 4. 自適應執行邏輯
+float rsi = ta.rsi(close, 14)
+emaF = ta.ema(close, 20)
+emaS = ta.ema(close, 50)
+
+bool canLong  = false
+bool canShort = false
+
+if regime == MarketRegime.LowVol
+    // 低波動：均值回歸
+    canLong  := rsi < 30
+    canShort := rsi > 70
+else if regime == MarketRegime.MidVol
+    // 中波動：趨勢對位
+    canLong  := ta.crossover(emaF, emaS) and isSovereignSafe
+    canShort := ta.crossunder(emaF, emaS)
+else
+    // 高波動：避險規訓 (僅在極度超賣且大盤健康時輕倉)
+    canLong := ta.crossover(rsi, 20) and isSovereignSafe
+
+// 5. 執行與物理日誌 (v6 runtime.log)
+if canLong
+    strategy.entry("Long", strategy.long, comment = "Regime: " + str.tostring(regime))
+    if barstate.islast
+        runtime.log("Sovereign Buy Executed in " + str.tostring(regime) + " state.")
+
+if canShort
+    strategy.entry("Short", strategy.short, comment = "Regime: " + str.tostring(regime))
+
+// 6. 視覺化地板
+bgColor = regime == MarketRegime.LowVol ? color.new(color.blue, 90) : regime == MarketRegime.MidVol ? color.new(color.green, 90) : color.new(color.red, 90)
+bgcolor(bgColor)
+
+// 7. 物理狀態標籤 (v6 Table API)
+var table dash = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(dash, 0, 0, "Current Regime", text_color = color.white)
+    table.cell(dash, 1, 0, str.tostring(regime), bgcolor = bgColor)
+    table.cell(dash, 0, 1, "Vol Rank", text_color = color.white)
+    table.cell(dash, 1, 1, str.tostring(math.round(volRank, 1)) + "%", text_color = color.yellow)
