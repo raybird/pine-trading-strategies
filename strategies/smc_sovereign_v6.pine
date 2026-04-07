@@ -1,0 +1,87 @@
+//@version=6
+// @description: TeleNexus 聰明錢概念 (SMC) 規訓策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.0)
+// @strategy: 自動偵測 BOS 與 OB 區位，結合 FVG 流動性缺口進行因果對位。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing SMC logic as a structural causal standard.","summary":"Established SMC (Order Blocks & FVG) as the primary execution floor for identifying institutional footprints."}]]
+
+strategy("TN SMC Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓靈敏度
+enum MarketRegime
+    Conservative = 10 // 高規訓 (長回溯)
+    Standard     = 5  // 標準因果
+    Scalping     = 3  // 高頻感知
+
+MarketRegime regime = input.enum(MarketRegime.Standard, "市場規訓模式")
+int length = int(regime)
+
+// 2. 市場結構偵測 (BOS)
+hi = ta.highest(high, length)
+lo = ta.lowest(low, length)
+bool isSwingHi = high[length] == hi
+bool isSwingLo = low[length] == lo
+
+var float lastHi = na
+var float lastLo = na
+var bool isBullish = true
+
+if isSwingHi => lastHi := high[length]
+if isSwingLo => lastLo := low[length]
+
+// 結構突破規訓
+bool bosBull = ta.crossover(close, lastHi)
+bool bosBear = ta.crossunder(close, lastLo)
+
+if bosBull
+    isBullish := true
+    label.new(bar_index, high, "BOS ↑", color=color.teal, style=label.style_label_down, textcolor=color.white, size=size.small)
+else if bosBear
+    isBullish := false
+    label.new(bar_index, low, "BOS ↓", color=color.red, style=label.style_label_up, textcolor=color.white, size=size.small)
+
+// 3. 訂單區塊 (Order Blocks) 物理地板
+var box obBox = na
+if bosBull
+    for i = 1 to 50
+        if close[i] < open[i]
+            obBox := box.new(bar_index[i], high[i], bar_index, low[i], bgcolor=color.new(color.teal, 85), border_color=color.teal)
+            break
+if bosBear
+    for i = 1 to 50
+        if close[i] > open[i]
+            obBox := box.new(bar_index[i], high[i], bar_index, low[i], bgcolor=color.new(color.red, 85), border_color=color.red)
+            break
+
+// 4. 流動性缺口 (FVG) 感知
+fvgThresh = input.float(0.1, "FVG 最小閾值 (%)") / 100
+bool isBullFVG = low > high[2] and (low - high[2]) > (close * fvgThresh)
+bool isBearFVG = high < low[2] and (low[2] - high) > (close * fvgThresh)
+
+if isBullFVG
+    box.new(bar_index[1], low, bar_index-1, high[2], bgcolor=color.new(color.orange, 90), border_style=line.style_dotted)
+
+// 5. 執行規訓：回測 OB 地板
+obLow  = box.get_bottom(obBox)
+obHigh = box.get_top(obBox)
+
+// v6 顯式布林檢查與動機對位
+if isBullish and ta.crossover(close, obLow)
+    strategy.entry("Long_SMC", strategy.long, comment="OB Retest")
+
+if not isBullish and ta.crossunder(close, obHigh)
+    strategy.entry("Short_SMC", strategy.short, comment="OB Retest")
+
+// 6. 視覺化 HUD
+var table hud = table.new(position.top_right, 2, 2, bgcolor=color.new(color.black, 30), border_width=1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Regime", text_color=color.white)
+    table.cell(hud, 1, 0, str.tostring(regime), text_color=color.yellow)
+    table.cell(hud, 0, 1, "Structure", text_color=color.white)
+    table.cell(hud, 1, 1, isBullish ? "BULLISH" : "BEARISH", bgcolor=isBullish ? color.teal : color.red)
+
+// 7. 物理退出 (ATR 規訓)
+atr = ta.atr(14)
+if strategy.position_size > 0
+    strategy.exit("Exit_L", "Long_SMC", stop=obLow - atr, limit=close + atr*3)
+if strategy.position_size < 0
+    strategy.exit("Exit_S", "Short_SMC", stop=obHigh + atr, limit=close - atr*3)
