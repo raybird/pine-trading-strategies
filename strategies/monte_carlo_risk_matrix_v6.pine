@@ -1,0 +1,89 @@
+//@version=6
+// @description: TeleNexus 蒙地卡羅動態風險矩陣策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 3x3 矩陣根據趨勢與波動率動態調整風險權重，並在最後一根 K 線執行 1000 次蒙地卡羅模擬以審計破產機率與回撤分布。
+
+strategy("TN Monte Carlo Risk Matrix Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.cash, currency = currency.USD)
+
+// 1. 利用 v6 Enum 定義風險規訓
+enum RiskAppetite
+    Conservative = "Low Risk"
+    Sovereign    = "Standard Causal"
+    Aggressive   = "Momentum Pursuit"
+
+RiskAppetite profile = input.enum(RiskAppetite.Sovereign, "執行風險規訓")
+float baseRisk = input.float(1.0, "基礎風險 (%)", minval = 0.1, maxval = 5.0)
+
+// 2. 獲取物理參數與矩陣對位
+[_, _, adx] = ta.dmi(14, 14)
+atr = ta.atr(14)
+float volRel = atr / ta.sma(atr, 50)
+
+// 定義 3x3 風險矩陣 (Row: Trend, Col: Volatility)
+var matrix<float> rMatrix = matrix.new<float>(3, 3, 1.0)
+if barstate.isfirst
+    // 趨勢弱 (ADX < 20) -> 減碼
+    rMatrix.set(0, 0, 0.8), rMatrix.set(0, 1, 0.6), rMatrix.set(0, 2, 0.4)
+    // 趨勢中 (20-40) -> 標準
+    rMatrix.set(1, 0, 1.2), rMatrix.set(1, 1, 1.0), rMatrix.set(1, 2, 0.8)
+    // 趨勢強 (> 40) -> 加碼
+    rMatrix.set(2, 0, 1.5), rMatrix.set(2, 1, 1.3), rMatrix.set(2, 2, 1.1)
+
+int tIdx = adx < 20 ? 0 : (adx < 40 ? 1 : 2)
+int vIdx = volRel < 0.8 ? 0 : (volRel < 1.2 ? 1 : 2)
+float weight = rMatrix.get(tIdx, vIdx)
+
+// 最終風險計算
+float finalRisk = baseRisk * weight * (profile == RiskAppetite.Conservative ? 0.7 : profile == RiskAppetite.Aggressive ? 1.5 : 1.0)
+
+// 3. 執行邏輯 (均線交叉作為載體)
+emaF = ta.ema(close, 10)
+emaS = ta.ema(close, 21)
+bool longCond = ta.crossover(emaF, emaS)
+bool shortCond = ta.crossunder(emaF, emaS)
+
+// 倉位大小規訓 (物理對位)
+float stopDist = atr * 2.5
+float riskAmt = strategy.equity * (finalRisk / 100)
+float qtySize = riskAmt / stopDist
+
+if longCond
+    strategy.entry("Long", strategy.long, qty = qtySize, comment = str.format("R:{0,number,#.##}%", finalRisk))
+if shortCond
+    strategy.entry("Short", strategy.short, qty = qtySize, comment = str.format("R:{0,number,#.##}%", finalRisk))
+
+strategy.exit("Exit", "Long", stop = strategy.position_avg_price - stopDist, limit = strategy.position_avg_price + stopDist * 2)
+strategy.exit("Exit", "Short", stop = strategy.position_avg_price + stopDist, limit = strategy.position_avg_price - stopDist * 2)
+
+// 4. 蒙地卡羅因果審計 (Monte Carlo Simulation)
+var float[] historyRet = array.new_float(0)
+if strategy.closedtrades > strategy.closedtrades[1]
+    array.push(historyRet, strategy.closedtrades.profit(strategy.closedtrades - 1) / strategy.initial_capital * 100)
+
+if barstate.islastconfirmedhistory and array.size(historyRet) > 10
+    float[] mcDD = array.new_float(0)
+    int ruin = 0
+    for i = 1 to 1000
+        float simEq = 100.0, float maxD = 0.0, float peak = 100.0
+        for j = 0 to array.size(historyRet) - 1
+            float r = array.get(historyRet, math.random(0, array.size(historyRet) - 1))
+            simEq += r
+            peak := math.max(peak, simEq)
+            maxD := math.max(maxD, (peak - simEq) / peak * 100)
+            if simEq <= 0 => (ruin += 1, break)
+        array.push(mcDD, maxD)
+    
+    array.sort(mcDD)
+    float medDD = array.get(mcDD, 500)
+    float worstDD = array.get(mcDD, 950) // 95% Confidence
+    
+    // 輸出審計表格
+    var table audit = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+    table.cell(audit, 0, 0, "Monte Carlo Audit", text_color = color.white)
+    table.cell(audit, 1, 0, "Value", text_color = color.white)
+    table.cell(audit, 0, 1, "95% Conf. DD", text_color = color.gray), table.cell(audit, 1, 1, str.tostring(worstDD, "#.##") + "%", text_color = color.orange)
+    table.cell(audit, 0, 2, "Prob. of Ruin", text_color = color.gray), table.cell(audit, 1, 2, str.tostring(ruin/10.0, "#.##") + "%", text_color = ruin > 50 ? color.red : color.green)
+
+// 5. 視覺化
+plot(emaF, color = color.aqua), plot(emaS, color = color.orange)
+bgcolor(tIdx == 2 ? color.new(color.green, 90) : tIdx == 0 ? color.new(color.red, 90) : na)
