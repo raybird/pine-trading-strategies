@@ -1,0 +1,64 @@
+//@version=6
+// @description: TeleNexus 多資產相關性矩陣對沖策略 - v6 核心實作
+// @author: TeleNexus AI
+// @strategy: 利用 v6 矩陣動態計算主資產與避險籃子的相關性位移，實施具備因果對位能力的自動化部位對沖與風險規訓。
+
+strategy("TN Multi-Asset Corr Hedging Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義對沖強度
+enum HedgeRigor
+    Light    = 0.2 // 輕度干預
+    Standard = 0.5 // 標準對沖
+    Heavy    = 0.8 // 極端避險
+
+HedgeRigor rigor = input.enum(HedgeRigor.Standard, "對沖規訓等級")
+int corrLen      = input.int(20, "相關性計算週期", minval = 5)
+
+// 2. 獲取多資產因果數據 (v6 Dynamic Request)
+s1_p = close
+s2_p = request.security("QQQ", timeframe.period, close)
+s3_p = request.security("GLD", timeframe.period, close)
+s4_p = request.security("TLT", timeframe.period, close)
+
+// 3. 建立因果矩陣 (Causal Matrix)
+var matrix<float> cMatrix = matrix.new<float>(4, 4, 0.0)
+
+method update_corr(float p1, float p2, float p3, float p4, int len) =>
+    matrix.set(cMatrix, 0, 1, ta.correlation(p1, p2, len)) // Index vs Tech
+    matrix.set(cMatrix, 0, 2, ta.correlation(p1, p3, len)) // Index vs Gold (Hedge)
+    matrix.set(cMatrix, 0, 3, ta.correlation(p1, p4, len)) // Index vs Bonds
+    matrix.get(cMatrix, 0, 2)
+
+float hedgeCorr = update_corr(s1_p, s2_p, s3_p, s4_p, corrLen)
+
+// 4. 對沖執行規訓
+// 當主資產與避險資產相關性低於 -0.3 時，判定市場進入避險模式
+bool isCrisis = hedgeCorr < -0.3
+float hedgeMult = isCrisis ? (rigor == HedgeRigor.Light ? 0.8 : rigor == HedgeRigor.Heavy ? 0.3 : 0.5) : 1.0
+
+// 主策略邏輯 (EMA 趨勢對位)
+emaF = ta.ema(close, 9)
+emaS = ta.ema(close, 21)
+longCond = ta.crossover(emaF, emaS)
+shortCond = ta.crossunder(emaF, emaS)
+
+// 執行與部位管理
+if longCond
+    strategy.entry("Long", strategy.long, qty = 10.0 * hedgeMult, comment = str.format("H:{0,number,#.##}", hedgeCorr))
+
+if shortCond
+    strategy.entry("Short", strategy.short, qty = 10.0 * hedgeMult, comment = str.format("H:{0,number,#.##}", hedgeCorr))
+
+// 5. 視覺化：因果相關性 HUD (v6 Table API)
+var table hud = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Corr (SPY-GLD)", text_color = color.white)
+    table.cell(hud, 1, 0, str.tostring(hedgeCorr, "#.##"), bgcolor = isCrisis ? color.red : color.green)
+    table.cell(hud, 0, 1, "Status", text_color = color.white)
+    table.cell(hud, 1, 1, isCrisis ? "HEDGING" : "STABLE", text_color = isCrisis ? color.orange : color.aqua)
+    table.cell(hud, 0, 2, "Multiplier", text_color = color.white)
+    table.cell(hud, 1, 2, str.tostring(hedgeMult, "#.#") + "x", text_color = color.yellow)
+
+// 6. 物理背景規訓
+bgcolor(isCrisis ? color.new(color.red, 95) : na)
+plot(hedgeCorr, "Hedge Correlation", color = color.new(color.white, 50), display = display.pane)
