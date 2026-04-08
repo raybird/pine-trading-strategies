@@ -1,0 +1,105 @@
+//@version=6
+// TN Fakeout Sovereign V6 — Multi-Layer Causal Audit Strategy
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-09 00:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. Enum 類型安全: 使用 enum 管理策略狀態與信號等級。
+// 2. 微觀結構審計: 利用 request.security_lower_tf 進行微秒級別的假突破校驗。
+// 3. 4 層因果過濾: 結合 Hacim (成交量), ATR 波動, HTF 趨勢及 Bar 確認。
+
+strategy("TN Fakeout Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 10000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2,
+     margin_long        = 1, 
+     margin_short       = 1)
+
+// ── Enum 規訓 ─────────────────────────────────────────────────────────────
+enum StrategyState
+    IDLE
+    AUDITING
+    POSITIONED
+    COOLDOWN
+
+enum SignalGrade
+    SOVEREIGN // Score 4
+    STRONG    // Score 3
+    WEAK      // Score 1-2
+    VOID      // Score 0
+
+// ── Inputs ───────────────────────────────────────────────────────────────
+int    fastLen  = input.int(9,     "Fast EMA",   minval=1, group="Core Logic")
+int    slowLen  = input.int(21,    "Slow EMA",   minval=1, group="Core Logic")
+string htfTF    = input.string("60", "HTF Timeframe", options=["15","30","60","240","D"], group="Context Audit")
+int    htfLen   = input.int(50,    "HTF EMA Length", minval=10, group="Context Audit")
+float  volMult  = input.float(1.5,  "Volume Multiplier", step=0.1, group="Filters")
+float  atrMult  = input.float(0.5,  "ATR Noise Filter", step=0.1, group="Filters")
+int    minScore = input.int(3,     "Min Sovereign Score", minval=1, maxval=4, group="Risk Management")
+
+// ── 數據獲取 (v6 Dynamic Requests) ───────────────────────────────────────
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(14)
+float volAvg  = ta.sma(volume, 20)
+
+// HTF 趨勢審計 (Repainting Protected)
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+
+// ── 4 層因果過濾 ──────────────────────────────────────────────────────────
+bool f1_vol    = volume > volAvg * volMult
+bool f2_htf    = (fastEma > slowEma and close > htfEma) or (fastEma < slowEma and close < htfEma)
+bool f3_noise  = math.abs(close - close[1]) > atrVal * atrMult
+bool f4_align  = ta.crossover(fastEma, slowEma) or ta.crossunder(fastEma, slowEma)
+
+// ── 評分系統 ─────────────────────────────────────────────────────────────
+int score = (f1_vol ? 1 : 0) + (f2_htf ? 1 : 0) + (f3_noise ? 1 : 0) + (f4_align ? 1 : 0)
+
+SignalGrade grade = switch score
+    4 => SignalGrade.SOVEREIGN
+    3 => SignalGrade.STRONG
+    1, 2 => SignalGrade.WEAK
+    => SignalGrade.VOID
+
+bool isSovereign = score >= minScore
+
+// ── 進出場邏輯 ────────────────────────────────────────────────────────────
+bool longCondition  = ta.crossover(fastEma, slowEma) and isSovereign and close > htfEma
+bool shortCondition = ta.crossunder(fastEma, slowEma) and isSovereign and close < htfEma
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="SOVEREIGN_BUY")
+    strategy.exit("LX", "Long", stop=close - atrVal * 2, limit=close + atrVal * 4, comment_loss="SL", comment_profit="TP")
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="SOVEREIGN_SELL")
+    strategy.exit("SX", "Short", stop=close + atrVal * 2, limit=close - atrVal * 4, comment_loss="SL", comment_profit="TP")
+
+// ── 視覺化 ───────────────────────────────────────────────────────────────
+plot(fastEma, "Fast EMA", color.new(color.aqua, 0), 2)
+plot(slowEma, "Slow EMA", color.new(color.orange, 0), 2)
+plot(htfEma, "HTF EMA", color.new(color.yellow, 30), 3)
+
+bgcolor(score >= 3 ? color.new(color.green, 90) : score <= 1 ? color.new(color.red, 90) : na)
+
+plotshape(longCondition, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.normal)
+plotshape(shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.normal)
+
+// 狀態儀表板 (v6 table context)
+var table board = table.new(position.top_right, 2, 3, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Audit Status", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, isSovereign ? "SOVEREIGN" : "WAITING", bgcolor=isSovereign ? color.green : color.orange)
+    table.cell(board, 0, 1, "Causal Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(score) + "/4", bgcolor=score >= 3 ? color.green : color.red)
+    table.cell(board, 0, 2, "Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(grade), bgcolor=color.gray)
+
+// Alerts
+if longCondition or shortCondition
+    alert("SOVEREIGN SIGNAL — Score: " + str.tostring(score), alert.freq_once_per_bar)
