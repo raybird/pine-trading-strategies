@@ -1,0 +1,93 @@
+//@version=6
+// @description: TeleNexus 因果回溯狀態機策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.0)
+// @strategy: 利用狀態機管理生命週期，結合因果回溯算法審計動能一致性，實現具備「反事實過濾」能力的執行主權。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing Causal Backtracking logic as a state-aware execution standard.","summary":"Established Causal Backtracking State Machine as the primary framework for validating execution motives and reducing whipsaws."}]]
+
+strategy("TN Causal Backtracking Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 定義狀態枚舉與數據結構 (v6 Types)
+type CausalState
+    int   current = 0 // 0:IDLE, 1:PRE_L, 2:LONG, 3:PRE_S, 4:SHORT, 5:COOLDOWN
+    int   lastTransition = 0
+    float sl = na
+
+var CausalState cs = CausalState.new()
+
+// 2. 規訓參數
+int   lookback = input.int(14, "因果回溯深度")
+float minDensity = input.float(0.7, "最小因果密度 (0-1)")
+float atrMult = input.float(2.0, "ATR 止損倍數")
+
+// 3. 因果支柱 (Indicators)
+rsi = ta.rsi(close, 14)
+atr = ta.atr(14)
+[mLine, sLine, _] = ta.macd(close, 12, 26, 9)
+ema200 = ta.ema(close, 200)
+bool isBullish = close > ema200
+
+// 4. 因果回溯驗證規訓 (Method-based Audit)
+method validate_chain(CausalState self, bool isLong) =>
+    int score = 0
+    for i = 1 to lookback
+        if isLong
+            if close[i] > open[i] and rsi[i] > 50 then score += 1
+            if mLine[i] > sLine[i] then score += 1
+        else
+            if close[i] < open[i] and rsi[i] < 50 then score += 1
+            if mLine[i] < sLine[i] then score += 1
+    
+    float density = score / (lookback * 2.0)
+    density >= minDensity
+
+// 5. 狀態機執行規訓
+if barstate.isconfirmed
+    // 處理冷卻 (5 根 K 線)
+    if cs.current == 5 and bar_index - cs.lastTransition >= 5
+        cs.current := 0
+
+    switch cs.current
+        0 => // IDLE
+            if ta.crossover(mLine, sLine) and isBullish
+                cs.current := 1, cs.lastTransition := bar_index
+            else if ta.crossunder(mLine, sLine) and not isBullish
+                cs.current := 3, cs.lastTransition := bar_index
+        
+        1 => // PRE_LONG
+            if cs.validate_chain(true)
+                cs.current := 2, cs.sl := close - atr * atrMult
+                strategy.entry("Long", strategy.long, comment = "Causal Confirmed")
+            else
+                cs.current := 0
+                label.new(bar_index, high, "Backtrack L", color=color.orange, style=label.style_label_down, size=size.small)
+        
+        3 => // PRE_SHORT
+            if cs.validate_chain(false)
+                cs.current := 4, cs.sl := close + atr * atrMult
+                strategy.entry("Short", strategy.short, comment = "Causal Confirmed")
+            else
+                cs.current := 0
+                label.new(bar_index, low, "Backtrack S", color=color.orange, style=label.style_label_up, size=size.small)
+        
+        2 => // LONG
+            if close < cs.sl or ta.crossunder(mLine, sLine)
+                strategy.close("Long", comment = "Causal Exit")
+                cs.current := 5, cs.lastTransition := bar_index
+        
+        4 => // SHORT
+            if close > cs.sl or ta.crossover(mLine, sLine)
+                strategy.close("Short", comment = "Causal Exit")
+                cs.current := 5, cs.lastTransition := bar_index
+
+// 6. 視覺化 HUD
+var table hud = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Current State", text_color = color.white)
+    stateStr = switch cs.current
+        0 => "IDLE", 1 => "PRE_L", 2 => "LONG", 3 => "PRE_S", 4 => "SHORT", 5 => "COOLDOWN", => "UNKNOWN"
+    table.cell(hud, 1, 0, stateStr, text_color = color.yellow)
+    table.cell(hud, 0, 1, "Life Line", text_color = color.white)
+    table.cell(hud, 1, 1, isBullish ? "Above" : "Below", bgcolor = isBullish ? color.teal : color.red)
+
+plot(cs.current == 2 or cs.current == 4 ? cs.sl : na, "Causal SL", color.red, 2, plot.style_linebr)
+bgcolor(cs.current == 1 ? color.new(color.green, 90) : cs.current == 3 ? color.new(color.red, 90) : na)
