@@ -1,0 +1,109 @@
+//@version=6
+// TN Multi-Audit Sovereign V6 — Advanced Causal Alignment Strategy
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-09 06:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. UDT 稽核架構: 使用 User-Defined Types 封裝多維度市場狀態。
+// 2. 多層級因果對位: 結合 HTF EMA 與 Supertrend 進行大趨勢定性。
+// 3. 類型安全規訓: 利用 enum 管理交易生命週期與信號等級。
+
+strategy("TN Multi-Audit Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2)
+
+// ── Enum 與 Type 規訓 ────────────────────────────────────────────────────────
+enum MarketBias
+    BULLISH
+    BEARISH
+    NEUTRAL
+
+enum AuditGrade
+    SOVEREIGN // All filters pass
+    VALID     // Major filters pass
+    WEAK      // Some filters fail
+    REJECTED  // Critical filters fail
+
+type AuditContext
+    MarketBias bias
+    float      volRatio
+    float      volatility
+    float      htfTrend
+    AuditGrade grade
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+string htfTF    = input.string("60", "HTF Timeframe", options=["15","30","60","240","D"], group="Context Audit")
+int    htfLen   = input.int(50,    "HTF EMA Length", minval=10, group="Context Audit")
+float  volMult  = input.float(1.5,  "Volume Multiplier", step=0.1, group="Causal Filters")
+float  atrMult  = input.float(0.5,  "ATR Noise Filter", step=0.1, group="Causal Filters")
+int    minScore = input.int(3,     "Min Sovereign Score", minval=1, maxval=4, group="Risk Management")
+
+// ── 數據獲取 (v6 Dynamic Requests) ───────────────────────────────────────────
+// HTF 趨勢審計 (Repainting Protected)
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+
+// ── 因果計算 ──────────────────────────────────────────────────────────────────
+float fastEma = ta.ema(close, 9)
+float slowEma = ta.ema(close, 21)
+float volAvg  = ta.sma(volume, 20)
+float atrVal  = ta.atr(14)
+
+// 實體化稽核上下文 (v6 UDT)
+AuditContext ctx = AuditContext.new()
+ctx.bias := (fastEma > slowEma and close > htfEma) ? MarketBias.BULLISH : (fastEma < slowEma and close < htfEma) ? MarketBias.BEARISH : MarketBias.NEUTRAL
+ctx.volRatio := volume / volAvg
+ctx.volatility := math.abs(close - close[1]) / atrVal
+
+// 評分與定級
+int passCount = 0
+passCount += ctx.bias != MarketBias.NEUTRAL ? 1 : 0
+passCount += ctx.volRatio > volMult ? 1 : 0
+passCount += ctx.volatility > atrMult ? 1 : 0
+passCount += (ta.crossover(fastEma, slowEma) or ta.crossunder(fastEma, slowEma)) ? 1 : 0
+
+ctx.grade := passCount == 4 ? AuditGrade.SOVEREIGN : passCount == 3 ? AuditGrade.VALID : passCount >= 1 ? AuditGrade.WEAK : AuditGrade.REJECTED
+
+// ── 進出場邏輯 ────────────────────────────────────────────────────────────────
+bool isAuditPassed = passCount >= minScore
+bool longCondition  = ctx.bias == MarketBias.BULLISH and isAuditPassed and ta.crossover(fastEma, slowEma)
+bool shortCondition = ctx.bias == MarketBias.BEARISH and isAuditPassed and ta.crossunder(fastEma, slowEma)
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="SOVEREIGN_LONG")
+    strategy.exit("LX", "Long", stop=close - atrVal * 2, limit=close + atrVal * 4, comment_loss="SL", comment_profit="TP")
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="SOVEREIGN_SHORT")
+    strategy.exit("SX", "Short", stop=close + atrVal * 2, limit=close - atrVal * 4, comment_loss="SL", comment_profit="TP")
+
+// ── 視覺化 ───────────────────────────────────────────────────────────────────
+plot(fastEma, "Fast EMA", color.new(color.aqua, 0), 1)
+plot(slowEma, "Slow EMA", color.new(color.orange, 0), 2)
+plot(htfEma, "HTF EMA", color.new(color.yellow, 30), 3)
+
+bgcolor(ctx.bias == MarketBias.BULLISH ? color.new(color.green, 90) : ctx.bias == MarketBias.BEARISH ? color.new(color.red, 90) : na)
+
+plotshape(longCondition, "Long", shape.triangleup, location.belowbar, color.green, size=size.normal)
+plotshape(shortCondition, "Short", shape.triangledown, location.abovebar, color.red, size=size.normal)
+
+// 狀態儀表板 (v6 table)
+var table board = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Audit Strategy", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, "V6 SOVEREIGN", bgcolor=color.green, text_color=color.white)
+    table.cell(board, 0, 1, "Context Bias", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(ctx.bias), bgcolor=ctx.bias == MarketBias.BULLISH ? color.green : color.red)
+    table.cell(board, 0, 2, "Causal Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(ctx.grade), bgcolor=isAuditPassed ? color.green : color.orange)
+    table.cell(board, 0, 3, "Vol/ATR Audit", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, str.tostring(passCount) + "/4", bgcolor=passCount >= 3 ? color.green : color.red)
+
+// Alerts
+if longCondition or shortCondition
+    alert("SOVEREIGN AUDIT PASSED: " + str.tostring(ctx.grade), alert.freq_once_per_bar)
