@@ -1,0 +1,111 @@
+//@version=6
+// TN Universal Sovereign V6 — Git-ified Execution & Causal Context Audit
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-09 18:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. 執行即 Git: 使用 enum 管理交易生命週期 (Stage -> Commit -> Push)。
+// 2. UDT 市場上下文: 使用 User-Defined Types 封裝多維度因果審計數據。
+// 3. 跨市場適配: 自動對焦 syminfo 指標，實作主權級執行地板。
+
+strategy("TN Universal Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2)
+
+// ── Enum 與 Type 規訓 ────────────────────────────────────────────────────────
+enum StrategyPhase
+    STAGING    // 意圖宣告階段
+    AUDITING   // 因果審計階段
+    PUSHING    // 物理執行階段
+    SYNCING    // 狀態對準階段
+
+enum AuditGrade
+    SOVEREIGN // 高維一致
+    VALID     // 邏輯成立
+    REJECTED  // 因果斷裂
+
+type MarketContext
+    float      biasScore
+    float      volatility
+    float      liquidityRatio
+    AuditGrade grade
+    StrategyPhase phase
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+string htfTF    = input.string("60", "HTF Audit Timeframe", options=["15","30","60","240","D"], group="Context")
+int    maFast   = input.int(9,     "Fast Audit MA", minval=1, group="Logic")
+int    maSlow   = input.int(21,    "Slow Audit MA", minval=1, group="Logic")
+float  volMult  = input.float(1.5,  "Volume Threshold", step=0.1, group="Filters")
+int    minAudit = input.int(3,     "Min Audit Score", minval=1, maxval=4, group="Governance")
+
+// ── 數據獲取與 UDT 初始化 ──────────────────────────────────────────────────────
+float fastEma = ta.ema(close, maFast)
+float slowEma = ta.ema(close, maSlow)
+float volAvg  = ta.sma(volume, 20)
+float atrVal  = ta.atr(14)
+
+// HTF 趨勢審計
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
+
+// 實體化市場上下文
+var MarketContext ctx = MarketContext.new()
+ctx.phase := StrategyPhase.STAGING
+
+// ── 因果審計流程 (Auditing) ────────────────────────────────────────────────────
+int auditScore = 0
+auditScore += (close > htfEma) ? 1 : 0
+auditScore += (fastEma > slowEma) ? 1 : 0
+auditScore += (volume > volAvg * volMult) ? 1 : 0
+auditScore += (math.abs(close - close[1]) > atrVal * 0.5) ? 1 : 0
+
+ctx.biasScore := auditScore / 4.0
+ctx.volatility := atrVal / close
+ctx.liquidityRatio := volume / volAvg
+ctx.grade := auditScore >= minAudit ? AuditGrade.SOVEREIGN : auditScore >= 2 ? AuditGrade.VALID : AuditGrade.REJECTED
+
+if auditScore >= minAudit
+    ctx.phase := StrategyPhase.AUDITING
+    log.info("STAGE: Intent declared. Audit Score: " + str.tostring(auditScore))
+
+// ── 執行路徑 (Pushing) ────────────────────────────────────────────────────────
+bool longIntent  = ta.crossover(fastEma, slowEma) and ctx.grade == AuditGrade.SOVEREIGN
+bool shortIntent = ta.crossunder(fastEma, slowEma) and ctx.grade == AuditGrade.SOVEREIGN
+
+if longIntent and strategy.position_size <= 0
+    ctx.phase := StrategyPhase.PUSHING
+    log.warning("PUSH: Executing Sovereign Long. Reason: Causal Alignment.")
+    strategy.entry("Long", strategy.long, comment="BRAIN_COMMIT: LONG")
+    strategy.exit("LX", "Long", stop=low - atrVal, limit=close + atrVal * 3)
+
+if shortIntent and strategy.position_size >= 0
+    ctx.phase := StrategyPhase.PUSHING
+    log.warning("PUSH: Executing Sovereign Short. Reason: Causal Alignment.")
+    strategy.entry("Short", strategy.short, comment="BRAIN_COMMIT: SHORT")
+    strategy.exit("SX", "Short", stop=high + atrVal, limit=close - atrVal * 3)
+
+// ── 視覺化與看板 ───────────────────────────────────────────────────────────────
+plot(fastEma, "Audit Fast", color.new(color.aqua, 0), 1)
+plot(slowEma, "Audit Slow", color.new(color.orange, 0), 2)
+plot(htfEma,  "HTF Floor",  color.new(color.gray, 30), 3)
+
+bgcolor(ctx.grade == AuditGrade.SOVEREIGN ? color.new(color.green, 90) : ctx.grade == AuditGrade.REJECTED ? color.new(color.red, 90) : na)
+
+// 狀態儀表板 (v6 table)
+var table board = table.new(position.top_right, 2, 5, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Phase", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, str.tostring(ctx.phase), bgcolor=color.gray)
+    table.cell(board, 0, 1, "Audit Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(ctx.grade), bgcolor=ctx.grade == AuditGrade.SOVEREIGN ? color.green : color.red)
+    table.cell(board, 0, 2, "Causal Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(auditScore) + "/4", bgcolor=auditScore >= 3 ? color.green : color.orange)
+    table.cell(board, 0, 3, "Ticker", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, syminfo.ticker, bgcolor=color.gray)
+    table.cell(board, 0, 4, "Time (CST)", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 4, str.tostring(year) + "/" + str.tostring(month) + "/" + str.tostring(day), bgcolor=color.gray)
