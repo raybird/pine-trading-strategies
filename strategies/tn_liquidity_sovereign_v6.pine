@@ -1,0 +1,119 @@
+//@version=6
+// TN Liquidity Sovereign V6 — Advanced Liquidity Sweep & Causal Audit
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-09 12:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. 流動性審計: 利用 request.security_lower_tf 捕捉微觀級別的流動性清掃（Sweep）。
+// 2. Enum 狀態規訓: 使用 enum 管理策略的執行階段與信號等級。
+// 3. 4 層因果對位: 結合成交量、HTF 趨勢、ATR 波動及微觀 K 線實體比例。
+
+strategy("TN Liquidity Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2)
+
+// ── Enum 與 UDT 規訓 ─────────────────────────────────────────────────────────
+enum StrategyPhase
+    IDLE
+    SWEEP_DETECTED
+    AUDITING
+    EXECUTING
+
+enum SignalGrade
+    SOVEREIGN // Score 4
+    STRONG    // Score 3
+    VALID     // Score 2
+    REJECTED  // Score 0-1
+
+type AuditResult
+    StrategyPhase phase
+    SignalGrade   grade
+    int           score
+    bool          isSweep
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+int    lookback = input.int(20,    "Sweep Lookback", minval=5, group="Liquidity")
+string htfTF    = input.string("60", "HTF Timeframe", options=["15","30","60","240","D"], group="Context Audit")
+float  volMult  = input.float(1.5,  "Volume Multiplier", step=0.1, group="Causal Filters")
+float  atrMult  = input.float(0.5,  "ATR Noise Filter", step=0.1, group="Causal Filters")
+int    minScore = input.int(3,     "Min Sovereign Score", minval=1, maxval=4, group="Risk Management")
+
+// ── 數據獲取 ──────────────────────────────────────────────────────────────────
+float atrVal  = ta.atr(14)
+float volAvg  = ta.sma(volume, 20)
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
+
+// ── 流動性清掃識別 (v6 Security Lower TF) ──────────────────────────────────────
+float highBound = ta.highest(high[1], lookback)
+float lowBound  = ta.lowest(low[1], lookback)
+
+bool isUpperSweep = high > highBound and close < highBound
+bool isLowerSweep = low < lowBound and close > lowBound
+
+// 微觀審計：檢查下位時間框架是否有強回抽 (v6 Feature)
+lowerTF = timeframe.isintraday ? "1" : "5"
+float[] lowerCloses = request.security_lower_tf(syminfo.tickerid, lowerTF, close)
+bool strongRejection = false
+if array.size(lowerCloses) > 0
+    float lastLowerClose = array.get(lowerCloses, array.size(lowerCloses) - 1)
+    float firstLowerClose = array.get(lowerCloses, 0)
+    strongRejection := isUpperSweep ? lastLowerClose < firstLowerClose : isLowerSweep ? lastLowerClose > firstLowerClose : false
+
+// ── 4 層因果對位 ──────────────────────────────────────────────────────────────
+bool f1_vol    = volume > volAvg * volMult
+bool f2_htf    = (isUpperSweep and close < htfEma) or (isLowerSweep and close > htfEma)
+bool f3_noise  = math.abs(close - close[1]) > atrVal * atrMult
+bool f4_sweep  = strongRejection
+
+// 評分系統
+int score = (f1_vol ? 1 : 0) + (f2_htf ? 1 : 0) + (f3_noise ? 1 : 0) + (f4_sweep ? 1 : 0)
+
+SignalGrade grade = switch score
+    4 => SignalGrade.SOVEREIGN
+    3 => SignalGrade.STRONG
+    2 => SignalGrade.VALID
+    => SignalGrade.REJECTED
+
+// ── 進出場邏輯 ────────────────────────────────────────────────────────────────
+bool longCondition  = isLowerSweep and score >= minScore
+bool shortCondition = isUpperSweep and score >= minScore
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="SWEEP_LONG")
+    strategy.exit("LX", "Long", stop=lowBound - atrVal * 1, limit=close + atrVal * 3, comment_loss="SL", comment_profit="TP")
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="SWEEP_SHORT")
+    strategy.exit("SX", "Short", stop=highBound + atrVal * 1, limit=close - atrVal * 3, comment_loss="SL", comment_profit="TP")
+
+// ── 視覺化 ───────────────────────────────────────────────────────────────────
+plot(highBound, "Upper Liquidity", color.new(color.red, 60), 2, plot.style_stepline)
+plot(lowBound, "Lower Liquidity", color.new(color.green, 60), 2, plot.style_stepline)
+plot(htfEma, "HTF Bias", color.new(color.yellow, 30), 3)
+
+bgcolor(isLowerSweep ? color.new(color.green, 90) : isUpperSweep ? color.new(color.red, 90) : na)
+
+plotshape(longCondition, "Sweep Long", shape.triangleup, location.belowbar, color.green, size=size.normal)
+plotshape(shortCondition, "Sweep Short", shape.triangledown, location.abovebar, color.red, size=size.normal)
+
+// 狀態儀表板
+var table board = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Liquidity Audit", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, grade == SignalGrade.SOVEREIGN ? "SOVEREIGN" : "AUDITING", bgcolor=score >= 3 ? color.green : color.orange)
+    table.cell(board, 0, 1, "Sweep Info", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, isLowerSweep ? "LOW_SWEEP" : isUpperSweep ? "HIGH_SWEEP" : "NONE", bgcolor=color.gray)
+    table.cell(board, 0, 2, "Causal Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(score) + "/4", bgcolor=score >= 3 ? color.green : color.red)
+    table.cell(board, 0, 3, "Micro Audit", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, strongRejection ? "PASS" : "FAIL", bgcolor=strongRejection ? color.green : color.red)
+
+// Alerts
+if longCondition or shortCondition
+    alert("SOVEREIGN SWEEP: " + str.tostring(grade) + " | Score: " + str.tostring(score), alert.freq_once_per_bar)
