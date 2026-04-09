@@ -1,0 +1,109 @@
+//@version=6
+// TN Multi-Factor Sovereign V6 — Collections & UDT Portfolio Strategy
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-10 06:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. 集合對象應用: 使用 map<string, float> 存儲多維度因子分數。
+// 2. UDT 陣列稽核: 使用 array<FactorAudit> 實作多策略併行權重審計。
+// 3. 類型安全規訓: 全面採用 v6 點號語法 (Method Syntax) 管理數據流。
+
+strategy("TN Multi-Factor Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2)
+
+// ── UDT 與 Enum 規訓 ─────────────────────────────────────────────────────────
+enum FactorType
+    TREND
+    MOMENTUM
+    VOLATILITY
+
+type FactorAudit
+    FactorType fType
+    float      score
+    float      weight
+    bool       isStrong
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+float trendWeight = input.float(0.4, "Trend Weight", minval=0, maxval=1, step=0.1)
+float momWeight   = input.float(0.4, "Momentum Weight", minval=0, maxval=1, step=0.1)
+float volWeight   = input.float(0.2, "Volatility Weight", minval=0, maxval=1, step=0.1)
+int   maFast      = input.int(9,    "Fast EMA", minval=1)
+int   maSlow      = input.int(21,   "Slow EMA", minval=1)
+
+// ── 數據獲取與集合初始化 ──────────────────────────────────────────────────────
+// v6 Map 應用
+var map<string, float> factorScores = map.new<string, float>()
+
+float fastEma = ta.ema(close, maFast)
+float slowEma = ta.ema(close, maSlow)
+float rsiVal  = ta.rsi(close, 14)
+float atrVal  = ta.atr(14)
+
+// ── 多因子審計 (v6 Method Syntax) ──────────────────────────────────────────────
+// 1. 趨勢因子
+float trendScore = fastEma > slowEma ? 1.0 : -1.0
+factorScores.put("trend", trendScore)
+
+// 2. 動能因子
+float momScore = rsiVal > 50 ? 1.0 : -1.0
+factorScores.put("momentum", momScore)
+
+// 3. 波動因子
+float volScore = close > ta.sma(close, 20) ? 1.0 : -1.0
+factorScores.put("volatility", volScore)
+
+// 實體化 UDT 陣列進行綜合計分
+var array<FactorAudit> auditStack = array.new<FactorAudit>(0)
+if barstate.isconfirmed
+    auditStack.clear()
+    auditStack.push(FactorAudit.new(FactorType.TREND,      factorScores.get("trend"),      trendWeight, trendScore > 0))
+    auditStack.push(FactorAudit.new(FactorType.MOMENTUM,   factorScores.get("momentum"),   momWeight,   momScore > 0))
+    auditStack.push(FactorAudit.new(FactorType.VOLATILITY, factorScores.get("volatility"), volWeight,  volScore > 0))
+
+// 綜合加權分數計算
+float totalScore = 0.0
+for audit in auditStack
+    totalScore += audit.score * audit.weight
+
+// ── 進出場邏輯 ────────────────────────────────────────────────────────────────
+bool longCondition  = totalScore > 0.5 and ta.crossover(fastEma, slowEma)
+bool shortCondition = totalScore < -0.5 and ta.crossunder(fastEma, slowEma)
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="MULTI_FACTOR_BUY")
+    strategy.exit("LX", "Long", stop=close - atrVal * 2, limit=close + atrVal * 4)
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="MULTI_FACTOR_SELL")
+    strategy.exit("SX", "Short", stop=close + atrVal * 2, limit=close - atrVal * 4)
+
+// ── 視覺化與儀表板 ─────────────────────────────────────────────────────────────
+plot(fastEma, "Audit Fast", color.new(color.aqua, 0), 1)
+plot(slowEma, "Audit Slow", color.new(color.orange, 0), 2)
+
+bgcolor(totalScore > 0.5 ? color.new(color.green, 90) : totalScore < -0.5 ? color.new(color.red, 90) : na)
+
+// 狀態儀表板 (v6 Table)
+var table board = table.new(position.top_right, 2, 5, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Factor Audit", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, "V6 SOVEREIGN", bgcolor=color.green, text_color=color.white)
+    table.cell(board, 0, 1, "Trend Factor", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(factorScores.get("trend")), bgcolor=factorScores.get("trend") > 0 ? color.green : color.red)
+    table.cell(board, 0, 2, "Mom Factor", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(factorScores.get("momentum")), bgcolor=factorScores.get("momentum") > 0 ? color.green : color.red)
+    table.cell(board, 0, 3, "Vol Factor", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, str.tostring(factorScores.get("volatility")), bgcolor=factorScores.get("volatility") > 0 ? color.green : color.red)
+    table.cell(board, 0, 4, "Agg Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 4, str.tostring(totalScore, "#.##"), bgcolor=math.abs(totalScore) > 0.5 ? color.green : color.orange)
+
+// 日誌規訓
+if longCondition or shortCondition
+    log.info("SOVEREIGN ACTION: Multi-Factor Audit Passed. Agg Score: " + str.tostring(totalScore))
