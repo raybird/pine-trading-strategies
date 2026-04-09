@@ -1,13 +1,13 @@
 //@version=6
-// TN Fakeout Sovereign V6 — Multi-Layer Causal Audit Strategy
+// TN Fakeout Sovereign V6 — Advanced Causal Audit Strategy
 // Author: TeleNexus (Raybird)
 // Timezone: Asia/Taipei (CST)
-// Version: 1.0.0 (2026-04-09 00:30)
+// Version: 1.0.0 (2026-04-10 00:30)
 //
 // 核心規訓 (Core Mandate):
-// 1. Enum 類型安全: 使用 enum 管理策略狀態與信號等級。
-// 2. 微觀結構審計: 利用 request.security_lower_tf 進行微秒級別的假突破校驗。
-// 3. 4 層因果過濾: 結合 Hacim (成交量), ATR 波動, HTF 趨勢及 Bar 確認。
+// 1. 執行即 Git: 使用 enum 管理交易生命週期 (Staging -> Auditing -> Pushing)。
+// 2. 對象化審計: 使用 User-Defined Types (UDT) 封裝多維度因果指標。
+// 3. 微觀結構對位: 整合 v6 集合與強化日誌規訓。
 
 strategy("TN Fakeout Sovereign V6 [TeleNexus]", 
      overlay            = true, 
@@ -16,90 +16,99 @@ strategy("TN Fakeout Sovereign V6 [TeleNexus]",
      default_qty_value  = 10, 
      commission_type    = strategy.commission.percent, 
      commission_value   = 0.075,
-     slippage           = 2,
-     margin_long        = 1, 
-     margin_short       = 1)
+     slippage           = 2)
 
-// ── Enum 規訓 ─────────────────────────────────────────────────────────────
-enum StrategyState
-    IDLE
-    AUDITING
-    POSITIONED
-    COOLDOWN
+// ── Enum 與 Type 規訓 ────────────────────────────────────────────────────────
+enum StrategyPhase
+    STAGING    // 意圖宣告
+    AUDITING   // 因果審計
+    PUSHING    // 物理執行
+    SYNCING    // 狀態校準
 
 enum SignalGrade
     SOVEREIGN // Score 4
     STRONG    // Score 3
-    WEAK      // Score 1-2
-    VOID      // Score 0
+    VALID     // Score 2
+    REJECTED  // Score 0-1
 
-// ── Inputs ───────────────────────────────────────────────────────────────
-int    fastLen  = input.int(9,     "Fast EMA",   minval=1, group="Core Logic")
-int    slowLen  = input.int(21,    "Slow EMA",   minval=1, group="Core Logic")
+type AuditContext
+    float       volRatio
+    float       htfAlignment
+    float       noiseFilter
+    float       barConfirmation
+    SignalGrade grade
+    StrategyPhase phase
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+int    maFast   = input.int(9,     "Audit Fast EMA", minval=1, group="Logic")
+int    maSlow   = input.int(21,    "Audit Slow EMA", minval=1, group="Logic")
 string htfTF    = input.string("60", "HTF Timeframe", options=["15","30","60","240","D"], group="Context Audit")
-int    htfLen   = input.int(50,    "HTF EMA Length", minval=10, group="Context Audit")
-float  volMult  = input.float(1.5,  "Volume Multiplier", step=0.1, group="Filters")
-float  atrMult  = input.float(0.5,  "ATR Noise Filter", step=0.1, group="Filters")
-int    minScore = input.int(3,     "Min Sovereign Score", minval=1, maxval=4, group="Risk Management")
+float  volMult  = input.float(1.5,  "Volume Threshold", step=0.1, group="Causal Filters")
+float  atrMult  = input.float(0.3,  "ATR Noise Filter", step=0.05, group="Causal Filters")
+int    minScore = input.int(3,     "Min Audit Score", minval=1, maxval=4, group="Risk Management")
 
-// ── 數據獲取 (v6 Dynamic Requests) ───────────────────────────────────────
-float fastEma = ta.ema(close, fastLen)
-float slowEma = ta.ema(close, slowLen)
-float atrVal  = ta.atr(14)
+// ── 數據獲取與 UDT 初始化 ──────────────────────────────────────────────────────
+float fastEma = ta.ema(close, maFast)
+float slowEma = ta.ema(close, maSlow)
 float volAvg  = ta.sma(volume, 20)
+float atrVal  = ta.atr(14)
 
 // HTF 趨勢審計 (Repainting Protected)
-float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
 
-// ── 4 層因果過濾 ──────────────────────────────────────────────────────────
-bool f1_vol    = volume > volAvg * volMult
-bool f2_htf    = (fastEma > slowEma and close > htfEma) or (fastEma < slowEma and close < htfEma)
-bool f3_noise  = math.abs(close - close[1]) > atrVal * atrMult
-bool f4_align  = ta.crossover(fastEma, slowEma) or ta.crossunder(fastEma, slowEma)
+// 初始化審計上下文
+var AuditContext ctx = AuditContext.new()
+ctx.phase := StrategyPhase.STAGING
 
-// ── 評分系統 ─────────────────────────────────────────────────────────────
-int score = (f1_vol ? 1 : 0) + (f2_htf ? 1 : 0) + (f3_noise ? 1 : 0) + (f4_align ? 1 : 0)
+// ── 因果審計流程 (Auditing) ────────────────────────────────────────────────────
+int score = 0
+score += (volume > volAvg * volMult) ? 1 : 0
+score += (close > htfEma) ? 1 : 0 // 簡化為趨勢對位
+score += (math.abs(close - close[1]) > atrVal * atrMult) ? 1 : 0
+score += (fastEma > slowEma) ? 1 : 0
 
-SignalGrade grade = switch score
-    4 => SignalGrade.SOVEREIGN
-    3 => SignalGrade.STRONG
-    1, 2 => SignalGrade.WEAK
-    => SignalGrade.VOID
+ctx.volRatio := volume / volAvg
+ctx.grade := score == 4 ? SignalGrade.SOVEREIGN : score == 3 ? SignalGrade.STRONG : score == 2 ? SignalGrade.VALID : SignalGrade.REJECTED
 
-bool isSovereign = score >= minScore
+// ── 執行路徑 (Pushing) ────────────────────────────────────────────────────────
+bool longIntent  = ta.crossover(fastEma, slowEma) and score >= minScore
+bool shortIntent = ta.crossunder(fastEma, slowEma) and score >= minScore
 
-// ── 進出場邏輯 ────────────────────────────────────────────────────────────
-bool longCondition  = ta.crossover(fastEma, slowEma) and isSovereign and close > htfEma
-bool shortCondition = ta.crossunder(fastEma, slowEma) and isSovereign and close < htfEma
+if longIntent and strategy.position_size <= 0
+    ctx.phase := StrategyPhase.AUDITING
+    log.info("STAGE: Long Intent Declared. Score: " + str.tostring(score))
+    if ctx.grade == SignalGrade.SOVEREIGN or ctx.grade == SignalGrade.STRONG
+        ctx.phase := StrategyPhase.PUSHING
+        log.warning("PUSH: Executing Sovereign Buy.")
+        strategy.entry("Long", strategy.long, comment="BRAIN_COMMIT: LONG")
+        strategy.exit("LX", "Long", stop=close - atrVal * 2, limit=close + atrVal * 4)
 
-if longCondition and strategy.position_size <= 0
-    strategy.entry("Long", strategy.long, comment="SOVEREIGN_BUY")
-    strategy.exit("LX", "Long", stop=close - atrVal * 2, limit=close + atrVal * 4, comment_loss="SL", comment_profit="TP")
+if shortIntent and strategy.position_size >= 0
+    ctx.phase := StrategyPhase.AUDITING
+    log.info("STAGE: Short Intent Declared. Score: " + str.tostring(score))
+    if ctx.grade == SignalGrade.SOVEREIGN or ctx.grade == SignalGrade.STRONG
+        ctx.phase := StrategyPhase.PUSHING
+        log.warning("PUSH: Executing Sovereign Sell.")
+        strategy.entry("Short", strategy.short, comment="BRAIN_COMMIT: SHORT")
+        strategy.exit("SX", "Short", stop=close + atrVal * 2, limit=close - atrVal * 4)
 
-if shortCondition and strategy.position_size >= 0
-    strategy.entry("Short", strategy.short, comment="SOVEREIGN_SELL")
-    strategy.exit("SX", "Short", stop=close + atrVal * 2, limit=close - atrVal * 4, comment_loss="SL", comment_profit="TP")
+// ── 視覺化與看板 ───────────────────────────────────────────────────────────────
+plot(fastEma, "Audit Fast", color.new(color.aqua, 0), 1)
+plot(slowEma, "Audit Slow", color.new(color.orange, 0), 2)
+plot(htfEma,  "HTF Floor",  color.new(color.gray, 30), 3)
 
-// ── 視覺化 ───────────────────────────────────────────────────────────────
-plot(fastEma, "Fast EMA", color.new(color.aqua, 0), 2)
-plot(slowEma, "Slow EMA", color.new(color.orange, 0), 2)
-plot(htfEma, "HTF EMA", color.new(color.yellow, 30), 3)
+bgcolor(ctx.grade == SignalGrade.SOVEREIGN ? color.new(color.green, 90) : ctx.grade == SignalGrade.REJECTED ? color.new(color.red, 90) : na)
 
-bgcolor(score >= 3 ? color.new(color.green, 90) : score <= 1 ? color.new(color.red, 90) : na)
-
-plotshape(longCondition, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.normal)
-plotshape(shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.normal)
-
-// 狀態儀表板 (v6 table context)
-var table board = table.new(position.top_right, 2, 3, border_width=1, frame_color=color.gray)
+// 狀態儀表板 (v6 table)
+var table board = table.new(position.top_right, 2, 5, border_width=1, frame_color=color.gray)
 if barstate.isconfirmed
-    table.cell(board, 0, 0, "Audit Status", bgcolor=color.new(color.navy, 20), text_color=color.white)
-    table.cell(board, 1, 0, isSovereign ? "SOVEREIGN" : "WAITING", bgcolor=isSovereign ? color.green : color.orange)
-    table.cell(board, 0, 1, "Causal Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
-    table.cell(board, 1, 1, str.tostring(score) + "/4", bgcolor=score >= 3 ? color.green : color.red)
-    table.cell(board, 0, 2, "Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
-    table.cell(board, 1, 2, str.tostring(grade), bgcolor=color.gray)
-
-// Alerts
-if longCondition or shortCondition
-    alert("SOVEREIGN SIGNAL — Score: " + str.tostring(score), alert.freq_once_per_bar)
+    table.cell(board, 0, 0, "Phase", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, str.tostring(ctx.phase), bgcolor=color.gray)
+    table.cell(board, 0, 1, "Causal Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(ctx.grade), bgcolor=ctx.grade == SignalGrade.SOVEREIGN ? color.green : color.orange)
+    table.cell(board, 0, 2, "Audit Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(score) + "/4", bgcolor=score >= 3 ? color.green : color.red)
+    table.cell(board, 0, 3, "Ticker", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, syminfo.ticker, bgcolor=color.gray)
+    table.cell(board, 0, 4, "CST Time", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 4, str.tostring(year) + "/" + str.tostring(month) + "/" + str.tostring(day), bgcolor=color.gray)
