@@ -1,0 +1,112 @@
+//@version=6
+// TN Triple Momentum Sovereign V6 — Advanced UDT Auditing & ADX Alignment
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-11 00:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. UDT Methods: 使用對象方法實作因果審計與風險核算。
+// 2. Enum 狀態機: 管理市場環境 (Market Regime) 與執行生命週期。
+// 3. 多重對位: 強制要求 ADX 強度、DMI 趨向與三重均線排列三位一體。
+
+strategy("TN Triple Momentum Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.075,
+     slippage           = 2)
+
+// ── Enum 與 Type 規訓 ────────────────────────────────────────────────────────
+enum MarketRegime
+    STRONG_BULL
+    STRONG_BEAR
+    SIDEWAYS
+    ACCUMULATING
+
+enum SignalGrade
+    SOVEREIGN // Score 3
+    VALID     // Score 2
+    WEAK      // Score 1
+    VOID      // Score 0
+
+type MomentumContext
+    float       adxVal
+    float       diPlus
+    float       diMinus
+    MarketRegime regime
+    SignalGrade  grade
+    int          score
+
+// UDT Method: 因果審計
+method audit(MomentumContext self, bool bullAlign, bool bearAlign, float adxMin) =>
+    int passCount = 0
+    passCount += (self.adxVal >= adxMin) ? 1 : 0
+    passCount += (bullAlign or bearAlign) ? 1 : 0
+    passCount += (bullAlign ? self.diPlus > self.diMinus : bearAlign ? self.diMinus > self.diPlus : false) ? 1 : 0
+    
+    self.score := passCount
+    self.grade := passCount == 3 ? SignalGrade.SOVEREIGN : passCount == 2 ? SignalGrade.VALID : SignalGrade.WEAK
+    self.regime := (self.adxVal >= adxMin) ? (bullAlign ? MarketRegime.STRONG_BULL : bearAlign ? MarketRegime.STRONG_BEAR : MarketRegime.ACCUMULATING) : MarketRegime.SIDEWAYS
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+int   adxLen   = input.int(14,   "ADX Length",  group="Momentum")
+float adxMin   = input.float(25, "ADX Threshold", minval=10, group="Momentum")
+int   ema1Len  = input.int(5,    "Fast EMA",    group="Structure")
+int   ema2Len  = input.int(13,   "Medium EMA",  group="Structure")
+int   ema3Len  = input.int(34,   "Slow EMA",    group="Structure")
+float slMult   = input.float(1.5, "SL ATR Mult", group="Risk")
+float tpMult   = input.float(3.0, "TP ATR Mult", group="Risk")
+
+// ── 數據獲取 ──────────────────────────────────────────────────────────────────
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+float ema1 = ta.ema(close, ema1Len)
+float ema2 = ta.ema(close, ema2Len)
+float ema3 = ta.ema(close, ema3Len)
+float atr  = ta.atr(14)
+
+bool bullAlign = ema1 > ema2 and ema2 > ema3
+bool bearAlign = ema1 < ema2 and ema2 < ema3
+
+// 實體化 UDT 並調用審計方法
+var MomentumContext ctx = MomentumContext.new(adxVal, diPlus, diMinus, MarketRegime.SIDEWAYS, SignalGrade.VOID, 0)
+ctx.adxVal := adxVal
+ctx.diPlus := diPlus
+ctx.diMinus := diMinus
+ctx.audit(bullAlign, bearAlign, adxMin)
+
+// ── 進出場邏輯 ────────────────────────────────────────────────────────────────
+bool longCondition  = ctx.grade == SignalGrade.SOVEREIGN and bullAlign and ta.crossover(ema1, ema2)
+bool shortCondition = ctx.grade == SignalGrade.SOVEREIGN and bearAlign and ta.crossunder(ema1, ema2)
+
+if longCondition and strategy.position_size <= 0
+    log.info("STAGE: Sovereign Long Intent. Score: " + str.tostring(ctx.score))
+    strategy.entry("Long", strategy.long, comment="BRAIN_COMMIT: LONG")
+    strategy.exit("LX", "Long", stop=close - slMult * atr, limit=close + tpMult * atr)
+
+if shortCondition and strategy.position_size >= 0
+    log.info("STAGE: Sovereign Short Intent. Score: " + str.tostring(ctx.score))
+    strategy.entry("Short", strategy.short, comment="BRAIN_COMMIT: SHORT")
+    strategy.exit("SX", "Short", stop=close + slMult * atr, limit=close - tpMult * atr)
+
+// ── 視覺化與看板 ───────────────────────────────────────────────────────────────
+plot(ema1, "Fast",  bullAlign ? color.green : bearAlign ? color.red    : color.gray, 1)
+plot(ema2, "Mid",   bullAlign ? color.lime  : bearAlign ? color.orange : color.gray, 2)
+plot(ema3, "Slow",  bullAlign ? color.teal  : bearAlign ? color.maroon : color.gray, 3)
+
+bgcolor(ctx.regime == MarketRegime.STRONG_BULL ? color.new(color.green, 90) : ctx.regime == MarketRegime.STRONG_BEAR ? color.new(color.red, 90) : na)
+
+// 狀態儀表板
+var table board = table.new(position.top_right, 2, 5, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Market Regime", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, str.tostring(ctx.regime), bgcolor=color.gray)
+    table.cell(board, 0, 1, "Audit Grade", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(ctx.grade), bgcolor=ctx.grade == SignalGrade.SOVEREIGN ? color.green : color.orange)
+    table.cell(board, 0, 2, "ADX Strength", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(ctx.adxVal, "#.##"), bgcolor=ctx.adxVal >= adxMin ? color.green : color.red)
+    table.cell(board, 0, 3, "Causal Score", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, str.tostring(ctx.score) + "/3", bgcolor=ctx.score == 3 ? color.green : color.red)
+    table.cell(board, 0, 4, "Time (CST)", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 4, str.tostring(year) + "/" + str.tostring(month) + "/" + str.tostring(day), bgcolor=color.gray)
