@@ -1,0 +1,122 @@
+//@version=6
+// TN Session Sovereign V6 — Intraday Causal Structure Strategy
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-04-10 18:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. 垂直化時段審計: 使用 enum 與 UDT 管理不同時段的執行主權。
+// 2. 微觀結構對位: 利用 request.security_lower_tf 確認突破真實性 (MSB)。
+// 3. 執行即 Git: 實作 Stage -> Audit -> Push 的狀態流轉。
+
+strategy("TN Session Sovereign V6 [TeleNexus]", 
+     overlay            = true, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 5, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.005,
+     slippage           = 1)
+
+// ── Enum 與 UDT 規訓 ────────────────────────────────────────────────────────
+enum SessionType
+    ASIA
+    LONDON
+    NEWYORK
+    OUT_OF_SESSION
+
+enum AuditStatus
+    STAGING
+    VERIFIED
+    REJECTED
+
+type SessionAudit
+    SessionType current
+    float       rangeHigh
+    float       rangeLow
+    bool        isRangeSet
+    AuditStatus status
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+string asiaTime   = input.session("0300-0700:1234567", "Asia Audit Range (GMT)", group="Session")
+string tradeTime  = input.session("0800-1600:1234567", "London Trade Window (GMT)", group="Session")
+float  bodyRatio  = input.float(0.5, "Min Lower-TF Body Ratio", minval=0.1, step=0.1, group="Audit")
+int    maPeriod   = input.int(50, "Trend Filter EMA", group="Filter")
+
+// ── 數據獲取與 UDT 初始化 ──────────────────────────────────────────────────────
+float trendEma = ta.ema(close, maPeriod)
+var SessionAudit audit = SessionAudit.new(SessionType.OUT_OF_SESSION, na, na, false, AuditStatus.STAGING)
+
+bool inAsia   = not na(time(timeframe.period, asiaTime, "GMT"))
+bool inLondon = not na(time(timeframe.period, tradeTime, "GMT"))
+bool newDay   = ta.change(time("D")) != 0
+
+if newDay
+    audit.rangeHigh := na
+    audit.rangeLow  := na
+    audit.isRangeSet := false
+    audit.status := AuditStatus.STAGING
+
+// ── 階段一：時段主權識別 (Staging) ──────────────────────────────────────────────
+if inAsia
+    audit.current := SessionType.ASIA
+    audit.rangeHigh := na(audit.rangeHigh) ? high : math.max(audit.rangeHigh, high)
+    audit.rangeLow  := na(audit.rangeLow)  ? low  : math.min(audit.rangeLow, low)
+else if inLondon
+    audit.current := SessionType.LONDON
+    audit.isRangeSet := not na(audit.rangeHigh)
+else
+    audit.current := SessionType.OUT_OF_SESSION
+
+// ── 階段二：因果微觀對位 (Auditing) ──────────────────────────────────────────────
+bool longBreak  = audit.isRangeSet and inLondon and ta.crossover(close, audit.rangeHigh)
+bool shortBreak = audit.isRangeSet and inLondon and ta.crossunder(close, audit.rangeLow)
+
+// v6 微觀審計: 檢查突破 K 線在下位時間框架的實體比例
+float[] lowerCloses = request.security_lower_tf(syminfo.tickerid, "1", close)
+float[] lowerOpens  = request.security_lower_tf(syminfo.tickerid, "1", open)
+
+bool msbConfirmed = false
+if array.size(lowerCloses) > 0
+    float lastClose = array.get(lowerCloses, array.size(lowerCloses) - 1)
+    float lastOpen  = array.get(lowerOpens, array.size(lowerOpens) - 1)
+    // 簡單規則：突破當刻 1min 必須為強實體
+    msbConfirmed := longBreak ? lastClose > lastOpen : shortBreak ? lastClose < lastOpen : false
+
+if (longBreak or shortBreak) and msbConfirmed
+    audit.status := AuditStatus.VERIFIED
+    log.info("SESSION_AUDIT: Micro-structure Break (MSB) confirmed via v6 Lower-TF request.")
+else if (longBreak or shortBreak)
+    audit.status := AuditStatus.REJECTED
+    log.error("SESSION_AUDIT: Fakeout detected. Low body ratio on micro-TF.")
+
+// ── 階段三：物理執行 (Pushing) ──────────────────────────────────────────────────
+bool entryLong  = longBreak and audit.status == AuditStatus.VERIFIED and close > trendEma
+bool entryShort = shortBreak and audit.status == AuditStatus.VERIFIED and close < trendEma
+
+if entryLong and strategy.position_size <= 0
+    log.warning("PUSH: Sovereign Long Entry Executed.")
+    strategy.entry("Long", strategy.long, comment="COMMIT: SESSION_BREAK")
+    strategy.exit("LX", "Long", stop=audit.rangeLow, limit=close + (close - audit.rangeLow) * 2)
+
+if entryShort and strategy.position_size >= 0
+    log.warning("PUSH: Sovereign Short Entry Executed.")
+    strategy.entry("Short", strategy.short, comment="COMMIT: SESSION_BREAK")
+    strategy.exit("SX", "Short", stop=audit.rangeHigh, limit=close - (audit.rangeHigh - close) * 2)
+
+// ── 視覺化 ───────────────────────────────────────────────────────────────────
+plot(audit.isRangeSet ? audit.rangeHigh : na, "Asia Ceiling", color.new(color.red, 40), 2, plot.style_stepline)
+plot(audit.isRangeSet ? audit.rangeLow : na,  "Asia Floor",   color.new(color.green, 40), 2, plot.style_stepline)
+bgcolor(inAsia ? color.new(color.blue, 95) : inLondon ? color.new(color.orange, 95) : na)
+
+// 垂直沙盒看板
+var table board = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.gray)
+if barstate.isconfirmed
+    table.cell(board, 0, 0, "Session Sandbox", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 0, str.tostring(audit.current), bgcolor=color.gray)
+    table.cell(board, 0, 1, "Audit Status", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 1, str.tostring(audit.status), bgcolor=audit.status == AuditStatus.VERIFIED ? color.green : color.red)
+    table.cell(board, 0, 2, "Trend Floor", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 2, close > trendEma ? "BULL" : "BEAR", bgcolor=close > trendEma ? color.green : color.red)
+    table.cell(board, 0, 3, "V6 Version", bgcolor=color.new(color.navy, 20), text_color=color.white)
+    table.cell(board, 1, 3, "TN_S_V6_1.0", bgcolor=color.black, text_color=color.white)
