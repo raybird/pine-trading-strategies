@@ -1,0 +1,57 @@
+//@version=6
+// @description: TeleNexus 足跡流動性獵取策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.7)
+// @strategy: 利用 v6 原生 footprint 感知 Bid/Ask 失衡，結合前期高低點掃蕩偵測，實現具備「因果動機」的流動性反轉捕捉。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing Native Footprint Liquidity logic as a causal sensing standard.","summary":"Established Liquidity Sweep + Order Flow Delta as the primary mechanism for institutional reversal detection."}]]
+
+strategy("TN Footprint Liquidity Sweep v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓嚴謹度
+enum SweepRigor
+    Aggressive = 10  // 短回溯 (快速響應)
+    Standard   = 20  // 標準因果
+    Structural = 50  // 長回溯 (結構確認)
+
+SweepRigor rigor = input.enum(SweepRigor.Standard, "流動性掃蕩規訓等級")
+int lookback     = int(rigor)
+
+// 2. 獲取物理邊界
+hiLevel = ta.highest(high[1], lookback)
+loLevel = ta.lowest(low[1], lookback)
+
+// 3. 獲取 v6 原生足跡物理對象 (Ticks=2, VA=70)
+fp = request.footprint(2, 70)[1]
+
+// 因果演算：提取 Delta 與 POC
+float delta = not na(fp) ? fp.delta() : 0.0
+float poc   = not na(fp) ? fp.poc().price_low() : na
+
+// 4. 流動性掃蕩規訓 (Liquidity Sweep Logic)
+// Bullish Sweep: 跌破低點後收盤回升 + 買方 Delta 介入
+bool isBullSweep = low < loLevel and close > loLevel and delta > 0
+// Bearish Sweep: 突破高點後收盤回落 + 賣方 Delta 介入
+bool isBearSweep = high > hiLevel and close < hiLevel and delta < 0
+
+// 5. 執行與物理對位
+if isBullSweep
+    strategy.entry("Long_Sweep", strategy.long, comment = str.format("Bull Sweep Δ:{0,number,#}", delta))
+
+if isBearSweep
+    strategy.entry("Short_Sweep", strategy.short, comment = str.format("Bear Sweep Δ:{0,number,#}", delta))
+
+// 6. 視覺化：因果區域標註
+if isBullSweep
+    box.new(bar_index, loLevel, bar_index, low, bgcolor = color.new(color.green, 85), border_color = color.green)
+if isBearSweep
+    box.new(bar_index, hiLevel, bar_index, high, bgcolor = color.new(color.red, 85), border_color = color.red)
+
+plot(hiLevel, "Resistance", color.new(color.red, 60), style = plot.style_stepline)
+plot(loLevel, "Support", color.new(color.green, 60), style = plot.style_stepline)
+plot(poc, "POC", color.new(color.orange, 50), 2, plot.style_circles)
+
+// 7. 物理退出 (ATR 規訓)
+atr = ta.atr(14)
+if strategy.position_size > 0
+    strategy.exit("Exit_L", "Long_Sweep", stop = close - atr * 2, limit = close + atr * 4)
+if strategy.position_size < 0
+    strategy.exit("Exit_S", "Short_Sweep", stop = close + atr * 2, limit = close - atr * 4)

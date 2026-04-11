@@ -10,21 +10,24 @@
 
 ## 📂 策略編目 (Featured Strategies)
 
-### 🛡️ 風險與執行主權
-*   **[TN Adaptive Risk Matrix Sovereign v6](./strategies/adaptive_risk_matrix_v6.md)** (v26.0411.1800)
-    *   **核心**：趨勢 x 波動率 2D 矩陣。
-    *   **功能**：自動演算 0.5x~1.5x 風險乘數，動態縮放執行敞口。
-*   **TN Triple Momentum Sovereign V6** (v26.0411.0000)
-    *   **核心**：UDT Method 審計框架。
-    *   **功能**：三重均線對位配合 ADX 因果過濾。
-
-### 📊 足跡與訂單流
+### 📊 足跡與訂單流 (Order Flow)
+*   **[TN Footprint Liquidity Sweep v6](./strategies/footprint_liquidity_sweep_v6.md)** (v26.0412.0000)
+    *   **核心**：原生 Footprint Delta + 高低點掃蕩。
+    *   **功能**：識別獵殺止損後的因果反轉，對位機構資金動機。
 *   **TN Footprint Entropy Sovereign v6**
     *   **核心**：香農熵 (Shannon Entropy) 矩陣。
     *   **功能**：利用原生 `footprint` 識別機構有序吸籌區。
+
+### 🛡️ 風險與執行主權
+*   **[TN Adaptive Risk Matrix Sovereign v6](./strategies/adaptive_risk_matrix_v6.md)** (v26.0411.1800)
+    *   **核心**：趨勢 x 波動率 2D 矩陣。
+    *   **功能**：自動演算風險乘數，動態縮放執行敞口。
+*   **TN Triple Momentum Sovereign V6**
+    *   **核心**：UDT Method 審計框架。
+
+### 🏗️ 市場結構 (SMC)
 *   **TN SMC Sovereign v6**
-    *   **核心**：聰明錢概念 (Smart Money Concepts)。
-    *   **功能**：自動標註 BOS/OB/FVG，實施「回測 OB 地板」執行規訓。
+    *   **核心**：自動 BOS/OB/FVG 偵測。
 
 ## 🛠️ 開發環境
 *   **Runtime**: TeleNexus-Core v2.9.7+
