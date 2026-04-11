@@ -10,20 +10,20 @@
 
 ## 📂 策略編目 (Featured Strategies)
 
+### 🧮 矩陣與多因子系統 (Multi-Factor)
+*   **[TN Causal Matrix Weights Sovereign v6](./strategies/causal_matrix_weights_v6.md)** (v26.0412.0600)
+    *   **核心**：5-Pillar 矩陣乘法權重模型。
+    *   **功能**：多因子合成因果得分，具備動態進場規訓。
+
 ### 📊 足跡與訂單流 (Order Flow)
 *   **[TN Footprint Liquidity Sweep v6](./strategies/footprint_liquidity_sweep_v6.md)** (v26.0412.0000)
     *   **核心**：原生 Footprint Delta + 高低點掃蕩。
-    *   **功能**：識別獵殺止損後的因果反轉，對位機構資金動機。
 *   **TN Footprint Entropy Sovereign v6**
     *   **核心**：香農熵 (Shannon Entropy) 矩陣。
-    *   **功能**：利用原生 `footprint` 識別機構有序吸籌區。
 
 ### 🛡️ 風險與執行主權
 *   **[TN Adaptive Risk Matrix Sovereign v6](./strategies/adaptive_risk_matrix_v6.md)** (v26.0411.1800)
     *   **核心**：趨勢 x 波動率 2D 矩陣。
-    *   **功能**：自動演算風險乘數，動態縮放執行敞口。
-*   **TN Triple Momentum Sovereign V6**
-    *   **核心**：UDT Method 審計框架。
 
 ### 🏗️ 市場結構 (SMC)
 *   **TN SMC Sovereign v6**
@@ -31,7 +31,7 @@
 
 ## 🛠️ 開發環境
 *   **Runtime**: TeleNexus-Core v2.9.7+
-*   **Memory**: Memoria v1.7.0 (Compiled Wiki Support)
+*   **Memory**: Memoria v1.8.0 (Skill Packaging Support)
 *   **Standard**: Pine Script v6 (force Enum/Method/Matrix)
 
 ---

@@ -1,0 +1,66 @@
+//@version=6
+// @description: TeleNexus 因果權重矩陣策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.7)
+// @strategy: 利用 v6 矩陣運算執行 5-Pillar 因果加權得分，實現具備「高維審計」特性的執行主權。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing Causal Matrix Weighting as a high-dimensional execution standard.","summary":"Established multi-factor matrix multiplication as the primary scoring engine for robust causal alignment."}]]
+
+strategy("TN Causal Matrix Weights Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 利用 v6 Enum 定義規訓模式
+enum ExecutionRegime
+    Sovereign = "高維主權 (0.7 閾值)"
+    Standard  = "標準規訓 (0.5 閾值)"
+    Fluid     = "靈活因果 (0.3 閾值)"
+
+ExecutionRegime regime = input.enum(ExecutionRegime.Standard, "執行規訓模式")
+float threshold = switch regime
+    ExecutionRegime.Sovereign => 0.7
+    ExecutionRegime.Standard  => 0.5
+    ExecutionRegime.Fluid     => 0.3
+
+// 2. 權重分配 (總和 = 1.0)
+w_trend = 0.35, w_mom = 0.25, w_vol = 0.15, w_volm = 0.15, w_ctx = 0.10
+
+// 3. 因子演算 (歸一化 -1 到 1)
+f_trend = ta.change(ta.ema(close, 20)) > 0 ? 1.0 : -1.0
+f_mom   = math.max(math.min(ta.roc(close, 14) / 5, 1.0), -1.0)
+f_vol   = math.max(math.min((close - ta.sma(close, 20)) / ta.atr(20), 1.0), -1.0)
+f_volm  = volume > ta.sma(volume, 20) ? (close > open ? 1.0 : -1.0) : 0.0
+f_ctx   = request.security(syminfo.tickerid, "D", ta.rsi(close, 14) > 50 ? 1.0 : -1.0)
+
+// 4. v6 矩陣引擎 (Matrix Engine)
+var factor_m = matrix.new<float>(5, 1, 0.0)
+var weight_m = matrix.new<float>(1, 5, 0.0)
+
+if barstate.isconfirmed
+    matrix.set(factor_m, 0, 0, f_trend)
+    matrix.set(factor_m, 1, 0, f_mom)
+    matrix.set(factor_m, 2, 0, f_vol)
+    matrix.set(factor_m, 3, 0, f_volm)
+    matrix.set(factor_m, 4, 0, f_ctx)
+
+    matrix.set(weight_m, 0, 0, w_trend)
+    matrix.set(weight_m, 0, 1, w_mom)
+    matrix.set(weight_m, 0, 2, w_vol)
+    matrix.set(weight_m, 0, 3, w_volm)
+    matrix.set(weight_m, 0, 4, w_ctx)
+
+result_m = matrix.mult(weight_m, factor_m)
+causal_score = matrix.get(result_m, 0, 0)
+
+// 5. 執行規訓
+if causal_score > threshold
+    strategy.entry("Causal_Long", strategy.long, comment = str.format("Score:{0,number,#.##}", causal_score))
+
+if causal_score < -threshold
+    strategy.entry("Causal_Short", strategy.short, comment = str.format("Score:{0,number,#.##}", causal_score))
+
+// 6. 視覺化 HUD
+var table hud = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Causal Score", text_color = color.white)
+    table.cell(hud, 1, 0, str.tostring(causal_score, "#.##"), bgcolor = causal_score > 0 ? color.teal : color.red)
+    table.cell(hud, 0, 1, "Regime", text_color = color.white)
+    table.cell(hud, 1, 1, str.tostring(regime), text_color = color.yellow)
+
+plot(causal_score, "Causal Intensity", color = causal_score > 0 ? color.teal : color.red, style = plot.style_columns)
