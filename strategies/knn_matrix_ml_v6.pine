@@ -1,0 +1,76 @@
+//@version=6
+// @description: TeleNexus kNN 矩陣機器學習策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.8)
+// @strategy: 利用 v6 矩陣儲存歷史特徵與標籤，執行勞倫茲距離 (Lorentzian Distance) 分類，實現具備「自主學習」能力的執行主權。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing kNN Machine Learning as a dynamic classification standard.","summary":"Established Lorentzian-based kNN matrix classification as the primary engine for non-parametric market regime detection."}]]
+
+strategy("TN kNN Matrix ML Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 機器學習規訓參數
+int   k          = input.int(10, "鄰居數量 (k)", minval=1, maxval=50)
+int   lookback   = input.int(500, "訓練窗口 (Lookback)", minval=100)
+float threshold  = input.float(0.1, "預測得分門檻", step=0.05)
+
+// 2. 特徵工程 (v6 Method 正規化)
+method normalize(float src, int len) =>
+    float minVal = ta.lowest(src, len)
+    float maxVal = ta.highest(src, len)
+    (src - minVal) / (math.max(maxVal - minVal, 1e-6))
+
+nf1 = ta.rsi(close, 14).normalize(lookback)
+nf2 = ta.roc(close, 14).normalize(lookback)
+nf3 = ta.cci(close, 20).normalize(lookback)
+nf4 = ta.roc(volume, 20).normalize(lookback)
+
+// 3. 物理矩陣儲存
+var matrix<float> ml_data = matrix.new<float>(lookback, 5, 0.0)
+var int write_ptr = 0
+var bool isReady = false
+
+float currentLabel = close > close[1] ? 1.0 : -1.0
+
+if not na(nf4[1])
+    ml_data.set(write_ptr, 0, nf1[1])
+    ml_data.set(write_ptr, 1, nf2[1])
+    ml_data.set(write_ptr, 2, nf3[1])
+    ml_data.set(write_ptr, 3, nf4[1])
+    ml_data.set(write_ptr, 4, currentLabel)
+    write_ptr := (write_ptr + 1) % lookback
+    if write_ptr == 0 => isReady := true
+
+// 4. kNN 核心演算 (Lorentzian Metric)
+calc_knn() =>
+    matrix<float> dist_mtx = matrix.new<float>(lookback, 2)
+    for i = 0 to lookback - 1
+        float d = 0.0
+        d += math.log(1 + math.abs(nf1 - ml_data.get(i, 0)))
+        d += math.log(1 + math.abs(nf2 - ml_data.get(i, 1)))
+        d += math.log(1 + math.abs(nf3 - ml_data.get(i, 2)))
+        d += math.log(1 + math.abs(nf4 - ml_data.get(i, 3)))
+        dist_mtx.set(i, 0, d)
+        dist_mtx.set(i, 1, ml_data.get(i, 4))
+    
+    dist_mtx.sort(0, order.ascending)
+    float sumLabels = 0.0
+    for i = 0 to k - 1
+        sumLabels += dist_mtx.get(i, 1)
+    sumLabels / k
+
+prediction = isReady ? calc_knn() : 0.0
+
+// 5. 執行規訓
+if prediction >= threshold
+    strategy.entry("ML_Long", strategy.long, comment = str.format("Score:{0,number,#.##}", prediction))
+
+if prediction <= -threshold
+    strategy.entry("ML_Short", strategy.short, comment = str.format("Score:{0,number,#.##}", prediction))
+
+// 6. 視覺化 HUD
+var table hud = table.new(position.top_right, 2, 2, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "ML Status", text_color = color.white)
+    table.cell(hud, 1, 0, isReady ? "READY" : "TRAINING", bgcolor = isReady ? color.teal : color.orange)
+    table.cell(hud, 0, 1, "ML Score", text_color = color.white)
+    table.cell(hud, 1, 1, str.tostring(prediction, "#.##"), text_color = prediction > 0 ? color.lime : color.red)
+
+bgcolor(prediction >= threshold ? color.new(color.green, 90) : prediction <= -threshold ? color.new(color.red, 90) : na)
