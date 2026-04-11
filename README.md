@@ -32,16 +32,17 @@
 
 ### 🥇 主權審計系列 (Sovereign Series) - *推薦重點*
 這類策略具備最完整的因果審計鏈條與執行生命週期管理。
-*   **[TN Sovereign Audit V6](./strategies/tn_sovereign_audit_v6.pine)**：旗艦型策略。實裝 UDT 稽核架構，將成交量比、趨勢對位、波動噪聲封裝進對象化審計流程。
-*   **[TN Multi-Factor Sovereign V6](./strategies/tn_multi_factor_sovereign_v6.pine)**：應用 v6 `map` 與 `array<UDT>`，實作趨勢、動能、波動多因子並行加權稽核。
-*   **[TN Session Sovereign V6](./strategies/tn_session_sovereign_v6.pine)**：專注於時段（如倫敦開盤）突破，並利用下位時間框架請求校驗微觀結構（MSB）。
-*   **[TN Universal Sovereign V6](./strategies/tn_universal_sovereign_v6.pine)**：實作 `Stage -> Audit -> Push` 的 Git 化執行流，提供極高透明度的交易日誌。
+*   **[TN Sovereign Audit V6](./strategies/tn_sovereign_audit_v6.pine) ([說明文檔](./strategies/tn_sovereign_audit_v6.md))**：旗艦型策略。實裝 UDT 稽核架構，將成交量比、趨勢對位、波動噪聲封裝進對象化審計流程。
+*   **[TN Multi-Factor Sovereign V6](./strategies/tn_multi_factor_sovereign_v6.pine) ([說明文檔](./strategies/tn_multi_factor_sovereign_v6.md))**：應用 v6 `map` 與 `array<UDT>`，實作趨勢、動能、波動多因子並行加權稽核。
+*   **[TN Session Sovereign V6](./strategies/tn_session_sovereign_v6.pine) ([說明文檔](./strategies/tn_session_sovereign_v6.md))**：專注於時段（如倫敦開盤）突破，並利用下位時間框架請求校驗微觀結構（MSB）。
+*   **[TN Universal Sovereign V6](./strategies/tn_universal_sovereign_v6.pine) ([說明文檔](./strategies/tn_universal_sovereign_v6.md))**：實作 `Stage -> Audit -> Push` 的 Git 化執行流，提供極高透明度的交易日誌。
 
 ### 🧠 機構與訂單流系列 (Institutional & Order Flow)
 針對大戶足跡與市場失衡進行深度追蹤。
 *   **[SMC Sovereign V6](./strategies/smc_sovereign_v6.pine)**：聰明錢概念 (SMC) 實體化，自動標註結構突破 (BOS) 與訂單區塊 (OB)。
 *   **[Footprint Entropy Sovereign V6](./strategies/footprint_entropy_sovereign_v6.pine)**：利用香農熵量化成交分布，識別低熵區的機構吸籌行為。
-*   **[Liquidity Sweep Audit V6](./strategies/tn_liquidity_sovereign_v6.pine)**：精確捕捉流動性清掃 (Sweep) 並進行微秒級回抽校驗。
+*   **[Liquidity Sweep Audit V6](./strategies/tn_liquidity_sovereign_v6.pine) ([說明文檔](./strategies/tn_fakeout_sovereign_v6.md))**：精確捕捉流動性清掃 (Sweep) 並進行微秒級回抽校驗。
+
 
 ### 📊 數學模型與矩陣運算 (Mathematical & Matrix)
 *   **Matrix KNN ML V6**：在 Pine Script 內實作 K-最近鄰算法進行形態分類。
