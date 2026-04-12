@@ -1,0 +1,68 @@
+//@version=6
+// @description: TeleNexus 成交量分佈自適應矩陣策略 - v6 核心實作
+// @author: TeleNexus AI (Core v2.9.8)
+// @strategy: 利用 v6 矩陣維護歷史價值區 (VAH/VAL/POC)，結合原生 footprint 數據實現具備「因果一致性」的價值區突破交易。
+// [[MEMORY_INTENT:{"level":"rule","confidence":"high","reason":"Implementing Adaptive Volume Profile Matrix as a structural consensus standard.","summary":"Established matrix-based multi-day value area analysis as the primary filter for institutional breakout validation."}]]
+
+strategy("TN Volume Profile Matrix Sovereign v6", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// 1. 規訓參數
+int   baseLookback = input.int(20, "基礎回溯深度 (天)")
+float vaPercent    = input.float(70.0, "價值區比例 (%)")
+float atrMult      = input.float(2.0, "ATR 止損倍數")
+
+// 2. 自適應深度演算 (Volatility-Aware Depth)
+atr = ta.atr(14)
+avgAtr = ta.sma(atr, 100)
+int adaptiveDepth = math.max(5, math.round(baseLookback * (avgAtr / atr)))
+
+// 3. 獲取 v6 原生 Footprint 對象
+fp = request.footprint(syminfo.tickerid, "D")[1]
+float currentPOC = not na(fp) ? fp.poc().price_low() : na
+float currentVAH = not na(fp) ? fp.vah() : na
+float currentVAL = not na(fp) ? fp.val() : na
+float currentDelta = not na(fp) ? fp.delta() : 0.0
+
+// 4. 物理矩陣儲存 (VA History)
+var matrix<float> vaMatrix = matrix.new<float>(50, 3, na) // [VAH, VAL, POC]
+
+if ta.change(time("D"))
+    matrix.shift_rows(vaMatrix, 0, 1)
+    matrix.set(vaMatrix, 0, 0, currentVAH)
+    matrix.set(vaMatrix, 0, 1, currentVAL)
+    matrix.set(vaMatrix, 0, 2, currentPOC)
+
+// 計算矩陣內的共識中心 (Matrix Mean POC)
+float consensusZone = matrix.sum(vaMatrix.get_col(2)) / adaptiveDepth
+
+// 5. 執行規訓
+// 多頭：突破 VAH + 高於共識中心 + 買方 Delta 強勁
+bool longCond = ta.crossover(close, currentVAH) and close > consensusZone and currentDelta > 0
+// 空頭：跌破 VAL + 低於共識中心 + 賣方 Delta 強勁
+bool shortCond = ta.crossunder(close, currentVAL) and close < consensusZone and currentDelta < 0
+
+if longCond
+    strategy.entry("Long_VA", strategy.long, comment = str.format("VAH Break Δ:{0,number,#}", currentDelta))
+
+if shortCond
+    strategy.entry("Short_VA", strategy.short, comment = str.format("VAL Break Δ:{0,number,#}", currentDelta))
+
+// 6. 物理退出 (ATR 追蹤)
+if strategy.position_size > 0
+    strategy.exit("Exit_L", "Long_VA", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
+if strategy.position_size < 0
+    strategy.exit("Exit_S", "Short_VA", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
+
+// 7. 視覺化 HUD
+plot(currentPOC, "Daily POC", color.new(color.red, 30), 2, plot.style_linebr)
+plot(consensusZone, "Consensus Zone", color.new(color.gray, 50), 1, plot.style_circles)
+fill(plot(currentVAH, display=display.none), plot(currentVAL, display=display.none), color.new(color.blue, 90), "Value Area")
+
+var table hud = table.new(position.top_right, 2, 3, bgcolor = color.new(color.black, 30), border_width = 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Depth", text_color = color.white)
+    table.cell(hud, 1, 0, str.tostring(adaptiveDepth), text_color = color.yellow)
+    table.cell(hud, 0, 1, "Delta", text_color = color.white)
+    table.cell(hud, 1, 1, str.tostring(currentDelta, "#"), bgcolor = currentDelta > 0 ? color.teal : color.red)
+    table.cell(hud, 0, 2, "Matrix POC", text_color = color.white)
+    table.cell(hud, 1, 2, str.tostring(consensusZone, "#.##"), text_color = color.gray)
