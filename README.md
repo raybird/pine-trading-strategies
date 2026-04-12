@@ -19,6 +19,11 @@
 *   **[TN kNN Matrix ML Sovereign v6](./strategies/knn_matrix_ml_v6.md)** (v26.0412.1200)
     *   **核心**：k-Nearest Neighbors (kNN) 矩陣分類引擎。
 
+### 📈 趨勢與多時框對位 (Trend & MTF)
+*   **[TN Asymmetric Swing Sovereign v6](./strategies/tn_asymmetric_swing_v6.md)** (v26.0413.1150)
+    *   **核心**：三層信號蒸餾引擎 (Weak Signals -> Causal Filters -> MTF Alignment)。
+    *   **功能**：非對稱多層級過濾，跨週、日、4 小時時框執行因果對位。
+
 ### 🧮 矩陣與多因子系統 (Multi-Factor)
 *   **[TN Causal Matrix Weights Sovereign v6](./strategies/causal_matrix_weights_v6.md)** (v26.0412.0600)
     *   **核心**：5-Pillar 矩陣乘法權重模型。

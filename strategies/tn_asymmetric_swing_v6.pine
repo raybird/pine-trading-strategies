@@ -1,0 +1,91 @@
+//@version=6
+strategy("TN Asymmetric Swing Sovereign v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// MODULE 1. WEAK SIGNALS ENGINE (ASYNCHRONOUS LAYER)
+// ------------------------------------------------------------
+groupBase = "Base Signals"
+useEMASignal = input.bool(true, "EMA Crossover + Pullback", group=groupBase)
+useBreakoutSignal = input.bool(true, "Price Action Breakout", group=groupBase)
+useRSISignal = input.bool(true, "RSI Momentum", group=groupBase)
+useMACDSignal = input.bool(true, "MACD Histogram Flip", group=groupBase)
+
+// Parameters
+emaFastLen = 9, emaSlowLen = 21
+breakoutLen = 20
+rsiLen = 14, rsiBullLevel = 40, rsiBearLevel = 60
+macdFastLen = 12, macdSlowLen = 26, macdSignalLen = 9
+
+getWeakSignals() =>
+    // EMA
+    emaFast = ta.ema(close, emaFastLen)
+    emaSlow = ta.ema(close, emaSlowLen)
+    emaLong = useEMASignal and ta.crossover(emaFast, emaSlow)
+    emaShort = useEMASignal and ta.crossunder(emaFast, emaSlow)
+    
+    // Breakout
+    highBound = ta.highest(high[1], breakoutLen)
+    lowBound = ta.lowest(low[1], breakoutLen)
+    breakLong = useBreakoutSignal and close > highBound
+    breakShort = useBreakoutSignal and close < lowBound
+    
+    // RSI
+    rsiVal = ta.rsi(close, rsiLen)
+    rsiLong = useRSISignal and rsiVal > rsiBullLevel and rsiVal > rsiVal[1]
+    rsiShort = useRSISignal and rsiVal < rsiBearLevel and rsiVal < rsiVal[1]
+    
+    // MACD
+    [_, _, macdHist] = ta.macd(close, macdFastLen, macdSlowLen, macdSignalLen)
+    macdLong = useMACDSignal and macdHist > 0 and macdHist > macdHist[1]
+    macdShort = useMACDSignal and macdHist < 0 and macdHist < macdHist[1]
+    
+    longSignal = emaLong or breakLong or rsiLong or macdLong
+    shortSignal = emaShort or breakShort or rsiShort or macdShort
+    [longSignal, shortSignal]
+
+// ------------------------------------------------------------
+// MODULE 2. CAUSAL FILTERS (REGIME & LIQUIDITY)
+// ------------------------------------------------------------
+groupFilter = "Causal Filters"
+useRegimeFilter = input.bool(true, "Enable Regime Filter", group=groupFilter)
+regimeLen = input.int(200, "Regime MA Length", group=groupFilter)
+
+applyFilters(long, short) =>
+    regimeMa = ta.sma(close, regimeLen)
+    regimeLong = not useRegimeFilter or close > regimeMa
+    regimeShort = not useRegimeFilter or close < regimeMa
+    
+    filteredLong = long and regimeLong
+    filteredShort = short and regimeShort
+    [filteredLong, filteredShort]
+
+// ------------------------------------------------------------
+// MODULE 3. MULTI-TIMEFRAME (MTF) ALIGNMENT
+// ------------------------------------------------------------
+[wBull, wBear, wNeutral] = request.security(syminfo.tickerid, "W", [ta.ema(close, 20) > ta.ema(close, 50), ta.ema(close, 20) < ta.ema(close, 50), false], gaps=barmerge.gaps_off)
+[h4Bull, h4Bear] = request.security(syminfo.tickerid, "240", [ta.rsi(close, 14) > 50, ta.rsi(close, 14) < 50], gaps=barmerge.gaps_off)
+
+[rawLong, rawShort] = getWeakSignals()
+[fLong, fShort] = applyFilters(rawLong, rawShort)
+
+finalLong = fLong and wBull and h4Bull
+finalShort = fShort and wBear and h4Bear
+
+// ------------------------------------------------------------
+// MODULE 4. RISK MANAGEMENT
+// ------------------------------------------------------------
+riskPct = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1)
+atrLen = 14
+atr = ta.atr(atrLen)
+
+if finalLong and strategy.position_size == 0
+    qty = (strategy.equity * riskPct / 100) / (atr * 2)
+    strategy.entry("Long", strategy.long, qty=qty)
+    strategy.exit("Exit Long", "Long", stop=close - atr * 2, limit=close + atr * 4)
+
+if finalShort and strategy.position_size == 0
+    qty = (strategy.equity * riskPct / 100) / (atr * 2)
+    strategy.entry("Short", strategy.short, qty=qty)
+    strategy.exit("Exit Short", "Short", stop=close + atr * 2, limit=close - atr * 4)
+
+plot(ta.sma(close, 200), color=color.gray, title="Regime Filter")
