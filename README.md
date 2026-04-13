@@ -20,6 +20,9 @@
     *   **核心**：k-Nearest Neighbors (kNN) 矩陣分類引擎。
 
 ### 📈 趨勢與多時框對位 (Trend & MTF)
+*   **[TN Stochastic Causal Divergence v6](./strategies/tn_stoch_causal_divergence_v6.md)** (v26.0414.0600)
+    *   **核心**：隨機指標結構性背離引擎。
+    *   **功能**：識別價格與動能的因果不一致，整合 HTF 趨勢錨點過濾噪聲。
 *   **[TN Asymmetric Swing Sovereign v6](./strategies/tn_asymmetric_swing_v6.md)** (v26.0413.1150)
     *   **核心**：三層信號蒸餾引擎 (Weak Signals -> Causal Filters -> MTF Alignment)。
     *   **功能**：非對稱多層級過濾，跨週、日、4 小時時框執行因果對位。
