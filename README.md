@@ -16,6 +16,9 @@
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
 ### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign Fibonacci Retracement v6](./strategies/tn_sovereign_fibonacci_v6.md)** (v26.0415.0009)
+    *   **核心**：PD Extreme Range + Fibonacci Retracement。
+    *   **功能**：識別前一交易日結構性回撤水平，整合 HTF 趨勢錨點。
 *   **[TN Sovereign Fakeout Filter v6](./strategies/tn_sovereign_fakeout_v6.md)** (v26.0415.0000)
     *   **核心**：4-Layer Causal Audit (Volume/HTF/ATR)。
     *   **功能**：多維度環境感知過濾假突破，整合動態因果審計狀態表。

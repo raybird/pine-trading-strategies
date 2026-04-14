@@ -1,0 +1,72 @@
+//@version=6
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: FIBONACCI CAUSAL ALIGNMENT
+// This strategy captures high-probability retracements based on 
+// previous day's extreme ranges, filtered by HTF trend anchors.
+// Version: v26.0415.0009 [CST]
+// ------------------------------------------------------------
+
+strategy("TN Sovereign Fibonacci Retracement v6",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 1)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupFib    = "Fibonacci Settings"
+fibLevel    = input.float(0.618, "Target Retracement Level", options=[0.236, 0.382, 0.5, 0.618, 0.786], group=groupFib)
+lookbackD   = input.int(1,       "Lookback Days", minval=1, group=groupFib)
+
+groupCausal = "Causal Filter (Sovereignty)"
+useHTF      = input.bool(true,  "Enable HTF Filter", group=groupCausal)
+htfTF       = input.timeframe("240", "HTF Timeframe", group=groupCausal)
+htfLen      = input.int(200,    "HTF EMA Length", group=groupCausal)
+
+groupRisk   = "Risk Management"
+riskPct     = input.float(1.0,  "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+slMult      = input.float(1.5,  "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(3.0,  "Take Profit (ATR Mult)", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+// 获取前一交易日的极值 (Non-repainting)
+[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+float range = pdHigh - pdLow
+float targetFib = pdHigh - (range * fibLevel)
+
+// HTF Causal Anchor
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+bool isBullishRegime = close > htfEma
+
+// ATR for dynamic risk
+float atrVal = ta.atr(14)
+
+// ── Sovereign Execution Logic ────────────────────────────────────────────────
+// Entry when price touches Fib level within Bullish regime
+bool longCondition = isBullishRegime and ta.crossunder(low, targetFib)
+
+// Dynamic Position Sizing
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atrVal * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longCondition and strategy.position_size == 0
+    strategy.entry("Fib Long", strategy.long, qty=qty, comment="Fib: " + str.tostring(fibLevel))
+    strategy.exit("LX", "Fib Long", stop=targetFib - stopDist, limit=targetFib + atrVal * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(pdHigh, "Prev Day High", color.new(color.gray, 50), 1, plot.style_stepline)
+plot(pdLow,  "Prev Day Low",  color.new(color.gray, 50), 1, plot.style_stepline)
+plot(targetFib, "Fib Level " + str.tostring(fibLevel), color.new(color.orange, 0), 2, plot.style_linebr)
+plot(htfEma, "HTF Causal Anchor", color.new(color.blue, 30), 2, plot.style_stepline)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "▣ FIB SOVEREIGN", text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 1, "Regime", text_color=color.white)
+    table.cell(tb, 1, 1, isBullishRegime ? "BULLISH" : "BEARISH", text_color=isBullishRegime ? color.green : color.red)
+    table.cell(tb, 0, 2, "Target Fib", text_color=color.white)
+    table.cell(tb, 1, 2, str.tostring(targetFib, "#.##"), text_color=color.orange)
