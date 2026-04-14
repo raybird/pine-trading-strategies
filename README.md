@@ -31,6 +31,9 @@
     *   **核心**：k-Nearest Neighbors (kNN) 矩陣分類引擎。
 
 ### 📈 趨勢與多時框對位 (Trend & MTF)
+*   **[TN Sovereign MTF Dual-Layer v6](./strategies/tn_sovereign_mtf_dual_layer_v6.md)** (v26.0415.0021)
+    *   **核心**：5m Trend Validation + 1m Signal Execution。
+    *   **功能**：雙層嵌套因果審計，整合 Supertrend 與成交量對位機制。
 *   **[TN Sovereign MTF Trend v6](./strategies/tn_sovereign_mtf_trend_v6.md)** (v26.0414.1800)
     *   **核心**：MTF Causal Anchor + ATR Trailing Stop。
     *   **功能**：高時框趨勢對焦，整合動態風險控制與利潤鎖定。

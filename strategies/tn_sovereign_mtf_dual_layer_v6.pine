@@ -1,0 +1,89 @@
+//@version=6
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: DUAL-LAYER MTF CONFLUENCE
+// This strategy implements a nested causal audit:
+// Layer 1 (Macro): 5m Trend validation (EMA + Supertrend)
+// Layer 2 (Micro): 1m Entry execution (EMA Cross + Vol + Noise)
+// Version: v26.0415.0021 [CST]
+// ------------------------------------------------------------
+
+strategy("TN Sovereign MTF Dual-Layer v6",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 1)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupMacro  = "Layer 1: Macro Trend (5m)"
+trendTF     = input.string("5", "Macro Timeframe", options=["3","5","15","30","60"], group=groupMacro)
+macroFast   = input.int(9, "Macro Fast EMA", group=groupMacro)
+macroSlow   = input.int(21, "Macro Slow EMA", group=groupMacro)
+stFact      = input.float(3.0, "Supertrend Factor", step=0.1, group=groupMacro)
+stLen       = input.int(10, "Supertrend ATR Period", group=groupMacro)
+
+groupMicro  = "Layer 2: Micro Entry (1m)"
+entFast     = input.int(9, "Entry Fast EMA", group=groupMicro)
+entSlow     = input.int(21, "Entry Slow EMA", group=groupMicro)
+atrLen      = input.int(14, "ATR Period", group=groupMicro)
+volMult     = input.float(1.3, "Volume Confirmation Mult", group=groupMicro)
+
+groupRisk   = "Sovereign Risk Management"
+riskPct     = input.float(1.0, "Risk % Per Trade", group=groupRisk)
+slMult      = input.float(2.0, "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(4.0, "Take Profit (ATR Mult)", group=groupRisk)
+
+// ── Macro Trend Context (Non-repainting) ────────────────────────────────────
+[tfFast, tfSlow, tfStDir] = request.security(
+    syminfo.tickerid, trendTF,
+    [ta.ema(close, macroFast)[1],
+     ta.ema(close, macroSlow)[1],
+     ta.supertrend(stFact, stLen)[1][1]],
+    lookahead = barmerge.lookahead_on)
+
+bool isMacroBull = tfFast > tfSlow and tfStDir == 1
+bool isMacroBear = tfFast < tfSlow and tfStDir == -1
+
+// ── Micro Signal & Filters ──────────────────────────────────────────────────
+float fastEma = ta.ema(close, entFast)
+float slowEma = ta.ema(close, entSlow)
+float volAvg  = ta.sma(volume, 20)
+float atrVal  = ta.atr(atrLen)
+
+bool volConfirm = volume > volAvg * volMult
+bool noiseFilter = math.abs(close - close[1]) > atrVal * 0.3
+
+// ── Sovereign Execution Logic ────────────────────────────────────────────────
+bool longEntry  = ta.crossover(fastEma, slowEma) and isMacroBull and volConfirm and noiseFilter
+bool shortEntry = ta.crossunder(fastEma, slowEma) and isMacroBear and volConfirm and noiseFilter
+
+// Position Sizing
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atrVal * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty, comment="MTF ALIGNED ↑")
+    strategy.exit("LX", "Long", stop=close - stopDist, limit=close + atrVal * tpMult)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty, comment="MTF ALIGNED ↓")
+    strategy.exit("SX", "Short", stop=close + stopDist, limit=close - atrVal * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(fastEma, "Entry Fast", color.new(color.lime, 0))
+plot(slowEma, "Entry Slow", color.new(color.red, 0))
+plot(tfFast, "Macro Fast", color.new(color.aqua, 50), 2, plot.style_stepline)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "▣ SOVEREIGN MTF", text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 1, "Macro (" + trendTF + "m)", text_color=color.white)
+    table.cell(tb, 1, 1, isMacroBull ? "BULL" : isMacroBear ? "BEAR" : "NEUTRAL", text_color=isMacroBull ? color.green : color.red)
+    table.cell(tb, 0, 2, "Signal", text_color=color.white)
+    table.cell(tb, 1, 2, longEntry ? "LONG" : shortEntry ? "SHORT" : "WAIT", text_color=longEntry ? color.green : shortEntry ? color.red : color.gray)
+    table.cell(tb, 0, 3, "Volatility", text_color=color.white)
+    table.cell(tb, 1, 3, noiseFilter ? "STABLE" : "NOISY", text_color=noiseFilter ? color.green : color.orange)
