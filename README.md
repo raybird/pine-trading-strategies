@@ -15,6 +15,11 @@
     *   **核心**：自適應深度價值區矩陣。
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
+### 📐 波動率與通道突破 (Volatility & Channels)
+*   **[TN Sovereign Donchian Breakout v6](./strategies/tn_sovereign_donchian_v6.md)** (v26.0414.1200)
+    *   **核心**：Donchian Channels + HTF EMA 趨勢錨點。
+    *   **功能**：捕捉結構性價格突破，整合成交量與高時框因果審計。
+
 ### 🤖 機器學習與分類 (Machine Learning)
 *   **[TN kNN Matrix ML Sovereign v6](./strategies/knn_matrix_ml_v6.md)** (v26.0412.1200)
     *   **核心**：k-Nearest Neighbors (kNN) 矩陣分類引擎。
