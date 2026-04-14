@@ -1,0 +1,114 @@
+//@version=6
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: CAUSAL FILTERING & SOVEREIGN EXECUTION
+// This strategy implements a 4-layer signal quality audit:
+// F1: Volume Confirmation (Institutional Footprint)
+// F2: Bar Confirmation (Price Action Hardening)
+// F3: HTF Trend Alignment (Macro Causal Anchor)
+// F4: ATR Volatility Filter (Noise Suppression)
+// Version: v26.0415.0000 [CST]
+// ------------------------------------------------------------
+
+strategy("TN Sovereign Fakeout Filter v6",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 1)
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupStrategy = "Strategy Core"
+fastLen       = input.int(9,     "Fast EMA",   minval=1, group=groupStrategy)
+slowLen       = input.int(21,    "Slow EMA",   minval=1, group=groupStrategy)
+atrLen        = input.int(14,    "ATR Length", minval=1, group=groupStrategy)
+slMult        = input.float(2.0, "SL (ATR Mult)", step=0.1, group=groupStrategy)
+tpMult        = input.float(3.0, "TP (ATR Mult)", step=0.1, group=groupStrategy)
+
+groupF1       = "F1: Volume (Institutional)"
+useVol        = input.bool(true,  "Enable Volume Filter", group=groupF1)
+volMA         = input.int(20,    "Volume MA Length", minval=5, group=groupF1)
+volMult       = input.float(1.5,  "Volume Multiplier", step=0.1, group=groupF1)
+
+groupF2       = "F2: Bar Confirmation"
+useBar        = input.bool(true,  "Enable Bar Confirmation", group=groupF2)
+barConf       = input.int(1,     "Confirmation Bars", minval=1, maxval=5, group=groupF2)
+
+groupF3       = "F3: HTF Causal Anchor"
+useHTF        = input.bool(true,  "Enable HTF Trend Filter", group=groupF3)
+htfTF         = input.timeframe("60", "HTF Timeframe", group=groupF3)
+htfLen        = input.int(50,    "HTF EMA Length", minval=10, group=groupF3)
+
+groupF4       = "F4: ATR Noise Filter"
+useATR        = input.bool(true,  "Enable ATR Noise Filter", group=groupF4)
+atrNoise      = input.float(0.3,  "Min Move (ATR Mult)", step=0.05, group=groupF4)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(atrLen)
+float volAvg  = ta.sma(volume, volMA)
+
+// Non-repainting HTF Anchor
+float htfEma  = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+
+// ── Causal Audit Layers ──────────────────────────────────────────────────────
+bool f1_vol   = not useVol or volume > volAvg * volMult
+bool f2_htfL  = not useHTF or close > htfEma
+bool f2_htfS  = not useHTF or close < htfEma
+bool f4_noise = not useATR or math.abs(close - close[1]) > atrVal * atrNoise
+
+// Raw Crossover Signals
+bool rawLong  = ta.crossover(fastEma, slowEma)
+bool rawShort = ta.crossunder(fastEma, slowEma)
+
+// ── Bar Action Confirmation ──────────────────────────────────────────────────
+var int barCountL = -1
+var int barCountS = -1
+
+if rawLong
+    barCountL := 0
+if rawShort
+    barCountS := 0
+if barCountL >= 0 and barCountL < barConf
+    barCountL += 1
+if barCountS >= 0 and barCountS < barConf
+    barCountS += 1
+
+bool barConfL = not useBar or (barCountL == barConf and close > slowEma)
+bool barConfS = not useBar or (barCountS == barConf and close < slowEma)
+
+// ── Final Sovereignty Check ──────────────────────────────────────────────────
+bool longEntry  = (useBar ? barConfL : rawLong) and f1_vol and f2_htfL and f4_noise
+bool shortEntry = (useBar ? barConfS : rawShort) and f1_vol and f2_htfS and f4_noise
+
+// ── Execution ────────────────────────────────────────────────────────────────
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="Audit: OK")
+    strategy.exit("LX", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="Audit: OK")
+    strategy.exit("SX", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(fastEma, "Fast EMA", color.new(color.lime, 0), 1)
+plot(slowEma, "Slow EMA", color.new(color.red, 0), 2)
+plot(htfEma,  "HTF Causal Anchor", color.new(color.gray, 50), 1, plot.style_stepline)
+
+plotshape(longEntry,  "LONG",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(shortEntry, "SHORT", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
+
+// On-chart Status Table
+var table st = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(st, 0, 0, "◈ SOVEREIGN AUDIT", text_color=color.white, text_size=size.small)
+    table.cell(st, 0, 1, "Volume (F1)", text_color=color.white)
+    table.cell(st, 1, 1, f1_vol ? "PASS" : "FAIL", text_color=f1_vol ? color.green : color.red)
+    table.cell(st, 0, 2, "Causal (F2)", text_color=color.white)
+    table.cell(st, 1, 2, (close > htfEma) ? "BULL" : "BEAR", text_color=(close > htfEma) ? color.green : color.red)
+    table.cell(st, 0, 3, "Noise (F4)", text_color=color.white)
+    table.cell(st, 1, 3, f4_noise ? "CLEAN" : "NOISY", text_color=f4_noise ? color.green : color.red)
+    table.cell(st, 0, 4, "STATUS", text_color=color.white)
+    table.cell(st, 1, 4, strategy.position_size != 0 ? "IN TRADE" : "MONITORING", text_color=color.yellow)

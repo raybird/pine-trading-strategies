@@ -16,6 +16,9 @@
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
 ### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign Fakeout Filter v6](./strategies/tn_sovereign_fakeout_v6.md)** (v26.0415.0000)
+    *   **核心**：4-Layer Causal Audit (Volume/HTF/ATR)。
+    *   **功能**：多維度環境感知過濾假突破，整合動態因果審計狀態表。
 *   **[TN Sovereign Market Structure v6](./strategies/tn_sovereign_market_structure_v6.md)** (v26.0414.1200)
     *   **核心**：BOS/CHOC 市場結構引擎 + Ichimoku Cloud。
     *   **功能**：識別趨勢轉折與結構延續，整合一目均衡表因果過濾。
