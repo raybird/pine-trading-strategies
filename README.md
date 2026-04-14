@@ -15,7 +15,10 @@
     *   **核心**：自適應深度價值區矩陣。
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
-### 📐 波動率與通道突破 (Volatility & Channels)
+### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign Market Structure v6](./strategies/tn_sovereign_market_structure_v6.md)** (v26.0414.1200)
+    *   **核心**：BOS/CHOC 市場結構引擎 + Ichimoku Cloud。
+    *   **功能**：識別趨勢轉折與結構延續，整合一目均衡表因果過濾。
 *   **[TN Sovereign Donchian Breakout v6](./strategies/tn_sovereign_donchian_v6.md)** (v26.0414.1200)
     *   **核心**：Donchian Channels + HTF EMA 趨勢錨點。
     *   **功能**：捕捉結構性價格突破，整合成交量與高時框因果審計。

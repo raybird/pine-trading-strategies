@@ -1,0 +1,95 @@
+//@version=6
+strategy("TN Sovereign Market Structure v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: MARKET STRUCTURE & CAUSAL CONVICTION
+// Implements BOS (Break of Structure) and CHOC (Change of Character)
+// detection, filtered by Ichimoku Cloud and EMA anchors.
+// Version: v26.0414.1200 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupMS     = "Market Structure Settings"
+leftBars    = input.int(5, "Pivot Left Bars", group=groupMS)
+rightBars   = input.int(3, "Pivot Right Bars", group=groupMS)
+useBOS      = input.bool(true, "Enable BOS Filter", group=groupMS)
+
+groupAnchors = "Trend Anchors (Causal)"
+useEMA      = input.bool(true, "Enable EMA Filter (50)", group=groupAnchors)
+emaLen      = input.int(50, "EMA Length", group=groupAnchors)
+useIchimoku = input.bool(true, "Enable Ichimoku Cloud", group=groupAnchors)
+
+groupRisk   = "Sovereign Risk Management"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+atrLen      = input.int(14, "ATR Length", group=groupRisk)
+slMult      = input.float(1.5, "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(3.0, "Take Profit (ATR Mult)", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+// 1. Trend Anchors
+emaVal = ta.ema(close, emaLen)
+[tenkan, kijun, senkouA, senkouB, _] = ta.ichimoku(9, 26, 52, 26, 26)
+
+// 2. Pivot Detection
+pHi = ta.pivothigh(high, leftBars, rightBars)
+pLo = ta.pivotlow(low, leftBars, rightBars)
+
+// 3. Market Structure Logic (Simplified BOS/CHOC)
+var float lastHi = na
+var float lastLo = na
+var bool  isBullish = false
+
+if not na(pHi)
+    lastHi := pHi
+if not na(pLo)
+    lastLo := pLo
+
+// BOS Detection: Close breaks last pivot in trend direction
+bullBOS = close > lastHi
+bearBOS = close < lastLo
+
+if bullBOS
+    isBullish := true
+else if bearBOS
+    isBullish := false
+
+// ── Causal Alignment ──────────────────────────────────────────────────────────
+// Trend must align with EMA and Ichimoku (Price above Cloud)
+bullCausal = (not useEMA or close > emaVal) and (not useIchimoku or close > math.max(senkouA, senkouB))
+bearCausal = (not useEMA or close < emaVal) and (not useIchimoku or close < math.min(senkouA, senkouB))
+
+// ── Execution Logic ──────────────────────────────────────────────────────────
+longEntry  = bullBOS and bullCausal and (not useBOS or isBullish)
+shortEntry = bearBOS and bearCausal and (not useBOS or not isBullish)
+
+// Position Sizing
+atrVal = ta.atr(atrLen)
+riskAmount = strategy.equity * (riskPct / 100)
+stopDist   = atrVal * slMult
+qty = stopDist > 0 ? riskAmount / stopDist : 0.0
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Sovereign MS Long", strategy.long, qty=qty, comment="BOS Bull")
+    strategy.exit("Exit Long", "Sovereign MS Long", stop=close - stopDist, limit=close + atrVal * tpMult)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Sovereign MS Short", strategy.short, qty=qty, comment="BOS Bear")
+    strategy.exit("Exit Short", "Sovereign MS Short", stop=close + stopDist, limit=close - atrVal * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(emaVal, color=color.new(color.blue, 50), title="EMA Anchor")
+p1 = plot(senkouA, color=color.new(color.green, 80), title="Senkou A")
+p2 = plot(senkouB, color=color.new(color.red, 80), title="Senkou B")
+fill(p1, p2, color = senkouA > senkouB ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// MS Markers
+plotshape(bullBOS, "BOS", shape.triangleup, location.belowbar, color.green, size=size.tiny)
+plotshape(bearBOS, "BOS", shape.triangledown, location.abovebar, color.red, size=size.tiny)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 2, border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "Structure", bgcolor=color.black, text_color=color.white)
+    table.cell(tb, 1, 0, isBullish ? "BULLISH" : "BEARISH", bgcolor=isBullish ? color.green : color.red, text_color=color.white)
+    table.cell(tb, 0, 1, "Causal", bgcolor=color.black, text_color=color.white)
+    table.cell(tb, 1, 1, bullCausal or bearCausal ? "ALIGNED" : "WAITING", bgcolor=bullCausal or bearCausal ? color.blue : color.gray, text_color=color.white)
