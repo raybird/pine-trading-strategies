@@ -2,31 +2,30 @@
 strategy("TN Stochastic Causal Divergence v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
 
 // ------------------------------------------------------------
-// 🚀 CORE PHILOSOPHY: STOCHASTIC DIVERGENCE & CAUSAL FILTERING
-// This strategy detects structural divergences between Price and 
-// Stochastic Oscillator, filtered by High-Timeframe causal trend.
-// Version: v26.0414.0600 [CST]
+// 🚀 CORE PHILOSOPHY: CAUSAL DIVERGENCE & STRUCTURAL AUDIT
+// This strategy identifies momentum exhaustions via structural 
+// divergences between Price and Stochastic Oscillator, filtered 
+// by macro-trend anchors.
+// Version: v26.0415.0600 [CST]
 // ------------------------------------------------------------
 
 // ── Inputs ───────────────────────────────────────────────────────────────────
-groupStoch  = "Stochastic Settings"
+groupStoch  = "Stochastic Parameters"
 periodK     = input.int(14, "K Length", minval=1, group=groupStoch)
 smoothK     = input.int(3, "K Smoothing", minval=1, group=groupStoch)
 periodD     = input.int(3, "D Smoothing", minval=1, group=groupStoch)
-obLevel     = input.int(80, "Overbought", minval=50, maxval=100, group=groupStoch)
-osLevel     = input.int(20, "Oversold", minval=0, maxval=50, group=groupStoch)
 
-groupDiv    = "Divergence Engine"
+groupDiv    = "Divergence Audit"
 pivotLeft   = input.int(5, "Pivot Left", minval=1, group=groupDiv)
 pivotRight  = input.int(2, "Pivot Right", minval=1, group=groupDiv)
-maxLookback = input.int(60, "Max Lookback Bars", minval=10, group=groupDiv)
+maxLookback = input.int(60, "Max Lookback (Bars)", minval=10, group=groupDiv)
 
 groupCausal = "Causal Filter (Sovereignty)"
-useHTF      = input.bool(true, "Enable HTF Causal Filter", group=groupCausal)
+useHTF      = input.bool(true, "Enable HTF Trend Filter", group=groupCausal)
 htfTF       = input.timeframe("240", "HTF Timeframe", group=groupCausal)
-htfLen      = input.int(50, "HTF EMA Length", group=groupCausal)
+htfLen      = input.int(200, "HTF EMA Length", group=groupCausal)
 
-groupRisk   = "Risk Management"
+groupRisk   = "Sovereign Risk Management"
 riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
 slMult      = input.float(2.0, "Stop Loss (ATR Mult)", group=groupRisk)
 tpMult      = input.float(4.0, "Take Profit (ATR Mult)", group=groupRisk)
@@ -36,68 +35,66 @@ k = ta.sma(ta.stoch(close, high, low, periodK), smoothK)
 d = ta.sma(k, periodD)
 atr = ta.atr(14)
 
-// HTF Causal Filter: Trend Anchor
+// HTF Causal Filter: Trend Floor
 float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
-bool bullRegime = not useHTF or close > htfEma
-bool bearRegime = not useHTF or close < htfEma
+bool isBullishRegime = not useHTF or close > htfEma
+bool isBearishRegime = not useHTF or close < htfEma
 
-// ── Divergence Engine (Matrix-ready Logic) ───────────────────────────────────
+// ── Divergence Engine ───────────────────────────────────────────────────────
 pLow  = ta.pivotlow(low, pivotLeft, pivotRight)
 pHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 
-// Detect Bullish Divergence (Price Lower Low, Stoch Higher Low)
+// State Tracking for Pivots
 var float lastPLowPrice = na
 var float lastPLowStoch = na
 var int   lastPLowBar   = na
-
-bullDiv = false
-if not na(pLow)
-    if low[pivotRight] < lastPLowPrice and d[pivotRight] > lastPLowStoch and (bar_index - lastPLowBar) <= maxLookback
-        bullDiv := true
-    lastPLowPrice := low[pivotRight]
-    lastPLowStoch := d[pivotRight]
-    lastPLowBar   := bar_index[pivotRight]
-
-// Detect Bearish Divergence (Price Higher High, Stoch Lower High)
 var float lastPHighPrice = na
 var float lastPHighStoch = na
 var int   lastPHighBar   = na
 
-bearDiv = false
+bool bullDivDetected = false
+bool bearDivDetected = false
+
+if not na(pLow)
+    if low[pivotRight] < lastPLowPrice and d[pivotRight] > lastPLowStoch and (bar_index - lastPLowBar) <= maxLookback
+        bullDivDetected := true
+    lastPLowPrice := low[pivotRight]
+    lastPLowStoch := d[pivotRight]
+    lastPLowBar   := bar_index[pivotRight]
+
 if not na(pHigh)
     if high[pivotRight] > lastPHighPrice and d[pivotRight] < lastPHighStoch and (bar_index - lastPHighBar) <= maxLookback
-        bearDiv := true
+        bearDivDetected := true
     lastPHighPrice := high[pivotRight]
     lastPHighStoch := d[pivotRight]
     lastPHighBar   := bar_index[pivotRight]
 
-// ── Sovereign Execution ──────────────────────────────────────────────────────
-longEntry  = bullDiv and bullRegime and d < osLevel + 10
-shortEntry = bearDiv and bearRegime and d > obLevel - 10
+// ── Sovereign Execution Logic ────────────────────────────────────────────────
+longCondition  = bullDivDetected and isBullishRegime and d < 30
+shortCondition = bearDivDetected and isBearishRegime and d > 70
 
-if longEntry
-    riskAmount = strategy.equity * (riskPct / 100)
-    stopDist   = atr * slMult
-    qty = stopDist > 0 ? riskAmount / stopDist : 0.0
+// Dynamic Position Sizing
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atr * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longCondition and strategy.position_size == 0
     strategy.entry("Long Div", strategy.long, qty=qty, comment="BullDiv")
-    strategy.exit("Exit Long", "Long Div", stop=close - stopDist, limit=close + atr * tpMult)
+    strategy.exit("LX", "Long Div", stop=close - stopDist, limit=close + atr * tpMult)
 
-if shortEntry
-    riskAmount = strategy.equity * (riskPct / 100)
-    stopDist   = atr * slMult
-    qty = stopDist > 0 ? riskAmount / stopDist : 0.0
+if shortCondition and strategy.position_size == 0
     strategy.entry("Short Div", strategy.short, qty=qty, comment="BearDiv")
-    strategy.exit("Exit Short", "Short Div", stop=close + stopDist, limit=close - atr * tpMult)
+    strategy.exit("SX", "Short Div", stop=close + stopDist, limit=close - atr * tpMult)
 
 // ── Visuals ──────────────────────────────────────────────────────────────────
-plot(htfEma, color=color.new(color.blue, 50), title="Causal Anchor (HTF EMA)")
-plotshape(bullDiv, "Bull Div", shape.labelup, location.belowbar, color.green, text="BULL DIV", textcolor=color.white, offset=-pivotRight)
-plotshape(bearDiv, "Bear Div", shape.labeldown, location.abovebar, color.red, text="BEAR DIV", textcolor=color.white, offset=-pivotRight)
+plot(htfEma, "HTF Causal Anchor", color.new(color.blue, 50), 2, plot.style_stepline)
+plotshape(bullDivDetected, "Bull Div", shape.labelup, location.belowbar, color.green, text="BULL DIV", textcolor=color.white, offset=-pivotRight)
+plotshape(bearDivDetected, "Bear Div", shape.labeldown, location.abovebar, color.red, text="BEAR DIV", textcolor=color.white, offset=-pivotRight)
 
-// Status Table
+// Dashboard Status
 var table info = table.new(position.top_right, 2, 2, border_width=1)
 if barstate.isconfirmed
     table.cell(info, 0, 0, "Regime", bgcolor=color.black, text_color=color.white)
-    table.cell(info, 1, 0, bullRegime ? "BULLISH" : "BEARISH", bgcolor=bullRegime ? color.green : color.red, text_color=color.white)
+    table.cell(info, 1, 0, isBullishRegime ? "BULLISH" : "BEARISH", bgcolor=isBullishRegime ? color.green : color.red, text_color=color.white)
     table.cell(info, 0, 1, "Stoch D", bgcolor=color.black, text_color=color.white)
     table.cell(info, 1, 1, str.tostring(d, "#.##"), bgcolor=color.gray, text_color=color.white)
