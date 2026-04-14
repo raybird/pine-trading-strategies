@@ -1,0 +1,68 @@
+//@version=6
+strategy("TN Sovereign MTF Trend v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: MTF CONFLUENCE & DYNAMIC SOVEREIGNTY
+// Filters micro-entries based on macro-trend anchors (HTF EMA)
+// and utilizes ATR-based dynamic trailing stops for capital protection.
+// Version: v26.0414.1800 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupTrend  = "Trend Indicators"
+emaFastLen  = input.int(10, "Fast EMA", minval=1, group=groupTrend)
+emaSlowLen  = input.int(25, "Slow EMA", minval=1, group=groupTrend)
+rsiLen      = input.int(14, "RSI Length", group=groupTrend)
+
+groupCausal = "Causal Filter (MTF)"
+useHTF      = input.bool(true, "Enable HTF Filter", group=groupCausal)
+htfTF       = input.timeframe("240", "HTF Timeframe", group=groupCausal)
+htfLen      = input.int(50, "HTF Trend EMA", group=groupCausal)
+
+groupRisk   = "Sovereign Risk Management"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+slMult      = input.float(2.0, "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(3.0, "Take Profit (ATR Mult)", group=groupRisk)
+useTrail    = input.bool(true, "Enable ATR Trailing Stop", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+// Primary Indicators
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+rsiVal  = ta.rsi(close, rsiLen)
+atrVal  = ta.atr(14)
+
+// HTF Causal Anchor (Non-repainting)
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+bool bullRegime = not useHTF or close > htfEma
+bool bearRegime = not useHTF or close < htfEma
+
+// ── Entry/Exit Logic ─────────────────────────────────────────────────────────
+longSignal  = ta.crossover(emaFast, emaSlow) and rsiVal < 60 and bullRegime
+shortSignal = ta.crossunder(emaFast, emaSlow) and rsiVal > 40 and bearRegime
+
+// Execution with Dynamic Sizing
+riskAmount = strategy.equity * (riskPct / 100)
+stopDist   = atrVal * slMult
+qty = stopDist > 0 ? riskAmount / stopDist : 0.0
+
+if longSignal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty, comment="MTF Bull")
+    strategy.exit("Exit Long", "Long", stop=close - stopDist, limit=close + atrVal * tpMult, trail_points=useTrail ? atrVal * 1.5 / syminfo.mintick : na, trail_offset=useTrail ? atrVal * 0.5 / syminfo.mintick : na)
+
+if shortSignal and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty, comment="MTF Bear")
+    strategy.exit("Exit Short", "Short", stop=close + stopDist, limit=close - atrVal * tpMult, trail_points=useTrail ? atrVal * 1.5 / syminfo.mintick : na, trail_offset=useTrail ? atrVal * 0.5 / syminfo.mintick : na)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(emaFast, color=color.new(color.lime, 0), title="Fast EMA")
+plot(emaSlow, color=color.new(color.red, 0), title="Slow EMA")
+plot(htfEma, color=color.new(color.blue, 30), linewidth=3, title="HTF Causal Anchor")
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 2, border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "Regime", bgcolor=color.black, text_color=color.white)
+    table.cell(tb, 1, 0, bullRegime ? "BULLISH" : "BEARISH", bgcolor=bullRegime ? color.green : color.red, text_color=color.white)
+    table.cell(tb, 0, 1, "RSI", bgcolor=color.black, text_color=color.white)
+    table.cell(tb, 1, 1, str.tostring(rsiVal, "#.##"), bgcolor=color.gray, text_color=color.white)
