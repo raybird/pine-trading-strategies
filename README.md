@@ -16,6 +16,9 @@
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
 ### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign Ichimoku Causal v6](./strategies/tn_sovereign_ichimoku_v6.md)** (v26.0415.1800)
+    *   **核心**：Ichimoku Kumo Breakout + HTF Causal Anchor。
+    *   **功能**：識別平衡區間突破，整合多維趨勢對焦與動態風險審計。
 *   **[TN Sovereign Darvas Box v6](./strategies/tn_sovereign_darvas_v6.md)** (v26.0415.1200)
     *   **核心**：Automated Darvas Box + Re-entry Protocol。
     *   **功能**：識別價格區間並捕捉邊界掃蕩後的動能回歸，整合 HTF 趨勢錨點。

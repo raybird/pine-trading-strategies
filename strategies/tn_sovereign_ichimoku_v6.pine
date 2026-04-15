@@ -1,0 +1,79 @@
+//@version=6
+strategy("TN Sovereign Ichimoku Causal v6", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: ICHIMOKU CLOUD & CAUSAL ALIGNMENT
+// Captures structural breakouts from the Kumo Cloud, filtered 
+// by macro trend anchors and dynamic volatility risk.
+// Version: v26.0415.1800 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupIchimoku = "Ichimoku Settings"
+tenkanLen     = input.int(9,  "Tenkan-sen", minval=1, group=groupIchimoku)
+kijunLen      = input.int(26, "Kijun-sen",  minval=1, group=groupIchimoku)
+senkouB_Len   = input.int(52, "Senkou B",   minval=1, group=groupIchimoku)
+displacement  = input.int(26, "Displacement", group=groupIchimoku)
+
+groupCausal   = "Causal Filter (Sovereignty)"
+useHTF        = input.bool(true,  "Enable HTF Trend Filter", group=groupCausal)
+htfTF         = input.timeframe("240", "HTF Timeframe", group=groupCausal)
+htfLen        = input.int(200,    "HTF EMA Length", group=groupCausal)
+
+groupRisk     = "Sovereign Risk Management"
+riskPct       = input.float(1.0,  "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+slMult        = input.float(1.5,  "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult        = input.float(3.0,  "Take Profit (ATR Mult)", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+donchian(len) => math.avg(ta.lowest(len), ta.highest(len))
+
+tenkan  = donchian(tenkanLen)
+kijun   = donchian(kijunLen)
+senkouA = math.avg(tenkan, kijun)
+senkouB = donchian(senkouB_Len)
+
+atrVal  = ta.atr(14)
+
+// HTF Causal Anchor
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+bool isBullishRegime = close > htfEma
+bool isBearishRegime = close < htfEma
+
+// ── Entry Logic ──────────────────────────────────────────────────────────────
+// Long: Price above Cloud + Tenkan > Kijun + Bullish HTF
+kumoTop = math.max(senkouA[displacement], senkouB[displacement])
+kumoBtm = math.min(senkouA[displacement], senkouB[displacement])
+
+longCondition  = close > kumoTop and tenkan > kijun and isBullishRegime
+shortCondition = close < kumoBtm and tenkan < kijun and isBearishRegime
+
+// ── Sovereign Execution ──────────────────────────────────────────────────────
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atrVal * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty, comment="Kumo Break ↑")
+    strategy.exit("LX", "Long", stop=close - stopDist, limit=close + atrVal * tpMult)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty, comment="Kumo Break ↓")
+    strategy.exit("SX", "Short", stop=close + stopDist, limit=close - atrVal * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(tenkan, "Tenkan-sen", color.new(color.blue, 0))
+plot(kijun,  "Kijun-sen",  color.new(color.red, 0))
+p1 = plot(senkouA, "Senkou A", offset=displacement, color.new(color.green, 50))
+p2 = plot(senkouB, "Senkou B", offset=displacement, color.new(color.red, 50))
+fill(p1, p2, color=senkouA > senkouB ? color.new(color.green, 90) : color.new(color.red, 90))
+
+plot(htfEma, "HTF Causal Anchor", color.new(color.gray, 30), 2, plot.style_stepline)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 2, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "Regime", text_color=color.white)
+    table.cell(tb, 1, 0, isBullishRegime ? "BULL" : "BEAR", text_color=isBullishRegime ? color.green : color.red)
+    table.cell(tb, 0, 1, "Conviction", text_color=color.white)
+    table.cell(tb, 1, 1, (longCondition or shortCondition) ? "HIGH" : "LOW", text_color=color.yellow)
