@@ -15,6 +15,11 @@
     *   **核心**：自適應深度價值區矩陣。
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
+### 📊 結構與流動性對位 (Structure & Liquidity)
+*   **[TN Sovereign ICT SMC v6](./strategies/tn_sovereign_ict_smc_v6.md)** (v26.0416.0600)
+    *   **核心**：BOS/CHOC + FVG Imbalance + Killzones。
+    *   **功能**：識別機構失衡與結構位移，對位於倫敦與紐約殺戮區執行。
+
 ### 📐 波動率與結構對位 (Volatility & Structure)
 *   **[TN Sovereign Ichimoku Causal v6](./strategies/tn_sovereign_ichimoku_v6.md)** (v26.0415.1800)
     *   **核心**：Ichimoku Kumo Breakout + HTF Causal Anchor。

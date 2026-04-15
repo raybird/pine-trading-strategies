@@ -1,0 +1,86 @@
+//@version=6
+strategy("TN Sovereign ICT SMC v6", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: ICT SMC & CAUSAL TIME ALIGNMENT
+// Integrates Market Structure (BOS/CHOC), Fair Value Gaps (FVG),
+// and Order Blocks (OB) with institutional Killzones.
+// Version: v26.0416.0600 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupSMC    = "SMC Parameters"
+pivotLen    = input.int(5, "Market Structure Pivot Bars", group=groupSMC)
+fvgMinSize  = input.float(0.1, "Min FVG Size (ATR %)", step=0.05, group=groupSMC)
+
+groupTime   = "Killzone Alignment (CST)"
+londonOpen  = input.string("1500-1800", "London Killzone", group=groupTime)
+nyOpen      = input.string("2100-0000", "NY Killzone", group=groupTime)
+
+groupRisk   = "Sovereign Risk Management"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, group=groupRisk)
+atrLen      = input.int(14, "ATR Length", group=groupRisk)
+rrRatio     = input.float(2.5, "Reward/Risk Ratio", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+atr = ta.atr(atrLen)
+inKillzone = not na(time(timeframe.period, londonOpen + "," + nyOpen, "Asia/Taipei"))
+
+// 1. Market Structure (BOS/CHOC)
+pHi = ta.pivothigh(high, pivotLen, pivotLen)
+pLo = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float lastHi = na
+var float lastLo = na
+var bool isBullish = false
+
+if not na(pHi)
+    if high[pivotLen] > lastHi
+        isBullish := true // BOS
+    lastHi := high[pivotLen]
+
+if not na(pLo)
+    if low[pivotLen] < lastLo
+        isBullish := false // BOS
+    lastLo := low[pivotLen]
+
+// 2. FVG Detection (Fair Value Gap)
+bullFVG = low > high[2] and (low - high[2]) > (atr * fvgMinSize)
+bearFVG = high < low[2] and (low[2] - high) > (atr * fvgMinSize)
+
+// 3. Order Block Detection (Simplified)
+bullOB = close > open[1] and close[1] < open[1] and low < low[1] // Engulfing + Sweep
+bearOB = close < open[1] and close[1] > open[1] and high > high[1]
+
+// ── Execution Logic ──────────────────────────────────────────────────────────
+longEntry  = inKillzone and isBullish and bullFVG and bullOB[1]
+shortEntry = inKillzone and not isBullish and bearFVG and bearOB[1]
+
+// Position Sizing
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atr * 1.5
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Sovereign ICT Long", strategy.long, qty=qty, comment="FVG+OB Alignment")
+    strategy.exit("LX", "Sovereign ICT Long", stop=close - stopDist, limit=close + stopDist * rrRatio)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Sovereign ICT Short", strategy.short, qty=qty, comment="FVG+OB Alignment")
+    strategy.exit("SX", "Sovereign ICT Short", stop=close + stopDist, limit=close - stopDist * rrRatio)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plotshape(bullFVG, "Bull FVG", shape.square, location.belowbar, color.new(color.green, 80), size=size.tiny)
+plotshape(bearFVG, "Bear FVG", shape.square, location.abovebar, color.new(color.red, 80), size=size.tiny)
+
+bgcolor(inKillzone ? color.new(color.blue, 95) : na)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "Structure", text_color=color.white)
+    table.cell(tb, 1, 0, isBullish ? "BULLISH" : "BEARISH", text_color=isBullish ? color.green : color.red)
+    table.cell(tb, 0, 1, "Killzone", text_color=color.white)
+    table.cell(tb, 1, 1, inKillzone ? "ACTIVE" : "WAIT", text_color=inKillzone ? color.green : color.gray)
+    table.cell(tb, 0, 2, "ATR", text_color=color.white)
+    table.cell(tb, 1, 2, str.tostring(atr, "#.##"), text_color=color.yellow)
