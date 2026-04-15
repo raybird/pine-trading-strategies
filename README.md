@@ -16,6 +16,9 @@
     *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
 
 ### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign Darvas Box v6](./strategies/tn_sovereign_darvas_v6.md)** (v26.0415.1200)
+    *   **核心**：Automated Darvas Box + Re-entry Protocol。
+    *   **功能**：識別價格區間並捕捉邊界掃蕩後的動能回歸，整合 HTF 趨勢錨點。
 *   **[TN Sovereign Fibonacci Retracement v6](./strategies/tn_sovereign_fibonacci_v6.md)** (v26.0415.0009)
     *   **核心**：PD Extreme Range + Fibonacci Retracement。
     *   **功能**：識別前一交易日結構性回撤水平，整合 HTF 趨勢錨點。

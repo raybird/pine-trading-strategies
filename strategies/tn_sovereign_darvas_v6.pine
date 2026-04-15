@@ -1,0 +1,89 @@
+//@version=6
+strategy("TN Sovereign Darvas Box v6", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: DARVAS RE-ENTRY & CAUSAL AUDIT
+// Implements automated Darvas Box detection with a re-entry 
+// protocol (entry on close back inside after a sweep), filtered 
+// by macro trend anchors.
+// Version: v26.0415.1200 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupDarvas = "Darvas Box Settings"
+boxLen      = input.int(5, "Box Pivot Length", minval=2, group=groupDarvas)
+useAuto     = input.bool(true, "Use Automated Box Detection", group=groupDarvas)
+
+groupCausal = "Causal Filter (Sovereignty)"
+useHTF      = input.bool(true, "Enable HTF Trend Filter", group=groupCausal)
+htfTF       = input.timeframe("240", "HTF Timeframe", group=groupCausal)
+htfLen      = input.int(200, "HTF EMA Length", group=groupCausal)
+
+groupRisk   = "Sovereign Risk Management"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+rrRatio     = input.float(3.0, "Reward/Risk Ratio", minval=1.0, group=groupRisk)
+
+// ── Automated Box Detection Logic ───────────────────────────────────────────
+var float boxUpper = na
+var float boxLower = na
+
+if useAuto
+    pHi = ta.pivothigh(high, boxLen, boxLen)
+    pLo = ta.pivotlow(low, boxLen, boxLen)
+    
+    if not na(pHi)
+        boxUpper := pHi
+    if not na(pLo)
+        boxLower := pLo
+
+// ── HTF Causal Anchor ────────────────────────────────────────────────────────
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+bool isBullishRegime = not useHTF or close > htfEma
+bool isBearishRegime = not useHTF or close < htfEma
+
+// ── Darvas Re-entry Logic ───────────────────────────────────────────────────
+var bool armedLong  = false
+var bool armedShort = false
+
+// Arming: Close outside the box
+if close < boxLower
+    armedLong := true
+if close > boxUpper
+    armedShort := true
+
+// Signal: Close back inside
+longSignal  = armedLong and close > boxLower and isBullishRegime
+shortSignal = armedShort and close < boxUpper and isBearishRegime
+
+// ── Execution with Dynamic Risk ──────────────────────────────────────────────
+atrVal = ta.atr(14)
+riskAmt = strategy.equity * (riskPct / 100)
+
+if longSignal and strategy.position_size == 0
+    stopDist = math.max(atrVal * 1.5, close - boxLower)
+    qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+    strategy.entry("Long", strategy.long, qty=qty, comment="Box Re-entry")
+    strategy.exit("LX", "Long", stop=close - stopDist, limit=close + stopDist * rrRatio)
+    armedLong := false // Reset after execution
+
+if shortSignal and strategy.position_size == 0
+    stopDist = math.max(atrVal * 1.5, boxUpper - close)
+    qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+    strategy.entry("Short", strategy.short, qty=qty, comment="Box Re-entry")
+    strategy.exit("SX", "Short", stop=close + stopDist, limit=close - stopDist * rrRatio)
+    armedShort := false // Reset after execution
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(boxUpper, "Box Upper", color.new(color.green, 50), 2, plot.style_stepline)
+plot(boxLower, "Box Lower", color.new(color.red, 50), 2, plot.style_stepline)
+plot(htfEma, "HTF Causal Anchor", color.new(color.blue, 30), 2, plot.style_stepline)
+
+bgcolor(armedLong ? color.new(color.green, 90) : armedShort ? color.new(color.red, 90) : na)
+
+// Dashboard
+var table tb = table.new(position.top_right, 2, 2, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(tb, 0, 0, "Regime", text_color=color.white)
+    table.cell(tb, 1, 0, isBullishRegime ? "BULL" : "BEAR", text_color=isBullishRegime ? color.green : color.red)
+    table.cell(tb, 0, 1, "Armed", text_color=color.white)
+    table.cell(tb, 1, 1, armedLong ? "LONG" : armedShort ? "SHORT" : "NONE", text_color=color.yellow)
