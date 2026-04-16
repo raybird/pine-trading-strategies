@@ -1,0 +1,127 @@
+//@version=6
+// 🛡️ TeleNexus Sovereign Advanced Swing Strategy (v26.0417.0600)
+// Base: popovantonnm-create/Advanced-Swing-Trading-Strategy-Pine-v6
+// Optimized for: Multi-Timeframe Causal Alignment & Micro-Audit Execution
+
+strategy("TN Sovereign Adv Swing v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// MODULE 0. UDT & CONTRACTS
+// ------------------------------------------------------------
+type SignalState
+    bool isLong
+    bool isShort
+    string source
+    float causalWeight
+    string auditInfo
+
+type MTFBias
+    bool weeklyBull
+    bool weeklyBear
+    bool weeklyNeutral
+    bool h4Confirmed
+
+type RiskProfile
+    float stopPrice
+    float targetPrice
+    float positionSize
+    bool portfolioAllowed
+
+// ------------------------------------------------------------
+// MODULE 1. WEAK SIGNAL ENGINE (Condensed)
+// ------------------------------------------------------------
+groupBase = "Base Signals"
+emaFastLen = input.int(9, "Fast EMA", minval=1, group=groupBase)
+emaSlowLen = input.int(21, "Slow EMA", minval=1, group=groupBase)
+rsiLen = input.int(14, "RSI Length", minval=2, group=groupBase)
+
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+rsiVal = ta.rsi(close, rsiLen)
+
+bool emaBull = ta.crossover(emaFast, emaSlow)
+bool emaBear = ta.crossunder(emaFast, emaSlow)
+bool rsiBull = rsiVal > 50
+bool rsiBear = rsiVal < 50
+
+getRawSignal() =>
+    SignalState signal = SignalState.new(false, false, "None", 0.0, "No initial trigger")
+    if emaBull and rsiBull
+        signal.isLong := true
+        signal.causalWeight := 0.6
+        signal.source := "EMA+RSI"
+        signal.auditInfo := "EMA X-up with RSI > 50"
+    else if emaBear and rsiBear
+        signal.isShort := true
+        signal.causalWeight := 0.6
+        signal.source := "EMA+RSI"
+        signal.auditInfo := "EMA X-down with RSI < 50"
+    signal
+
+// ------------------------------------------------------------
+// MODULE 2. MTF CAUSAL ALIGNMENT
+// ------------------------------------------------------------
+groupMTF = "MTF Alignment"
+useMTF = input.bool(true, "Enable MTF Filter", group=groupMTF)
+
+getWeeklyTrend() =>
+    float wEmaFast = ta.ema(close, 9)
+    float wEmaSlow = ta.ema(close, 21)
+    [wEmaFast > wEmaSlow, wEmaFast < wEmaSlow, math.abs(wEmaFast - wEmaSlow) < ta.atr(14) * 0.5]
+
+getH4Momentum() =>
+    float h4Rsi = ta.rsi(close, 14)
+    [h4Rsi > 52, h4Rsi < 48]
+
+[wBull, wBear, wNeut] = request.security(syminfo.tickerid, "W", getWeeklyTrend(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[h4Bull, h4Bear] = request.security(syminfo.tickerid, "240", getH4Momentum(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+MTFBias mtf = MTFBias.new(wBull, wBear, wNeut, false)
+
+// ------------------------------------------------------------
+// MODULE 3. RISK & EXECUTION
+// ------------------------------------------------------------
+groupRisk = "Risk Management"
+riskPct = input.float(1.0, "Risk % per trade", minval=0.1, maxval=5.0, group=groupRisk)
+atrLen = input.int(14, "ATR Length", group=groupRisk)
+atrVal = ta.atr(atrLen)
+
+SignalState currentSignal = getRawSignal()
+bool finalLong = currentSignal.isLong and (not useMTF or (mtf.weeklyBull or mtf.weeklyNeutral) and h4Bull)
+bool finalShort = currentSignal.isShort and (not useMTF or (mtf.weeklyBear or mtf.weeklyNeutral) and h4Bear)
+
+// Micro-Audit Logic
+string auditTrail = finalLong ? "ALIGNED: " + currentSignal.auditInfo : 
+                  finalShort ? "ALIGNED: " + currentSignal.auditInfo :
+                  currentSignal.isLong ? "FILTERED: MTF Mismatch" : "WAITING"
+
+if finalLong
+    float stop = close - atrVal * 2.0
+    float riskAmt = strategy.equity * riskPct / 100
+    float qty = riskAmt / (close - stop)
+    strategy.entry("Long", strategy.long, qty=qty, comment=auditTrail)
+    strategy.exit("Exit Long", "Long", stop=stop, limit=close + (close - stop) * 2.0)
+
+if finalShort
+    float stop = close + atrVal * 2.0
+    float riskAmt = strategy.equity * riskPct / 100
+    float qty = riskAmt / (stop - close)
+    strategy.entry("Short", strategy.short, qty=qty, comment=auditTrail)
+    strategy.exit("Exit Short", "Short", stop=stop, limit=close - (stop - close) * 2.0)
+
+// ------------------------------------------------------------
+// MODULE 4. VISUALS (Micro-Audit)
+// ------------------------------------------------------------
+plotshape(finalLong, "Long Entry", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(finalShort, "Short Entry", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+var table auditTable = table.new(position.top_right, 2, 4, border_width=1)
+if barstate.islast
+    table.cell(auditTable, 0, 0, "Audit Trail", bgcolor=color.black, text_color=color.white)
+    table.cell(auditTable, 1, 0, auditTrail, bgcolor=color.gray, text_color=color.white)
+    table.cell(auditTable, 0, 1, "Weekly Regime", bgcolor=color.black, text_color=color.white)
+    table.cell(auditTable, 1, 1, mtf.weeklyBull ? "Bullish" : mtf.weeklyBear ? "Bearish" : "Neutral", bgcolor=color.gray, text_color=color.white)
+    table.cell(auditTable, 0, 2, "H4 Momentum", bgcolor=color.black, text_color=color.white)
+    table.cell(auditTable, 1, 2, h4Bull ? "Bullish" : h4Bear ? "Bearish" : "Weak", bgcolor=color.gray, text_color=color.white)
+    table.cell(auditTable, 0, 3, "Version", bgcolor=color.black, text_color=color.white)
+    table.cell(auditTable, 1, 3, "v26.0417.0600", bgcolor=color.gray, text_color=color.white)
