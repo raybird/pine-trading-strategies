@@ -1,0 +1,137 @@
+//@version=6
+strategy("Advanced Swing Strategy v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// MODULE 1. BASE WEAK SIGNALS ENGINE
+// These signals are intentionally weak and are not direct entries.
+// Their role is to provide a diverse raw signal layer for later stage filters.
+// ------------------------------------------------------------
+
+groupBase = "Base Signals"
+groupEMA = "1. EMA Crossover + Pullback"
+groupBreakout = "2. Price Action Breakout"
+groupRSI = "3. RSI Momentum"
+groupMACD = "4. MACD Histogram Flip"
+groupVolume = "5. Volume Surge"
+groupCandle = "6. Candlestick Patterns"
+groupSupertrend = "7. Supertrend Flip"
+groupSAR = "8. Parabolic SAR + ADX"
+
+// ------------------------------------------------------------
+// Module toggles. Each weak signal can be enabled or disabled independently.
+// Nested settings use Pine v6 dynamic inputs via active=...
+// ------------------------------------------------------------
+useEMASignal = input.bool(true, "Enable EMA Crossover + Pullback", group=groupBase)
+useBreakoutSignal = input.bool(true, "Enable Price Action Breakout", group=groupBase)
+useRSISignal = input.bool(true, "Enable RSI Momentum", group=groupBase)
+useMACDSignal = input.bool(true, "Enable MACD Histogram Flip", group=groupBase)
+useVolumeSignal = input.bool(true, "Enable Volume Surge", group=groupBase)
+useCandlestickSignal = input.bool(true, "Enable Candlestick Patterns", group=groupBase)
+useSupertrendSignal = input.bool(true, "Enable Supertrend Flip", group=groupBase)
+useSarAdxSignal = input.bool(true, "Enable Parabolic SAR + ADX", group=groupBase)
+
+// ------------------------------------------------------------
+// Settings 1. EMA Crossover + Pullback
+// ------------------------------------------------------------
+emaFastLen = input.int(9, "Fast EMA", minval=1, group=groupEMA, active=useEMASignal)
+emaSlowLen = input.int(21, "Slow EMA", minval=1, group=groupEMA, active=useEMASignal)
+emaPullbackPct = input.float(0.5, "Pullback tolerance, %", minval=0.1, step=0.1, group=groupEMA, active=useEMASignal)
+
+// ------------------------------------------------------------
+// Settings 2. Price Action Breakout
+// ------------------------------------------------------------
+breakoutLen = input.int(20, "Breakout lookback", minval=2, group=groupBreakout, active=useBreakoutSignal)
+
+// ------------------------------------------------------------
+// Settings 3. RSI Momentum
+// ------------------------------------------------------------
+rsiLen = input.int(14, "RSI Length", minval=2, group=groupRSI, active=useRSISignal)
+rsiBullLevel = input.int(40, "Bull RSI level", minval=1, maxval=99, group=groupRSI, active=useRSISignal)
+rsiBearLevel = input.int(60, "Bear RSI level", minval=1, maxval=99, group=groupRSI, active=useRSISignal)
+rsiDivLookback = input.int(5, "Simple divergence lookback", minval=2, group=groupRSI, active=useRSISignal)
+
+// ------------------------------------------------------------
+// Settings 4. MACD Histogram Flip
+// ------------------------------------------------------------
+macdFastLen = input.int(12, "MACD Fast", minval=1, group=groupMACD, active=useMACDSignal)
+macdSlowLen = input.int(26, "MACD Slow", minval=1, group=groupMACD, active=useMACDSignal)
+macdSignalLen = input.int(9, "MACD Signal", minval=1, group=groupMACD, active=useMACDSignal)
+
+// ------------------------------------------------------------
+// Settings 5. Volume Surge
+// ------------------------------------------------------------
+volumeMaLen = input.int(20, "Volume SMA", minval=1, group=groupVolume, active=useVolumeSignal)
+volumeSurgeMult = input.float(1.5, "Volume surge multiplier", minval=0.5, step=0.1, group=groupVolume, active=useVolumeSignal)
+
+// ------------------------------------------------------------
+// Settings 6. Candlestick Patterns
+// ------------------------------------------------------------
+pinbarBodyMaxPct = input.float(35.0, "Pinbar: max body % of range", minval=1, maxval=90, step=1, group=groupCandle, active=useCandlestickSignal)
+pinbarWickMinPct = input.float(55.0, "Pinbar: min lead wick % of range", minval=10, maxval=95, step=1, group=groupCandle, active=useCandlestickSignal)
+
+// Settings 7. Supertrend Flip
+supertrendFactor = input.float(3.0, "Supertrend Factor", minval=1.0, step=0.1, group=groupSupertrend, active=useSupertrendSignal)
+supertrendAtrLen = input.int(10, "Supertrend ATR", minval=1, group=groupSupertrend, active=useSupertrendSignal)
+
+// Settings 8. Parabolic SAR + ADX
+sarStart = input.float(0.02, "SAR Start", step=0.01, group=groupSAR, active=useSarAdxSignal)
+sarInc = input.float(0.02, "SAR Increment", step=0.01, group=groupSAR, active=useSarAdxSignal)
+sarMax = input.float(0.2, "SAR Max", step=0.01, group=groupSAR, active=useSarAdxSignal)
+adxLen = input.int(14, "ADX Length", minval=1, group=groupSAR, active=useSarAdxSignal)
+adxThreshold = input.int(25, "ADX Threshold", minval=1, group=groupSAR, active=useSarAdxSignal)
+
+// ------------------------------------------------------------
+// CORE LOGIC FUNCTIONS
+// ------------------------------------------------------------
+
+getWeakSignalCode() =>
+    int code = 0
+    string label = ""
+    
+    // 1. EMA
+    float emaF = ta.ema(close, emaFastLen)
+    float emaS = ta.ema(close, emaSlowLen)
+    bool emaBull = useEMASignal and ta.crossover(emaF, emaS)
+    bool emaBear = useEMASignal and ta.crossunder(emaF, emaS)
+    
+    // 2. Breakout
+    bool breakoutBull = useBreakoutSignal and high > ta.highest(high, breakoutLen)[1]
+    bool breakoutBear = useBreakoutSignal and low < ta.lowest(low, breakoutLen)[1]
+    
+    // 3. RSI
+    float r = ta.rsi(close, rsiLen)
+    bool rsiBull = useRSISignal and r > rsiBullLevel and r[1] <= rsiBullLevel
+    bool rsiBear = useRSISignal and r < rsiBearLevel and r[1] >= rsiBearLevel
+
+    // Combine logic (Simplified for headhunting extraction)
+    code := emaBull or breakoutBull or rsiBull ? 1 : emaBear or breakoutBear or rsiBear ? -1 : 0
+    code
+
+getSignalLabelFromCode(int code) =>
+    code == 1 ? "Bullish Entry" : code == -1 ? "Bearish Entry" : "No Signal"
+
+// MTF and Filters
+[tfLong, tfShort, tfType] = [false, false, ""] // Placeholder for MTF logic from full script
+
+// ------------------------------------------------------------
+// MODULE 3. MULTI-TIMEFRAME INTEGRATION
+// ------------------------------------------------------------
+[wBull, wBear, wNeutral] = request.security(syminfo.tickerid, "W", [ta.ema(close, 20) > ta.ema(close, 50), ta.ema(close, 20) < ta.ema(close, 50), false])
+
+finalLong = tfLong and (wBull or wNeutral)
+finalShort = tfShort and (wBear or wNeutral)
+
+// ------------------------------------------------------------
+// MODULE 4. RISK MANAGEMENT
+// ------------------------------------------------------------
+atr = ta.atr(14)
+riskAmt = strategy.equity * 0.01
+posSize = riskAmt / (atr * 2)
+
+if finalLong
+    strategy.entry("Long", strategy.long, qty=posSize)
+if finalShort
+    strategy.entry("Short", strategy.short, qty=posSize)
+
+strategy.exit("Exit Long", "Long", stop=strategy.position_avg_price - atr * 2, limit=strategy.position_avg_price + atr * 4)
+strategy.exit("Exit Short", "Short", stop=strategy.position_avg_price + atr * 2, limit=strategy.position_avg_price - atr * 4)

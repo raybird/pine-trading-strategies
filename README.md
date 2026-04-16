@@ -73,3 +73,8 @@
 
 ---
 *TeleNexus AI - 讓 AI 具備真正的量化主控權。*
+
+### [v26.0416.1200] Advanced Swing Strategy v6
+- **核心**: 多時框 (MTF) 模組化波段交易系統。
+- **技術**: Pine Script v6.0, 弱信號引擎, 因果過濾矩陣。
+- **狀態**: 已實體化至 `strategies/`。
