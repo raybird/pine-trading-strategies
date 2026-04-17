@@ -1,4 +1,4 @@
-# 🛡️ TeleNexus Sovereign Advanced Swing Strategy (v26.0417.0601)
+# 🛡️ TeleNexus Sovereign Advanced Swing Strategy (v26.0417.1201)
 
 ## 📌 策略概述
 此策略基於 `popovantonnm-create` 的 `Advanced-Swing-Trading-Strategy-Pine-v6` 進行主權化重構。它採用了多層級的因果過濾機制，將弱訊號引擎與多時框 (MTF) 對位邏輯相結合，確保在具備高信賴度的市場環境下執行交易。

@@ -1,5 +1,5 @@
 //@version=6
-// 🛡️ TeleNexus Sovereign Advanced Swing Strategy (v26.0417.0601)
+// 🛡️ TeleNexus Sovereign Advanced Swing Strategy (v26.0417.1201)
 // Base: popovantonnm-create/Advanced-Swing-Trading-Strategy-Pine-v6
 // Optimized for: Multi-Timeframe Causal Alignment & Micro-Audit Execution
 
@@ -20,12 +20,6 @@ type MTFBias
     bool weeklyBear
     bool weeklyNeutral
     bool h4Confirmed
-
-type RiskProfile
-    float stopPrice
-    float targetPrice
-    float positionSize
-    bool portfolioAllowed
 
 // ------------------------------------------------------------
 // MODULE 1. WEAK SIGNAL ENGINE (Refactored)
@@ -76,10 +70,10 @@ getH4Momentum() =>
 [wBull, wBear, wNeut] = request.security(syminfo.tickerid, "W", getWeeklyTrend(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [h4Bull, h4Bear] = request.security(syminfo.tickerid, "240", getH4Momentum(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-MTFBias mtf = MTFBias.new(wBull, wBear, wNeut, false)
+MTFBias mtf = MTFBias.new(wBull, wBear, wNeut, h4Bull or h4Bear)
 
 // ------------------------------------------------------------
-// MODULE 3. RISK & EXECUTION
+// MODULE 3. RISK & EXECUTION (Micro-Audit)
 // ------------------------------------------------------------
 groupRisk = "Risk Management"
 riskPct = input.float(1.0, "Risk % per trade", minval=0.1, maxval=5.0, group=groupRisk)
@@ -90,7 +84,6 @@ SignalState currentSignal = getRawSignal()
 bool finalLong = currentSignal.isLong and (not useMTF or (mtf.weeklyBull or mtf.weeklyNeutral) and h4Bull)
 bool finalShort = currentSignal.isShort and (not useMTF or (mtf.weeklyBear or mtf.weeklyNeutral) and h4Bear)
 
-// Micro-Audit Logic
 string auditTrail = finalLong ? "ALIGNED: " + currentSignal.auditInfo : 
                   finalShort ? "ALIGNED: " + currentSignal.auditInfo :
                   currentSignal.isLong ? "FILTERED: MTF Mismatch" : 
@@ -111,11 +104,8 @@ if finalShort
     strategy.exit("Exit Short", "Short", stop=stop, limit=close - (stop - close) * 2.0)
 
 // ------------------------------------------------------------
-// MODULE 4. VISUALS & DASHBOARD
+// MODULE 4. DASHBOARD
 // ------------------------------------------------------------
-plotshape(finalLong, "Long Entry", shape.triangleup, location.belowbar, color.lime, size=size.small)
-plotshape(finalShort, "Short Entry", shape.triangledown, location.abovebar, color.red, size=size.small)
-
 var table auditTable = table.new(position.top_right, 2, 4, border_width=1)
 if barstate.islast
     table.cell(auditTable, 0, 0, "Audit Trail", bgcolor=color.black, text_color=color.white)
@@ -125,4 +115,7 @@ if barstate.islast
     table.cell(auditTable, 0, 2, "H4 Momentum", bgcolor=color.black, text_color=color.white)
     table.cell(auditTable, 1, 2, h4Bull ? "Bullish" : h4Bear ? "Bearish" : "Weak", bgcolor=color.gray, text_color=color.white)
     table.cell(auditTable, 0, 3, "Version", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 3, "v26.0417.0601", bgcolor=color.gray, text_color=color.white)
+    table.cell(auditTable, 1, 3, "v26.0417.1201", bgcolor=color.gray, text_color=color.white)
+
+plotshape(finalLong, "Long Entry", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(finalShort, "Short Entry", shape.triangledown, location.abovebar, color.red, size=size.small)
