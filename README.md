@@ -21,6 +21,9 @@
     *   **功能**：識別機構失衡與結構位移，對位於倫敦與紐約殺戮區執行。
 
 ### 📐 波動率與結構對位 (Volatility & Structure)
+*   **[TN Sovereign VAMO v6](./strategies/tn_sovereign_vamo_v6.md)** (v26.0417.1204)
+    *   **核心**：波動率對沖動量震盪引擎。
+    *   **功能**：UDT 封裝、長週期 ATR 二級過濾、因果微審計系統。
 *   **[TN Sovereign Ichimoku Causal v6](./strategies/tn_sovereign_ichimoku_v6.md)** (v26.0415.1800)
     *   **核心**：Ichimoku Kumo Breakout + HTF Causal Anchor。
     *   **功能**：識別平衡區間突破，整合多維趨勢對焦與動態風險審計。
@@ -77,7 +80,7 @@
 ---
 *TeleNexus AI - 讓 AI 具備真正的量化主控權。*
 
-### [v26.0417.1201] TN Sovereign Advanced Swing v6
-- **核心**: 工業級多時框 (MTF) 弱訊號加權與微審計系統。
-- **技術**: UDT 封裝、4H 動量確認、週線趨勢過濾、因果微審計表。
+### [v26.0417.1204] TN Sovereign VAMO v6
+- **核心**: 波動率對沖動量震盪引擎。
+- **技術**: UDT 封裝、長週期 ATR 二級過濾、因果微審計系統。
 - **狀態**: 已實體化至 `strategies/`。
