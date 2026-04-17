@@ -1,0 +1,63 @@
+//@version=6
+strategy("MTF Trend Sovereign Strategy [v26.0418.0004]",
+    overlay=true, 
+    initial_capital=100000,
+    default_qty_type=strategy.percent_of_equity, 
+    default_qty_value=10,
+    commission_type=strategy.commission.percent, 
+    commission_value=0.05,
+    pyramiding=0)
+
+// ------------------------------------------------------------
+// MODULE 1. MTF CONTEXT (Higher Timeframe Filter)
+// Using barmerge.lookahead_on with [1] offset to prevent repainting.
+// ------------------------------------------------------------
+groupHTF   = "高時框過濾 (HTF Context)"
+htfInput   = input.string("D", "HTF 週期", options=["60","240","D","W"], group=groupHTF)
+htfEmaLen  = input.int(21, "HTF EMA 長度", minval=1, group=groupHTF)
+
+[htfEma, htfClose] = request.security(syminfo.tickerid, htfInput, [ta.ema(close, htfEmaLen)[1], close[1]], lookahead=barmerge.lookahead_on)
+bool htfBull = htfClose > htfEma
+bool htfBear = htfClose < htfEma
+
+// ------------------------------------------------------------
+// MODULE 2. LOCAL MOMENTUM (Lower Timeframe Signals)
+// ------------------------------------------------------------
+groupSignal = "本地動能 (Signal)"
+fastLen     = input.int(9,  "快線 EMA", minval=1, group=groupSignal)
+slowLen     = input.int(21, "慢線 EMA", minval=1, group=groupSignal)
+atrLen      = input.int(14, "ATR 長度", minval=1, group=groupSignal)
+
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(atrLen)
+
+bool bullCross = ta.crossover(fastEma,  slowEma) and htfBull
+bool bearCross = ta.crossunder(fastEma, slowEma) and htfBear
+
+// ------------------------------------------------------------
+// MODULE 3. RISK MANAGEMENT (Adaptive SL/TP)
+// ------------------------------------------------------------
+groupRisk = "風險管理"
+slMult    = input.float(1.5, "止損 ATR 倍數", step=0.1, group=groupRisk)
+tpMult    = input.float(3.0, "獲利 ATR 倍數", step=0.1, group=groupRisk)
+
+if bullCross
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+if bearCross
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+// ------------------------------------------------------------
+// MODULE 4. VISUALIZATION
+// ------------------------------------------------------------
+plot(fastEma, "Fast EMA", color.new(color.lime, 0), linewidth=2)
+plot(slowEma, "Slow EMA", color.new(color.red, 0),   linewidth=2)
+plot(htfEma,  "HTF EMA",  color.new(color.orange, 40), linewidth=3)
+
+bgcolor(htfBull ? color.new(color.green, 95) : color.new(color.red, 95), title="HTF Trend Background")
+
+plotshape(bullCross, "Long Signal",  shape.triangleup,   location.belowbar, color.lime, size=size.small, text="BUY")
+plotshape(bearCross, "Short Signal", shape.triangledown, location.abovebar, color.red,   size=size.small, text="SELL")

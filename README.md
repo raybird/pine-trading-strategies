@@ -89,3 +89,8 @@
 - **核心**: 黃金日內趨勢拉回系統，結合 EMA 與 RSI。
 - **技術**: Pine Script v6.0, ATR 波動率止損, 保本邏輯。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0418.0004] MTF Trend Sovereign v6
+- **核心**: 多時框趨勢追蹤系統，整合 ATR 自適應止損。
+- **技術**: Pine Script v6.0, request.security, 非重繪 (No-repaint) 規訓。
+- **狀態**: 已實體化至 `strategies/`。
