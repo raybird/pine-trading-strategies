@@ -84,3 +84,8 @@
 - **核心**: 波動率對沖動量震盪引擎。
 - **技術**: UDT 封裝、長週期 ATR 二級過濾、因果微審計系統。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0417.1800] XAUUSD Intraday Trend Pullback v6
+- **核心**: 黃金日內趨勢拉回系統，結合 EMA 與 RSI。
+- **技術**: Pine Script v6.0, ATR 波動率止損, 保本邏輯。
+- **狀態**: 已實體化至 `strategies/`。

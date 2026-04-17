@@ -1,0 +1,139 @@
+//@version=6
+strategy(
+     title="XAUUSD Intraday Trend Pullback Strategy [v26.0417.1800]",
+     shorttitle="XAUUSD_IP_v26",
+     overlay=true,
+     initial_capital=100000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.02,
+     pyramiding=0,
+     process_orders_on_close=true,
+     calc_on_order_fills=true,
+     calc_on_every_tick=false
+)
+
+// =====================================================
+// 1) 參數輸入 (Inputs)
+// =====================================================
+groupTrend           = "趨勢過濾"
+emaFastLen           = input.int(20,  "快線 EMA 長度", minval=1, group=groupTrend)
+emaSlowLen           = input.int(50,  "慢線 EMA 長度", minval=2, group=groupTrend)
+
+groupMomentum        = "動能指標"
+rsiLen               = input.int(14,  "RSI 長度", minval=2, group=groupMomentum)
+rsiLongThreshold     = input.float(50.0, "RSI 做多門檻", step=0.1, group=groupMomentum)
+rsiShortThreshold    = input.float(50.0, "RSI 做空門檻", step=0.1, group=groupMomentum)
+
+groupRisk            = "風險管理"
+atrLen               = input.int(14,  "ATR 長度", minval=1, group=groupRisk)
+useMinVolFilter      = input.bool(true, "啟用最低波動過濾", group=groupRisk)
+minAtrThreshold      = input.float(1.2, "最低 ATR 門檻", step=0.1, group=groupRisk)
+slAtrMult            = input.float(1.2, "止損 ATR 倍數", minval=0.1, step=0.1, group=groupRisk)
+tpRrMult             = input.float(2.0, "獲利盈虧比 (R-Multiple)", minval=0.5, step=0.1, group=groupRisk)
+useBreakeven         = input.bool(true, "啟用 1R 保本止損", group=groupRisk)
+useTrailingStop      = input.bool(false, "啟用 ATR 追蹤止損", group=groupRisk)
+trailAtrMult         = input.float(1.0, "追蹤止損 ATR 倍數", minval=0.1, step=0.1, group=groupRisk)
+
+groupSession         = "交易時段"
+tradeSession         = input.session("0700-1700", "交易時段 (倫敦 + 紐約)", group=groupSession)
+onlyOnCloseConfirm   = input.bool(true, "僅在收盤確認後進場", group=groupSession)
+
+// =====================================================
+// 2) 核心計算 (Core Calculations)
+// =====================================================
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+rsiVal  = ta.rsi(close, rsiLen)
+atrVal  = ta.atr(atrLen)
+atrAvg  = ta.sma(atrVal, 50)
+adxVal  = ta.adx(14)
+
+inSession = not na(time(timeframe.period, tradeSession))
+barConfirmed = onlyOnCloseConfirm ? barstate.isconfirmed : true
+
+isTrendLong  = emaFast > emaSlow
+isTrendShort = emaFast < emaSlow
+
+// 拉回並重新站上/跌破 EMA20
+pullbackLong = low <= emaFast and close > emaFast
+pullbackShort = high >= emaFast and close < emaFast
+
+// RSI 動能確認
+rsiLongOk  = rsiVal > rsiLongThreshold and rsiVal > rsiVal[1]
+rsiShortOk = rsiVal < rsiShortThreshold and rsiVal < rsiVal[1]
+
+// 波動率與趨勢強度過濾
+volatilityOk = useMinVolFilter ? (atrVal >= minAtrThreshold and atrVal >= atrAvg * 0.70) : true
+trendStrengthOk = adxVal >= 16.0
+
+// 進場冷卻邏輯
+var int lastEntryBar = na
+cooldownBars = 2
+cooldownOk = na(lastEntryBar) or (bar_index - lastEntryBar > cooldownBars)
+
+// 進場條件整合
+longCondition = barConfirmed and inSession and isTrendLong and pullbackLong and rsiLongOk and volatilityOk and trendStrengthOk and strategy.position_size <= 0 and cooldownOk
+shortCondition = barConfirmed and inSession and isTrendShort and pullbackShort and rsiShortOk and volatilityOk and trendStrengthOk and strategy.position_size >= 0 and cooldownOk
+
+// =====================================================
+// 3) 執行進場 (Entries)
+// =====================================================
+if longCondition
+    strategy.entry("Long", strategy.long)
+    lastEntryBar := bar_index
+
+if shortCondition
+    strategy.entry("Short", strategy.short)
+    lastEntryBar := bar_index
+
+// =====================================================
+// 4) 出場與風險控制 (Risk Management)
+// =====================================================
+var float longRiskAtEntry = na
+var float shortRiskAtEntry = na
+
+if strategy.position_size > 0 and strategy.position_size[1] <= 0
+    longRiskAtEntry := atrVal * slAtrMult
+
+if strategy.position_size < 0 and strategy.position_size[1] >= 0
+    shortRiskAtEntry := atrVal * slAtrMult
+
+if strategy.position_size == 0
+    longRiskAtEntry := na
+    shortRiskAtEntry := na
+
+longEntryPrice = strategy.position_size > 0 ? strategy.position_avg_price : na
+shortEntryPrice = strategy.position_size < 0 ? strategy.position_avg_price : na
+
+// 多頭出場邏輯
+longBaseStop = longEntryPrice - longRiskAtEntry
+longTakeProfit = longEntryPrice + longRiskAtEntry * tpRrMult
+longOneRReached = high >= (longEntryPrice + longRiskAtEntry)
+longFinalStop = longBaseStop
+if strategy.position_size > 0
+    if useBreakeven and longOneRReached
+        longFinalStop := math.max(longFinalStop, longEntryPrice)
+    if useTrailingStop
+        longFinalStop := math.max(longFinalStop, close - atrVal * trailAtrMult)
+    strategy.exit("Long Exit", from_entry="Long", stop=longFinalStop, limit=longTakeProfit)
+
+// 空頭出場邏輯
+shortBaseStop = shortEntryPrice + shortRiskAtEntry
+shortTakeProfit = shortEntryPrice - shortRiskAtEntry * tpRrMult
+shortOneRReached = low <= (shortEntryPrice - shortRiskAtEntry)
+shortFinalStop = shortBaseStop
+if strategy.position_size < 0
+    if useBreakeven and shortOneRReached
+        shortFinalStop := math.min(shortFinalStop, shortEntryPrice)
+    if useTrailingStop
+        shortFinalStop := math.min(shortFinalStop, close + atrVal * trailAtrMult)
+    strategy.exit("Short Exit", from_entry="Short", stop=shortFinalStop, limit=shortTakeProfit)
+
+// =====================================================
+// 5) 視覺化 (Visuals)
+// =====================================================
+plot(emaFast, "EMA Fast", color=color.new(color.yellow, 0), linewidth=2)
+plot(emaSlow, "EMA Slow", color=color.new(color.orange, 0), linewidth=2)
+
+plotshape(longCondition, title="做多信號", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0), size=size.tiny, text="BUY")
+plotshape(shortCondition, title="做空信號", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL")
