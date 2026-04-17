@@ -1,0 +1,124 @@
+//@version=6
+strategy("Tn Sovereign MTF Intraday v6 [v26.0418.0600]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     process_orders_on_close=true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN INPUTS & CONFIGURATION
+// =====================================================
+
+// ─── Trend Context (Higher Timeframe) ───
+groupHTF   = "主權趨勢背景 (HTF Context)"
+trendTF    = input.string("5", "HTF 週期 (分鐘)", options=["3","5","15","30","60"], group=groupHTF)
+trendFast  = input.int(9, "HTF 快線 EMA", minval=1, group=groupHTF)
+trendSlow  = input.int(21, "HTF 慢線 EMA", minval=1, group=groupHTF)
+stFact     = input.float(3.0, "Supertrend 乘數", step=0.1, group=groupHTF)
+stLen      = input.int(10, "Supertrend ATR 週期", minval=1, group=groupHTF)
+
+// ─── Execution Logic (Local Timeframe) ───
+groupExec  = "執行規訓 (Execution Logic)"
+entFast    = input.int(9, "進場快線 EMA", minval=1, group=groupExec)
+entSlow    = input.int(21, "進場慢線 EMA", minval=1, group=groupExec)
+useVol     = input.bool(true, "啟用成交量過濾", group=groupExec)
+volLen     = input.int(20, "成交量 SMA 週期", minval=5, group=groupExec)
+volMult    = input.float(1.3, "成交量放大倍數", step=0.1, group=groupExec)
+
+// ─── Adaptive Risk Management ───
+groupRisk  = "自適應風險管理 (Risk Management)"
+atrLen     = input.int(14, "ATR 週期", minval=1, group=groupRisk)
+slMult     = input.float(2.0, "止損 ATR 倍數", step=0.1, group=groupRisk)
+tpMult     = input.float(3.5, "獲利 ATR 倍數", step=0.1, group=groupRisk)
+useNoise   = input.bool(true, "啟用 ATR 噪聲過濾", group=groupRisk)
+noiseMult  = input.float(0.3, "噪聲閾值 (ATR×)", step=0.05, group=groupRisk)
+
+// ─── Session Regulation ───
+groupSes   = "時段規訓 (Session)"
+useSession = input.bool(false, "啟用特定時段限制", group=groupSes)
+tradeSes   = input.session("0900-1800", "交易時段 (CST)", group=groupSes)
+
+// =====================================================
+// MODULE 2: DATA ACQUISITION (NON-REPAINTING)
+// =====================================================
+
+// Using [1] and lookahead_on to ensure historical causality
+[tfFast, tfSlow, tfStDir] = request.security(
+     syminfo.tickerid, trendTF,
+     [ta.ema(close, trendFast)[1],
+      ta.ema(close, trendSlow)[1],
+      ta.supertrend(stFact, stLen)[1][1]],
+     lookahead=barmerge.lookahead_on)
+
+trendBull = tfFast > tfSlow and tfStDir == 1
+trendBear = tfFast < tfSlow and tfStDir == -1
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & FILTERS
+// =====================================================
+
+// Local momentum
+entFastEma = ta.ema(close, entFast)
+entSlowEma = ta.ema(close, entSlow)
+
+// Filters
+volAvg = ta.sma(volume, volLen)
+atrVal = ta.atr(atrLen)
+f_vol   = not useVol or volume > volAvg * volMult
+f_noise = not useNoise or math.abs(close - close[1]) > atrVal * noiseMult
+inSes   = not useSession or not na(time(timeframe.period, tradeSes, "UTC+8"))
+
+// Entry signals
+longTrigger  = ta.crossover(entFastEma, entSlowEma) and trendBull and f_vol and f_noise and inSes
+shortTrigger = ta.crossunder(entFastEma, entSlowEma) and trendBear and f_vol and f_noise and inSes
+
+// =====================================================
+// MODULE 4: SOVEREIGN EXECUTION
+// =====================================================
+
+if longTrigger and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="SOV ↑")
+    strategy.exit("Long Exit", "Long", 
+         stop=close - slMult * atrVal, 
+         limit=close + tpMult * atrVal,
+         comment_loss="SL", comment_profit="TP")
+
+if shortTrigger and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="SOV ↓")
+    strategy.exit("Short Exit", "Short", 
+         stop=close + slMult * atrVal, 
+         limit=close - tpMult * atrVal,
+         comment_loss="SL", comment_profit="TP")
+
+// =====================================================
+// MODULE 5: VISUALIZATION & AUDIT
+// =====================================================
+
+// Local momentum bands
+plot(entFastEma, "Entry Fast", color.new(color.lime, 0), linewidth=1)
+plot(entSlowEma, "Entry Slow", color.new(color.green, 20), linewidth=2)
+
+// HTF Trend Shadow (High causal visibility)
+plot(tfFast, "HTF Fast", color.new(color.aqua, 50), linewidth=2)
+plot(tfSlow, "HTF Slow", color.new(color.purple, 50), linewidth=2)
+
+bgcolor(trendBull ? color.new(color.green, 95) : trendBear ? color.new(color.red, 95) : na, title="Trend Domain")
+
+plotshape(longTrigger, "Long Signal", shape.triangleup, location.belowbar, color.lime, size=size.small, text="BUY")
+plotshape(shortTrigger, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small, text="SELL")
+
+// Dashboard for real-time discipline
+var table dt = table.new(position.bottom_right, 2, 4, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.isconfirmed
+    table.cell(dt, 0, 0, "Regime", text_color=color.white)
+    table.cell(dt, 1, 0, trendBull ? "Bullish" : trendBear ? "Bearish" : "Neutral", text_color=trendBull ? color.lime : trendBear ? color.red : color.gray)
+    table.cell(dt, 0, 1, "Volume", text_color=color.white)
+    table.cell(dt, 1, 1, f_vol ? "Pass" : "Gate", text_color=f_vol ? color.lime : color.orange)
+    table.cell(dt, 0, 2, "Volatility", text_color=color.white)
+    table.cell(dt, 1, 2, str.tostring(atrVal, "#.##"), text_color=color.aqua)
+    table.cell(dt, 0, 3, "Version", text_color=color.gray)
+    table.cell(dt, 1, 3, "v26.0418.0600", text_color=color.gray)

@@ -94,3 +94,8 @@
 - **核心**: 多時框趨勢追蹤系統，整合 ATR 自適應止損。
 - **技術**: Pine Script v6.0, request.security, 非重繪 (No-repaint) 規訓。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0418.0600] Tn Sovereign MTF Intraday v6
+- **核心**: 多時框因果對位日內交易系統。
+- **技術**: Pine Script v6.0, 雙層趨勢過濾, 自適應 ATR 風險管理。
+- **狀態**: 已實體化至 `strategies/`。
