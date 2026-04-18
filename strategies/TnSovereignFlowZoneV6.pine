@@ -1,0 +1,92 @@
+//@version=6
+strategy("Tn Sovereign FlowZone v6 [v26.0419.0000]", 
+     shorttitle="TN_FZ_v26", 
+     overlay=true, 
+     initial_capital=100000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=10, 
+     commission_type=strategy.commission.percent, 
+     commission_value=0.05,
+     process_orders_on_close=true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN INPUTS
+// =====================================================
+
+groupCore = "🎯 核心規訓 (Core Settings)"
+strategyMode = input.string("Sovereign", "策略模式", options=["Aggressive", "Balanced", "Sovereign"], group=groupCore)
+confThreshold = input.float(7.5, "因果匯流閾值", minval=5.0, maxval=10.0, step=0.1, group=groupCore)
+
+groupRisk = "⚖️ 風險管理 (Risk Management)"
+riskPerTrade = input.float(1.5, "單筆風險 (%)", minval=0.1, maxval=5.0, step=0.1, group=groupRisk)
+slAtrMult = input.float(2.0, "止損 ATR 倍數", minval=0.5, maxval=5.0, step=0.1, group=groupRisk)
+tpRatio = input.float(2.5, "獲利盈虧比", minval=1.0, group=groupRisk)
+
+// =====================================================
+// MODULE 2: CAUSAL CONFLUENCE ENGINE
+// =====================================================
+
+// 物理支柱 1: 趨勢對位 (Trend Alignment)
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+bool isTrendLong = close > ema200 and ema20 > ema50
+bool isTrendShort = close < ema200 and ema20 < ema50
+
+// 物理支柱 2: 動能規訓 (Momentum)
+rsiVal = ta.rsi(close, 14)
+bool isMomLong = rsiVal > 50 and rsiVal > rsiVal[1]
+bool isMomShort = rsiVal < 50 and rsiVal < rsiVal[1]
+
+// 物理支柱 3: 波動率審計 (Volatility)
+atrVal = ta.atr(14)
+float volRel = atrVal / ta.sma(atrVal, 50)
+bool isVolHealthy = volRel > 0.8
+
+// 因果評分 (Confluence Score)
+float confluenceScore = 0.0
+confluenceScore += isTrendLong or isTrendShort ? 4.0 : 0.0
+confluenceScore += isMomLong or isMomShort ? 3.0 : 0.0
+confluenceScore += isVolHealthy ? 3.0 : 0.0
+
+// =====================================================
+// MODULE 3: EXECUTION LOGIC
+// =====================================================
+
+bool longSignal = isTrendLong and isMomLong and isVolHealthy and confluenceScore >= confThreshold
+bool shortSignal = isTrendShort and isMomShort and isVolHealthy and confluenceScore >= confThreshold
+
+// 倉位大小計算 (基於風險)
+float stopDist = atrVal * slAtrMult
+float riskAmt = strategy.equity * (riskPerTrade / 100)
+float posSize = riskAmt / stopDist
+
+if longSignal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=posSize, comment="SOV Buy Score: " + str.tostring(confluenceScore, "#.1"))
+    strategy.exit("L-Exit", "Long", stop=close - stopDist, limit=close + stopDist * tpRatio)
+
+if shortSignal and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=posSize, comment="SOV Sell Score: " + str.tostring(confluenceScore, "#.1"))
+    strategy.exit("S-Exit", "Short", stop=close + stopDist, limit=close - stopDist * tpRatio)
+
+// =====================================================
+// MODULE 4: VISUALIZATION & HUD
+// =====================================================
+
+plot(ema20, "Fast EMA", color.new(color.lime, 0))
+plot(ema50, "Mid EMA", color.new(color.blue, 0))
+plot(ema200, "Slow EMA", color.new(color.red, 0), 2)
+
+bgcolor(longSignal ? color.new(color.green, 90) : shortSignal ? color.new(color.red, 90) : na)
+
+// Dashboard
+var table ui = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    table.cell(ui, 0, 0, "Metrics", text_color=color.white)
+    table.cell(ui, 1, 0, "Value", text_color=color.white)
+    table.cell(ui, 0, 1, "Confluence", text_color=color.gray)
+    table.cell(ui, 1, 1, str.tostring(confluenceScore, "#.1") + "/10", bgcolor=confluenceScore >= confThreshold ? color.green : color.red)
+    table.cell(ui, 0, 2, "Regime", text_color=color.gray)
+    table.cell(ui, 1, 2, strategyMode, text_color=color.yellow)
+    table.cell(ui, 0, 3, "Version", text_color=color.gray)
+    table.cell(ui, 1, 3, "v26.0419.0000", text_color=color.gray)

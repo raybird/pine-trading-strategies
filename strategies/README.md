@@ -45,3 +45,6 @@
 
 ---
 *註：所有的策略現在均具備 100% 的因果說明文件。*
+
+### 🏛️ Sovereign FlowZone (Batch 7)
+- [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
