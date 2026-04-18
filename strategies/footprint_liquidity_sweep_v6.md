@@ -1,19 +1,24 @@
-# TN Footprint Liquidity Sweep Sovereign (v6)
-> **STATUS: DEPLOYED**  
-> **VERSION: v26.0412.0000 [CST]**
+# TN Footprint Liquidity Sweep v6 (足跡流動性獵取版)
 
-## 1. 策略前因 (Context)
-傳統技術指標（如 RSI/MACD）無法捕捉價格突破背後的「意圖」。本策略透過 Pine Script v6 原生 `footprint` 技術，將流動性掃蕩（Liquidity Sweep）與實際的訂單流 Delta 進行對位，旨在識別大戶獵殺散戶止損後的真實反轉動機。
+## 策略概述
+此策略致力於識別市場中的「虛假突破」並在因果對位下執行反轉交易。它結合了傳統的價格行為（掃蕩過往的高低點）與 Pine Script v6 的微觀訂單流審計。只有當價格在獵取流動性後「重新回歸」且「累積成交量增量 (Delta)」展現出明確的反向介入時，才會啟動交易。
 
-## 2. 核心邏輯 (Logic)
-*   **物理掃蕩偵測**：監控過去 N 根 K 線的物理高低點（High/Low Levels）。
-*   **因果過濾 (Delta Alignment)**：單純的掃蕩不足以進場，必須伴隨著 **Footprint Delta** 的轉向（即掃蕩低點後，Bid/Ask 淨值必須轉正）。
-*   **POC 參考地板**：利用每根 K 線的 Point of Control 作為進場後的物理支撐/壓力位移參考。
+## 核心特性
+- **流動性掃蕩規訓 (Sweep Logic)**: 自動監控過往 $N$ 根 K 線的邊界。捕捉價格暫時穿刺該邊界但最終收盤於其內部的行為，這被定義為典型的「洗盤」因果節點。
+- **三級掃蕩嚴謹度 (Sweep Rigors)**:
+  - **Aggressive (10)**: 短期洗盤捕捉，適合高頻波動。
+  - **Standard (20)**: 標準因果對位，鎖定強力的日內轉折。
+  - **Structural (50)**: 長期結構性獵取，代表大級別的動能切換。
+- **微觀 Delta 校驗**: 全量實裝 v6 `footprint` 物理對象。不僅僅是價格回歸，還要求內部 Delta 必須轉正/轉負，確保市場共識已真實發生逆轉。
+- **因果區域實體化**: 使用 `box` 矩陣在地圖上精確標註出清掃發生的物理區位，提升執行的可審計性。
 
-## 3. v6 技術對位
-*   **`request.footprint()`**：全面棄用低時區模擬，改用官方原生足跡數據，實現 100% 數據準確性。
-*   **對象化操作**：使用 `fp.delta()` 與 `fp.poc()` 對象方法，極大化代碼執行效率。
-*   **MIAP 織入**：內建 `[[MEMORY_INTENT]]` 標籤，支援 TeleNexus 記憶系統的自動化歸檔與技能索引。
+## 模組說明
+1. **Boundary Sensor**: 負責維護歷史高低點的物理邊界。
+2. **Footprint Auditor**: 執行 v6 原生足跡數據獲取，提取 Delta 與 POC 核心參數。
+3. **Reversal Engine**: 結合 Sweep 判定與 Delta 指向觸發執行。
+4. **Adaptive Exit**: 基於 ATR 的主權保護模組，維持固定的物理防禦空間。
 
----
-*TeleNexus Quantitative Causal Branch*
+## 使用建議
+- **主週期**: 建議在 15M、30M 或 1H 週期使用。
+- **進場規訓**: 若 Delta 強度未達標，即使價格發生掃蕩，系統也會拒絕執行，以杜絕無動能的隨機回調。
+- **版本號**: v26.0418.0715
