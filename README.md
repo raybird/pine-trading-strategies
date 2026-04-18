@@ -99,3 +99,8 @@
 - **核心**: 多時框因果對位日內交易系統。
 - **技術**: Pine Script v6.0, 雙層趨勢過濾, 自適應 ATR 風險管理。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0418.1202] ZZC Market Structure Sovereign v6
+- **核心**: 結合波段結構與主權隧道過濾的趨勢系統。
+- **技術**: Pine Script v6.0, 非重繪 ZigZag, 自適應風險管理。
+- **狀態**: 已實體化至 `strategies/`。

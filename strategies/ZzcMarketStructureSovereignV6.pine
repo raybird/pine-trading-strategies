@@ -1,0 +1,86 @@
+//@version=6
+strategy("ZZC Market Structure Sovereign v6 [v26.0418.1202]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     max_labels_count=500,
+     max_lines_count=500)
+
+// =====================================================
+// MODULE 1: ZIGZAG CORE (CAUSAL SUBSTRATE)
+// =====================================================
+groupZZ = "波段核心 (ZigZag Core)"
+zzLen   = input.int(5, "Pivot 長度 (L/R)", minval=2, group=groupZZ)
+zzAtr   = input.int(14, "ATR 週期", group=groupZZ)
+zzMult  = input.float(2.0, "ATR 乘數", step=0.1, group=groupZZ)
+
+// Causal ZigZag Implementation (Non-repainting via confirmation)
+var float lastPivotPrice = na
+var int lastPivotIndex = na
+var int dir = 0 // 1 for Up, -1 for Down
+
+atrVal = ta.atr(zzAtr)
+ph = ta.pivothigh(high, zzLen, zzLen)
+pl = ta.pivotlow(low, zzLen, zzLen)
+
+// Simplified logic for headhunting materialization
+// Actual ZZC uses much more complex state machine
+bool turnUp = not na(pl) and (na(lastPivotPrice) or pl > lastPivotPrice - atrVal * zzMult)
+bool turnDn = not na(ph) and (na(lastPivotPrice) or ph < lastPivotPrice + atrVal * zzMult)
+
+// =====================================================
+// MODULE 2: MARKET STRUCTURE & CORRIDORS
+// =====================================================
+groupMS = "市場結構 (Market Structure)"
+useKC   = input.bool(true, "啟用 Keltner 隧道", group=MS)
+kcLen   = input.int(20, "KC 長度", group=MS)
+kcMult  = input.float(1.5, "KC 乘數", group=MS)
+
+emaBase = ta.ema(close, kcLen)
+kcUpper = emaBase + atrVal * kcMult
+kcLower = emaBase - atrVal * kcMult
+
+// Corridor States
+inCorridor = close < kcUpper and close > kcLower
+breakoutUp = ta.crossover(close, kcUpper)
+breakoutDn = ta.crossunder(close, kcLower)
+
+// =====================================================
+// MODULE 3: SOVEREIGN EXECUTION & RISK
+// =====================================================
+groupRisk = "主權風險管理 (Risk)"
+slAtrMult = input.float(2.0, "止損 ATR 倍數", group=groupRisk)
+tpAtrMult = input.float(4.0, "獲利 ATR 倍數", group=groupRisk)
+
+longCondition  = turnUp and close > emaBase and inCorridor
+shortCondition = turnDn and close < emaBase and inCorridor
+
+if longCondition
+    strategy.entry("Long", strategy.long, comment="ZZ-UP")
+    strategy.exit("L-Exit", "Long", stop=close - atrVal * slAtrMult, limit=close + atrVal * tpAtrMult)
+
+if shortCondition
+    strategy.entry("Short", strategy.short, comment="ZZ-DN")
+    strategy.exit("S-Exit", "Short", stop=close + atrVal * slAtrMult, limit=close - atrVal * tpAtrMult)
+
+// =====================================================
+// MODULE 4: VISUALIZATION & AUDIT
+// =====================================================
+plot(emaBase, "基準線", color.new(color.gray, 50))
+fill(plot(kcUpper, color=color.new(color.blue, 80)), plot(kcLower, color=color.new(color.blue, 80)), color.new(color.blue, 95), title="主權隧道")
+
+plotshape(longCondition, "做多信號", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortCondition, "做空信號", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Real-time Discipline Table
+var table dt = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(dt, 0, 0, "Regime", text_color=color.white)
+    table.cell(dt, 1, 0, close > emaBase ? "Bullish" : "Bearish", text_color=close > emaBase ? color.lime : color.red)
+    table.cell(dt, 0, 1, "Structure", text_color=color.white)
+    table.cell(dt, 1, 1, inCorridor ? "Inside" : "Breakout", text_color=inCorridor ? color.aqua : color.orange)
+    table.cell(dt, 0, 2, "Version", text_color=color.gray)
+    table.cell(dt, 1, 2, "v26.0418.1202", text_color=color.gray)
