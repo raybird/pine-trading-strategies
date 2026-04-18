@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeleNexus Sovereign Trading Dashboard</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --primary: #58a6ff;
+            --accent: #238636;
+            --text: #c9d1d9;
+            --border: #30363d;
+        }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            margin: 0; padding: 20px; line-height: 1.6;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        header {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px; margin-bottom: 30px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .badge {
+            padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;
+        }
+        .badge-sovereign { background-color: var(--accent); color: white; }
+        .grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px; padding: 20px;
+            transition: transform 0.2s;
+        }
+        .card:hover { border-color: var(--primary); transform: translateY(-2px); }
+        h1, h2, h3 { color: var(--primary); }
+        .status-bar {
+            background: #1c2128; padding: 10px 20px; border-radius: 6px;
+            font-family: monospace; font-size: 0.9rem; margin-bottom: 30px;
+            border-left: 4px solid var(--accent);
+        }
+        ul { list-style-type: none; padding: 0; }
+        li { padding: 5px 0; border-bottom: 1px solid #21262d; font-size: 0.9rem; }
+        li::before { content: "▸ "; color: var(--accent); }
+        footer { margin-top: 50px; text-align: center; color: #8b949e; font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌌 SOVEREIGN DASHBOARD</h1>
+            <span class="badge badge-sovereign">TeleNexus v6 Standard</span>
+        </header>
+
+        <div class="status-bar">
+            LAST_UPDT: 2026-04-18 12:02 (CST)<br>
+            VERSION : v26.0418.1202<br>
+            STATUS  : DISCIPLINED_EVOLUTION_ACTIVE
+        </div>
+
+        <section>
+            <h2>📖 核心精神 (Spirit)</h2>
+            <p><strong>因果主權 (Causal Sovereignty)</strong>：我們拒絕黑盒交易。每一筆訂單的背後，都必須有可審計的物理因果證明。本系統透過自動化獵頭與主權化重寫，確保量化資產的純淨度與執行主權。</p>
+        </section>
+
+        <div class="grid">
+            <div class="card">
+                <h3>🏛️ 主權核心 (Core)</h3>
+                <ul>
+                    <li>tn_sovereign_v6.pine</li>
+                    <li>TnSovereignMtfIntradayV6.pine</li>
+                    <li>tn_multi_audit_sovereign_v6.pine</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>📐 市場結構 (Structure)</h3>
+                <ul>
+                    <li>ZzcMarketStructureSovereignV6.pine</li>
+                    <li>XauusdIntradayTrendPullbackV6.pine</li>
+                    <li>smc_sovereign_v6.pine</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>📊 訂單流 (Order Flow)</h3>
+                <ul>
+                    <li>volume_profile_matrix_v6.pine</li>
+                    <li>tn_footprint_imbalance_v6.pine</li>
+                    <li>of_imbalance_matrix_map_v6.pine</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>🐝 蜂群協作 (Swarm)</h3>
+                <ul>
+                    <li>federated_consensus_sovereign_v6.pine</li>
+                    <li>swarm_modular_executor_v6.pine</li>
+                    <li>multi_agent_of_ensemble_v6.pine</li>
+                </ul>
+            </div>
+        </div>
+
+        <footer>
+            &copy; 2026 TeleNexus Studio. 執行主權，因果必達。
+        </footer>
+    </div>
+</body>
+</html>
