@@ -1,0 +1,78 @@
+//@version=6
+strategy("RSI Mean Reversion Sovereign v6 [v26.0419.0000]",
+    overlay=true, 
+    initial_capital=100000,
+    default_qty_type=strategy.percent_of_equity, 
+    default_qty_value=10,
+    commission_type=strategy.commission.percent, 
+    commission_value=0.05,
+    pyramiding=0)
+
+// ------------------------------------------------------------
+// MODULE 1. SOVEREIGN INPUTS & REGIMES
+// ------------------------------------------------------------
+groupRSI = "RSI 規訓 (RSI Context)"
+rsiLen  = input.int(14, "RSI 長度", minval=1, group=groupRSI)
+obLevel = input.float(70, "超買門檻 (OB)", minval=60, maxval=90, group=groupRSI)
+osLevel = input.float(30, "超賣門檻 (OS)", minval=10, maxval=40, group=groupRSI)
+
+groupFilter = "因果過濾 (Causal Filters)"
+useBB      = input.bool(true, "啟用布林帶邊界過濾", group=groupFilter)
+bbLen      = input.int(20, "布林帶長度", group=groupFilter)
+bbMult     = input.float(2.0, "標準差倍數", group=groupFilter)
+
+groupRisk = "風險對位 (Risk Alignment)"
+atrLen    = input.int(14, "ATR 週期", group=groupRisk)
+slMult    = input.float(2.0, "止損 ATR 倍數", step=0.1, group=groupRisk)
+tpMult    = input.float(1.5, "獲利 ATR 倍數", step=0.1, group=groupRisk)
+
+// ------------------------------------------------------------
+// MODULE 2. CORE CALCULATIONS
+// ------------------------------------------------------------
+float rsi    = ta.rsi(close, rsiLen)
+float atrVal = ta.atr(atrLen)
+
+// Bollinger Bands for boundary audit
+[bbMid, bbUpper, bbLower] = ta.bb(close, bbLen, bbMult)
+
+// ------------------------------------------------------------
+// MODULE 3. CAUSAL SIGNALS
+// ------------------------------------------------------------
+// Entry Conditions: RSI Crossing + Physical Boundary Check
+bool bbAuditLong = not useBB or low < bbLower
+bool bbAuditShort = not useBB or high > bbUpper
+
+bool longEntry  = ta.crossover(rsi, osLevel) and bbAuditLong
+bool shortEntry = ta.crossunder(rsi, obLevel) and bbAuditShort
+
+// ------------------------------------------------------------
+// MODULE 4. EXECUTION規訓
+// ------------------------------------------------------------
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="RSI-OS Fade")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="RSI-OB Fade")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// ------------------------------------------------------------
+// MODULE 5. VISUALIZATION & HUD
+// ------------------------------------------------------------
+plot(bbMid, "BB Basis", color.new(color.gray, 50))
+p1 = plot(bbUpper, "BB Upper", color.new(color.red, 70))
+p2 = plot(bbLower, "BB Lower", color.new(color.green, 70))
+fill(p1, p2, color.new(color.blue, 96), title="Sovereign Range")
+
+plotshape(longEntry,  "Long Signal",  shape.triangleup,   location.belowbar, color.lime, size=size.small, text="BUY")
+plotshape(shortEntry, "Short Signal", shape.triangledown, location.abovebar, color.red,   size=size.small, text="SELL")
+
+// Dashboard for real-time discipline
+var table dt = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(dt, 0, 0, "Regime", text_color=color.white)
+    table.cell(dt, 1, 0, rsi > 50 ? "Bullish" : "Bearish", text_color=rsi > 50 ? color.lime : color.red)
+    table.cell(dt, 0, 1, "RSI Value", text_color=color.white)
+    table.cell(dt, 1, 1, str.tostring(rsi, "#.##"), text_color=color.yellow)
+    table.cell(dt, 0, 2, "Version", text_color=color.gray)
+    table.cell(dt, 1, 2, "v26.0419.0000", text_color=color.gray)

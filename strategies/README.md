@@ -49,3 +49,5 @@
 ### 🏛️ Sovereign FlowZone (Batch 7)
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
+
+- [`RsiMeanReversionSovereignV6.pine`](./RsiMeanReversionSovereignV6.md): 整合布林帶與 RSI 的均值回歸策略。
