@@ -1,106 +1,45 @@
-# TeleNexus Pine Trading Strategies (v6)
-> **自 2026 年起，專注於「自主掌控」與「因果對位」的高階量化規訓。**
+# 🌌 TeleNexus Sovereign Trading Systems (v6)
 
-本儲存庫是 TeleNexus AI 代理人的實體化量化資產庫。所有策略均嚴格遵守 Pine Script v6 標準，並整合了 **MIAP (記憶意圖宣告協定)**，確保每一行代碼都具備可追溯的執行動機。
+> **"Trading is not a game of chance, but a disciplined audit of causal reality."**
 
-## 🚀 核心執行規訓
-1. **執行即 Git**：每一次獵頭任務與策略演進均自動版本化，確保因果鏈條的絕對透明。
-2. **物理對位**：優先使用原生 `footprint`、`matrix` 與 `request.*` 函數進行環境感知，杜絕邏輯幻覺。
-3. **自主掌控**：內建動態風險矩陣與因果審計，保護執行主權不被極端行情侵蝕。
+[![Pine Script v6](https://img.shields.io/badge/Script-Pine_v6.0-2962FF.svg)](https://www.tradingview.com/pine-script-docs/en/v6/Introduction.html)
+[![Sovereign Governance](https://img.shields.io/badge/Governance-TeleNexus_Sovereign-green.svg)](https://github.com/raybird/telenexus)
+[![Physical Alignment](https://img.shields.io/badge/Alignment-Physical_Time_CST-orange.svg)](https://github.com/raybird/pine-trading-strategies)
 
-## 📂 策略編目 (Featured Strategies)
+## 📖 核心精神 (The Spirit of TeleNexus)
 
-### 📊 成交量與共識感知 (Volume & Consensus)
-*   **[TN Volume Profile Matrix v6](./strategies/volume_profile_matrix_v6.md)** (v26.0412.1800)
-    *   **核心**：自適應深度價值區矩陣。
-    *   **功能**：多日 POC 權重對焦，結合 Footprint Delta 執行因果突破審計。
+本儲存庫是 **TeleNexus Studio** 的實體化量化資產庫。我們拒絕傳統量化開發中的「黑盒黑箱」，主張**主權交易 (Sovereign Trading)** 的核心理念。在這裡，每一行代碼都是一次對市場因果結構的深度審計。
 
-### 📊 結構與流動性對位 (Structure & Liquidity)
-*   **[TN Sovereign ICT SMC v6](./strategies/tn_sovereign_ict_smc_v6.md)** (v26.0416.0600)
-    *   **核心**：BOS/CHOC + FVG Imbalance + Killzones。
-    *   **功能**：識別機構失衡與結構位移，對位於倫敦與紐約殺戮區執行。
+### 1. 因果主權 (Causal Sovereignty)
+我們認為，真正的交易優勢源於對市場微觀結構（如訂單流、流動性陷阱）的因果理解。所有策略均內建「因果審計狀態表」，確保買賣決策不僅是機率的疊加，更是邏輯的必然。
 
-### 📐 波動率與結構對位 (Volatility & Structure)
-*   **[TN Sovereign VAMO v6](./strategies/tn_sovereign_vamo_v6.md)** (v26.0417.1204)
-    *   **核心**：波動率對沖動量震盪引擎。
-    *   **功能**：UDT 封裝、長週期 ATR 二級過濾、因果微審計系統。
-*   **[TN Sovereign Ichimoku Causal v6](./strategies/tn_sovereign_ichimoku_v6.md)** (v26.0415.1800)
-    *   **核心**：Ichimoku Kumo Breakout + HTF Causal Anchor。
-    *   **功能**：識別平衡區間突破，整合多維趨勢對焦與動態風險審計。
-*   **[TN Sovereign Darvas Box v6](./strategies/tn_sovereign_darvas_v6.md)** (v26.0415.1200)
-    *   **核心**：Automated Darvas Box + Re-entry Protocol。
-    *   **功能**：識別價格區間並捕捉邊界掃蕩後的動能回歸，整合 HTF 趨勢錨點。
-*   **[TN Sovereign Fibonacci Retracement v6](./strategies/tn_sovereign_fibonacci_v6.md)** (v26.0415.0009)
-    *   **核心**：PD Extreme Range + Fibonacci Retracement。
-    *   **功能**：識別前一交易日結構性回撤水平，整合 HTF 趨勢錨點。
-*   **[TN Sovereign Fakeout Filter v6](./strategies/tn_sovereign_fakeout_v6.md)** (v26.0415.0000)
-    *   **核心**：4-Layer Causal Audit (Volume/HTF/ATR)。
-    *   **功能**：多維度環境感知過濾假突破，整合動態因果審計狀態表。
-*   **[TN Sovereign Market Structure v6](./strategies/tn_sovereign_market_structure_v6.md)** (v26.0414.1200)
-    *   **核心**：BOS/CHOC 市場結構引擎 + Ichimoku Cloud。
-    *   **功能**：識別趨勢轉折與結構延續，整合一目均衡表因果過濾。
-*   **[TN Sovereign Donchian Breakout v6](./strategies/tn_sovereign_donchian_v6.md)** (v26.0414.1200)
-    *   **核心**：Donchian Channels + HTF EMA 趨勢錨點。
-    *   **功能**：捕捉結構性價格突破，整合成交量與高時框因果審計。
+### 2. 物理對位 (Physical Alignment)
+系統嚴格執行物理時間對位規訓。所有版本號（vYY.MMDD.HHMM）與 Git 提交軌跡均精準鎖定 **CST (UTC+8)**，確保數位資產在跨時空維度下具備無可爭議的因果連續性。
 
-### 🤖 機器學習與分類 (Machine Learning)
-*   **[TN Sovereign Advanced Swing v6](./strategies/tn_sovereign_adv_swing_v6.md)** (v26.0417.1201)
-    *   **核心**：工業級多時框 (MTF) 弱訊號加權與微審計系統。
-    *   **功能**：UDT 封裝、4H 動量確認、週線趨勢過濾、因果微審計表。
-*   **[TN kNN Matrix ML Sovereign v6](./strategies/knn_matrix_ml_v6.md)** (v26.0412.1200)
-    *   **核心**：k-Nearest Neighbors (kNN) 矩陣分類引擎。
-
-### 📈 趨勢與多時框對位 (Trend & MTF)
-*   **[TN Sovereign MTF Dual-Layer v6](./strategies/tn_sovereign_mtf_dual_layer_v6.md)** (v26.0415.0021)
-    *   **核心**：5m Trend Validation + 1m Signal Execution。
-    *   **功能**：雙層嵌套因果審計，整合 Supertrend 與成交量對位機制。
-*   **[TN Sovereign MTF Trend v6](./strategies/tn_sovereign_mtf_trend_v6.md)** (v26.0414.1800)
-    *   **核心**：MTF Causal Anchor + ATR Trailing Stop。
-    *   **功能**：高時框趨勢對焦，整合動態風險控制與利潤鎖定。
-*   **[TN Stochastic Causal Divergence v6](./strategies/tn_stoch_causal_divergence_v6.md)** (v26.0414.0600)
-    *   **核心**：隨機指標結構性背離引擎。
-    *   **功能**：識別價格與動能的因果不一致，整合 HTF 趨勢錨點過濾噪聲。
-*   **[TN Asymmetric Swing Sovereign v6](./strategies/tn_asymmetric_swing_v6.md)** (v26.0413.1150)
-    *   **核心**：三層信號蒸餾引擎 (Weak Signals -> Causal Filters -> MTF Alignment)。
-    *   **功能**：非對稱多層級過濾，跨週、日、4 小時時框執行因果對位。
-
-### 🧮 矩陣與多因子系統 (Multi-Factor)
-*   **[TN Causal Matrix Weights Sovereign v6](./strategies/causal_matrix_weights_v6.md)** (v26.0412.0600)
-    *   **核心**：5-Pillar 矩陣乘法權重模型。
-
-### 📊 足跡與訂單流 (Order Flow)
-*   **[TN Footprint Liquidity Sweep v6](./strategies/footprint_liquidity_sweep_v6.md)** (v26.0412.0000)
-    *   **核心**：原生 Footprint Delta + 高低點掃蕩。
-
-## 🛠️ 開發環境
-*   **Runtime**: TeleNexus-Core v2.9.8+
-*   **Memory**: Memoria v1.8.0 (Skill Packaging Support)
-*   **Standard**: Pine Script v6 (force Enum/Method/Matrix)
+### 3. 確定性演化 (Deterministic Evolution)
+本儲存庫由 TeleNexus AI 代理人透過「自動化獵頭排程」自主維護。從全球開源生態中擷取高信號邏輯，並依據 Pine Script v6 標準進行「主權化重寫」，實現資產庫的每日自演化。
 
 ---
-*TeleNexus AI - 讓 AI 具備真正的量化主控權。*
 
-### [v26.0417.1204] TN Sovereign VAMO v6
-- **核心**: 波動率對沖動量震盪引擎。
-- **技術**: UDT 封裝、長週期 ATR 二級過濾、因果微審計系統。
-- **狀態**: 已實體化至 `strategies/`。
+## 🛠️ 技術支柱 (Technical Pillars)
 
-### [v26.0417.1800] XAUUSD Intraday Trend Pullback v6
-- **核心**: 黃金日內趨勢拉回系統，結合 EMA 與 RSI。
-- **技術**: Pine Script v6.0, ATR 波動率止損, 保本邏輯。
-- **狀態**: 已實體化至 `strategies/`。
+- **Pine Script v6 標準**：全量實裝 UDT (User Defined Types)、Matrix (矩陣運算)、Collections (集合) 等高階語法，實現工業級的代碼封裝。
+- **MIAP (記憶意圖宣告協定)**：整合 TeleNexus 的記憶系統，讓策略執行具備「跨會話」的情境感知能力。
+- **多代理共識 (Multi-Agent Consensus)**：導入聯邦共識與蜂群投票邏輯，利用多維度過濾矩陣降低單點邏輯失效風險。
 
-### [v26.0418.0004] MTF Trend Sovereign v6
-- **核心**: 多時框趨勢追蹤系統，整合 ATR 自適應止損。
-- **技術**: Pine Script v6.0, request.security, 非重繪 (No-repaint) 規訓。
-- **狀態**: 已實體化至 `strategies/`。
+---
 
-### [v26.0418.0600] Tn Sovereign MTF Intraday v6
-- **核心**: 多時框因果對位日內交易系統。
-- **技術**: Pine Script v6.0, 雙層趨勢過濾, 自適應 ATR 風險管理。
-- **狀態**: 已實體化至 `strategies/`。
+## 📂 儲存庫結構 (Repository Map)
 
-### [v26.0418.1202] ZZC Market Structure Sovereign v6
-- **核心**: 結合波段結構與主權隧道過濾的趨勢系統。
-- **技術**: Pine Script v6.0, 非重繪 ZigZag, 自適應風險管理。
-- **狀態**: 已實體化至 `strategies/`。
+- **[`/strategies`](./strategies/README.md)**：策略實體目錄。包含各類已實體化的主權交易系統清單。
+- **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)**：核心邏輯庫。定義了 TeleNexus 的主權過濾與風險對位標準組件。
+- **[`/docs`](./strategies/ZzcMarketStructureSovereignV6.md)**：每一款策略的「因果說明書」，詳細記錄了邏輯來源與規訓細節。
+
+---
+
+## ⚖️ 免責聲明 (Disclaimer)
+
+本專案內容僅供學術研究與技術開發參考，不構成任何形式的投資建議。市場交易存在極高風險，所有執行應由使用者在充分理解「主權風險管理協定」的前提下自主負責。
+
+---
+*Created and evolved by Raybird via TeleNexus Studio.*
