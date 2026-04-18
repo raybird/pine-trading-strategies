@@ -4,7 +4,13 @@
 
 [![Pine Script v6](https://img.shields.io/badge/Script-Pine_v6.0-2962FF.svg)](https://www.tradingview.com/pine-script-docs/en/v6/Introduction.html)
 [![Sovereign Governance](https://img.shields.io/badge/Governance-TeleNexus_Sovereign-green.svg)](https://github.com/raybird/telenexus)
-[![Physical Alignment](https://img.shields.io/badge/Alignment-Physical_Time_CST-orange.svg)](https://github.com/raybird/pine-trading-strategies)
+[![Dashboard](https://img.shields.io/badge/Live-Sovereign_Dashboard-blue.svg)](https://raybird.github.io/pine-trading-strategies/)
+
+## 🔗 實時披露 (Live Disclosure)
+本專案的規訓進度與策略矩陣已即時同步至：
+**[TeleNexus Sovereign Dashboard](https://raybird.github.io/pine-trading-strategies/)**
+
+---
 
 ## 📖 核心精神 (The Spirit of TeleNexus)
 
