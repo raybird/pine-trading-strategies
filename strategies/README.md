@@ -48,3 +48,4 @@
 
 ### 🏛️ Sovereign FlowZone (Batch 7)
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
+- [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
