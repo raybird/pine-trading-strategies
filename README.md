@@ -38,8 +38,12 @@
 ## 📂 儲存庫結構 (Repository Map)
 
 - **[`/strategies`](./strategies/README.md)**：策略實體目錄。包含各類已實體化的主權交易系統清單。
+    - **核心主權**：[`tn_sovereign_v6.md`](./strategies/tn_sovereign_v6.md)
+    - **市場結構**：[`ZzcMarketStructureSovereignV6.md`](./strategies/ZzcMarketStructureSovereignV6.md)
+    - **訂單流感知**：[`tn_footprint_imbalance_md`](./strategies/tn_footprint_imbalance_v6.md)
+    - **機器學習**：[`matrix_knn_ml_v6.md`](./strategies/matrix_knn_ml_v6.md)
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)**：核心邏輯庫。定義了 TeleNexus 的主權過濾與風險對位標準組件。
-- **[`/docs`](./strategies/ZzcMarketStructureSovereignV6.md)**：每一款策略的「因果說明書」，詳細記錄了邏輯來源與規訓細節。
+- **[`/docs`](./strategies/README.md)**：策略的「因果說明書」索引。
 
 ---
 
