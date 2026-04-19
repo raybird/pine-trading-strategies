@@ -38,9 +38,9 @@
 ## 📂 儲存庫結構 (Repository Map)
 
 - **[`/strategies`](./strategies/README.md)**：策略實體目錄。包含各類已實體化的主權交易系統清單。
-    - **核心主權**：[`tn_sovereign_v6.md`](./strategies/tn_sovereign_v6.md)
-    - **市場結構**：[`ZzcMarketStructureSovereignV6.md`](./strategies/ZzcMarketStructureSovereignV6.md)
-    - **訂單流感知**：[`tn_footprint_imbalance_md`](./strategies/tn_footprint_imbalance_v6.md)
+    - **核心主權**：[`TnSovereignMtfViopV6.md`](./strategies/TnSovereignMtfViopV6.md)
+    - **市場結構**：[`ZzcCorridorSovereignV6.md`](./strategies/ZzcCorridorSovereignV6.md)
+    - **訂單流感知**：[`tn_footprint_imbalance_v6.md`](./strategies/tn_footprint_imbalance_v6.md)
     - **機器學習**：[`matrix_knn_ml_v6.md`](./strategies/matrix_knn_ml_v6.md)
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)**：核心邏輯庫。定義了 TeleNexus 的主權過濾與風險對位標準組件。
 - **[`/docs`](./strategies/README.md)**：策略的「因果說明書」索引。
@@ -54,22 +54,17 @@
 ---
 *Created and evolved by Raybird via TeleNexus Studio.*
 
+### [v26.0420.0603] Zzc Corridor Sovereign v6
+- **核心**: 整合擠壓偵測與 Wyckoff 審計的波段走廊主權策略。
+- **技術**: Pine Script v6.0, 擠壓釋放邏輯, 實時審計 HUD。
+- **狀態**: 已實體化至 `strategies/`。
+
 ### [v26.0420.0002] Tn Sovereign MTF VIOP v6
-- **核心**: 多時框因果鏈與成交量物理規訓。
+- **核心**: 雙層時序對位（1M/5M）與物理能量過濾規訓。
 - **技術**: Pine Script v6.0, 非重繪 MTF, 實時審計 HUD。
 - **狀態**: 已實體化至 `strategies/`。
 
 ### [v26.0419.1801] Tn Sovereign Advanced Swing v6
 - **核心**: 多維時序對位（W/D/4H）與機構級因果過濾引擎。
 - **技術**: Pine Script v6.0, 動態風險對位, 實時審計 HUD。
-- **狀態**: 已實體化至 `strategies/`。
-
-### [v26.0418.1802] ZZC Market Structure Sovereign v6
-- **核心**: 多維波段結構與主權通道過濾系統。
-- **技術**: Pine Script v6.0, 非重繪 ZigZag, 自適應 ATR 風險管理。
-- **狀態**: 已實體化至 `strategies/`。
-
-### [v26.0420.0002] Tn Sovereign MTF VIOP v6
-- **核心**: 雙層時序對位（1M/5M）與物理能量過濾規訓。
-- **技術**: Pine Script v6.0, 非重繪 MTF, 實時審計 HUD。
 - **狀態**: 已實體化至 `strategies/`。

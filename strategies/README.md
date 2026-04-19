@@ -7,6 +7,7 @@
 - [`tn_universal_sovereign_v6.pine`](./tn_universal_sovereign_v6.md): 通用型主權規訓策略。
 - [`tn_multi_audit_sovereign_v6.pine`](./tn_multi_audit_sovereign_v6.md): 多維因果審計主權系統。
 - [`TnSovereignMtfIntradayV6.pine`](./TnSovereignMtfIntradayV6.md): 多時框因果對位日內策略。
+- [`TnSovereignMtfViopV6.pine`](./TnSovereignMtfViopV6.md): 具備時序審計特徵的多時框 VIOP 策略。
 
 ### 📐 Market Structure & Price Action (市場結構與價格行為)
 - [`ZzcMarketStructureSovereignV6.pine`](./ZzcMarketStructureSovereignV6.md): 波段結構主權策略 (ZZC)。
@@ -16,6 +17,7 @@
 - [`tn_sovereign_darvas_v6.pine`](./tn_sovereign_darvas_v6.md): 自動化達瓦斯箱體規訓。
 - [`tn_sovereign_fibonacci_v6.pine`](./tn_sovereign_fibonacci_v6.md): 結構性斐波那契回撤系統。
 - [`TnSovereignAdvancedSwingV6.pine`](./TnSovereignAdvancedSwingV6.md): 多維時序對位進階波段策略。
+- [`ZzcCorridorSovereignV6.pine`](./ZzcCorridorSovereignV6.md): 整合擠壓偵測與 Wyckoff 審計的波段走廊主權策略。
 
 ### 📊 Volume & Order Flow (成交量與訂單流感知)
 - [`volume_profile_matrix_v6.pine`](./volume_profile_matrix_v6.md): 自適應成交量分佈矩陣。
@@ -38,8 +40,6 @@
 - [`multi_agent_of_ensemble_v6.pine`](./multi_agent_of_ensemble_v6.md): 多代理人集成訂單流。
 - [`momentum_swarm_sovereign_v6.pine`](./momentum_swarm_sovereign_v6.md): 多資產動能輪動系統。
 
-- [`TnSovereignMtfViopV6.pine`](./TnSovereignMtfViopV6.md): 具備時序審計特徵的多時框 VIOP 策略。
-
 ### 🌍 Macro & Optimization (宏觀建模與優化)
 - [`macro_modeling_sovereign_v6.pine`](./macro_modeling_sovereign_v6.md): 宏觀環境狀態機規訓。
 - [`yield_spread_sovereign_v6.pine`](./yield_spread_sovereign_v6.md): 美債收益率差主權監測。
@@ -53,6 +53,3 @@
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
 - [`RsiMeanReversionSovereignV6.pine`](./RsiMeanReversionSovereignV6.md): 整合布林帶與 RSI 的均值回歸策略。
 - [`TnSovereignFakeoutConfirmedV6.pine`](./TnSovereignFakeoutConfirmedV6.md): 具備四層過濾器的假突破確認主權策略。
-- [`TnSovereignMtfViopV6.pine`](./TnSovereignMtfViopV6.md): 具備雙層時框過濾與成交量審計的 MTF 主權策略。
-
-- [`ZzcCorridorSovereignV6.pine`](./ZzcCorridorSovereignV6.md): 整合擠壓偵測與 Wyckoff 審計的波段走廊主權策略。
