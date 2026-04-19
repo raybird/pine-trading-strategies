@@ -1,0 +1,99 @@
+//@version=6
+strategy("Zzc Corridor Sovereign v6 [v26.0420.0603]",
+    shorttitle         = "ZZC_SOV_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true,
+    max_labels_count   = 500,
+    max_lines_count    = 500)
+
+// =====================================================
+// MODULE 1: SOVEREIGN VOLATILITY CORRIDOR (ZZC)
+// Advanced ZigZag with Keltner/Donchian Filters
+// =====================================================
+
+groupZZ = "📐 波段規訓 (ZigZag Settings)"
+zzMode = input.string("ATR", "ZigZag 模式", options=["ATR","PCT","DEV"], group=groupZZ)
+pivotLen = input.int(5, "樞軸寬度", minval=2, group=groupZZ)
+
+groupEnv = "🌌 走廊規訓 (Corridor Envelopes)"
+kcLen = input.int(20, "Keltner 週期", group=groupEnv)
+kcMult = input.float(2.0, "Keltner 倍數", group=groupEnv)
+dcLen = input.int(20, "Donchian 週期", group=groupEnv)
+
+// Volatility Core
+float atrVal = ta.atr(14)
+float kcMid = ta.ema(close, kcLen)
+float kcUpp = kcMid + atrVal * kcMult
+float kclow = kcMid - atrVal * kcMult
+
+float dcUpp = ta.highest(high, dcLen)
+float dcLow = ta.lowest(low, dcLen)
+
+// =====================================================
+// MODULE 2: CAUSAL EVENT DETECTION (WYCKOFF & SQUEEZE)
+// =====================================================
+
+groupAudit = "🛡️ 因果審計 (Causal Audit)"
+useSOW = input.bool(true, "啟用 Wyckoff SOW/LPSY 審計", group=groupAudit)
+useSqueeze = input.bool(true, "啟用擠壓 (Squeeze) 偵測", group=groupAudit)
+
+// Squeeze Logic (BB within KC)
+[bbMid, bbUpp, bbLow] = ta.bb(close, 20, 2.0)
+bool isSqueezed = bbUpp < kcUpp and bbLow > kclow
+bool squeezeReleaseL = not isSqueezed and isSqueezed[1] and close > kcMid
+bool squeezeReleaseS = not isSqueezed and isSqueezed[1] and close < kcMid
+
+// Wyckoff SOW (Sign of Weakness)
+spread = high - low
+volMA = ta.sma(volume, 20)
+isSOW = close < dcLow and volume > volMA and (close - low) < (high - close)
+
+// =====================================================
+// MODULE 3: SIGNAL SYNTHESIS & EXECUTION
+// =====================================================
+
+bool longEntry = squeezeReleaseL and close > dcUpp[1]
+bool shortEntry = squeezeReleaseS and close < dcLow[1]
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="ZZC-L")
+    strategy.exit("L-Exit", "Long", stop=close - atrVal * 2.5, limit=close + atrVal * 4.0)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="ZZC-S")
+    strategy.exit("S-Exit", "Short", stop=close + atrVal * 2.5, limit=close - atrVal * 4.0)
+
+// =====================================================
+// MODULE 4: SOVEREIGN HUD & VISUALS
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ ZZC SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Squeeze", text_color=color.gray)
+    table.cell(hud, 1, 1, isSqueezed ? "CHARGING" : "STABLE", text_color=isSqueezed ? color.orange : color.lime)
+    
+    table.cell(hud, 0, 2, "Wyckoff Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, isSOW ? "SOW DETECTED" : "NORMAL", text_color=isSOW ? color.red : color.gray)
+    
+    table.cell(hud, 0, 3, "Volatility", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "#.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0420.0603", text_color=color.gray)
+
+// Visuals
+plot(kcUpp, "Keltner Upper", color.new(color.gray, 60))
+plot(kclow, "Keltner Lower", color.new(color.gray, 60))
+fill(plot(kcUpp), plot(kclow), color.new(color.blue, 95), "Corridor Fill")
+plotshape(isSOW, "SOW", shape.triangledown, location.abovebar, color.red, size=size.tiny, text="SOW")
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
