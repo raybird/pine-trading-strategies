@@ -1,0 +1,131 @@
+//@version=6
+strategy("Tn Sovereign Fakeout Confirmed v6 [v26.0419.1202]",
+    shorttitle         = "TN_FC_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN CORE CONFIGURATION
+// =====================================================
+
+groupCore = "🎯 核心規訓 (Core Settings)"
+fastLen  = input.int(9,     "快線 EMA",   minval=1, group=groupCore)
+slowLen  = input.int(21,    "慢線 EMA",   minval=1, group=groupCore)
+atrLen   = input.int(14,    "ATR 週期",    minval=1, group=groupCore)
+slMult   = input.float(2.0, "止損 ATR 倍數", step=0.1, group=groupCore)
+tpMult   = input.float(3.0, "獲利 ATR 倍數", step=0.1, group=groupCore)
+
+// =====================================================
+// MODULE 2: CAUSAL AUDIT LAYERS (4-LAYER FILTER)
+// =====================================================
+
+// Layer 1: 物理能量審計 (Volume Filter)
+groupF1 = "F1: 物理能量 (Volume)"
+useVol  = input.bool(true,  "啟用成交量過濾", group=groupF1)
+volLen  = input.int(20,    "成交量 SMA 週期", minval=5, group=groupF1)
+volMult = input.float(1.5,  "成交量放大倍數", step=0.1, group=groupF1)
+
+volAvg = ta.sma(volume, volLen)
+bool f1_vol_pass = not useVol or volume > volAvg * volMult
+
+// Layer 2: 宏觀趨勢審計 (HTF Trend)
+groupF2 = "F2: 宏觀背景 (HTF Trend)"
+useHTF  = input.bool(true,  "啟用 HTF 趨勢過濾", group=groupF2)
+htfTF   = input.string("60", "HTF 週期", options=["15","30","60","240","D"], group=groupF2)
+htfLen  = input.int(50,    "HTF EMA 長度", minval=10, group=groupF2)
+
+// Non-repainting HTF acquisition
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+bool f2_htf_long = not useHTF or close > htfEma
+bool f2_htf_short = not useHTF or close < htfEma
+
+// Layer 3: 執行確認規訓 (Bar Confirmation)
+groupF3 = "F3: 執行確認 (Bar Confirmation)"
+useBar   = input.bool(true,  "啟用 K 線確認", group=groupF3)
+barConf  = input.int(1,      "確認 K 線數", minval=1, maxval=5, group=groupF3)
+
+var int barCountL = -1
+var int barCountS = -1
+
+// Layer 4: ATR 噪聲過濾 (ATR Noise Filter)
+groupF4 = "F4: 噪聲規訓 (ATR Noise)"
+useATR   = input.bool(true,  "啟用噪聲過濾", group=groupF4)
+atrNoise = input.float(0.3,  "最小移動位階 (ATR×)", step=0.05, group=groupF4)
+
+float atrVal = ta.atr(atrLen)
+bool f4_noise_pass = not useATR or math.abs(close - close[1]) > atrVal * atrNoise
+
+// =====================================================
+// MODULE 3: SIGNAL SYNTHESIS
+// =====================================================
+
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+
+bool rawLong  = ta.crossover(fastEma, slowEma)
+bool rawShort = ta.crossunder(fastEma, slowEma)
+
+if rawLong
+    barCountL := 0
+if rawShort
+    barCountS := 0
+if barCountL >= 0 and barCountL < barConf
+    barCountL += 1
+if barCountS >= 0 and barCountS < barConf
+    barCountS += 1
+
+bool barConfL = not useBar or (barCountL == barConf and close > slowEma)
+bool barConfS = not useBar or (barCountS == barConf and close < slowEma)
+
+// Final Sovereign Entry Signals
+bool longEntry  = (useBar ? barConfL : rawLong) and f1_vol_pass and f2_htf_long and f4_noise_pass
+bool shortEntry = (useBar ? barConfS : rawShort) and f1_vol_pass and f2_htf_short and f4_noise_pass
+
+// =====================================================
+// MODULE 4: EXECUTION & MONITORING
+// =====================================================
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="FC-Long")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="FC-Short")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal, comment_loss="SL", comment_profit="TP")
+
+// =====================================================
+// MODULE 5: VISUALIZATION & AUDIT HUD
+// =====================================================
+
+plot(fastEma, "Fast EMA", color.new(color.lime, 0))
+plot(slowEma, "Slow EMA", color.new(color.green, 20), 2)
+plot(htfEma,  "HTF EMA",  color.new(color.orange, 40), 1)
+
+bgcolor(longEntry ? color.new(color.green, 90) : shortEntry ? color.new(color.red, 90) : na)
+
+// Real-time Audit Table
+var table ft = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(ft, 0, 0, "◈ AUDIT", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(ft, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(ft, 0, 1, "Volume", text_color=color.gray)
+    table.cell(ft, 1, 1, f1_vol_pass ? "PASS" : "GATE", text_color=f1_vol_pass ? color.lime : color.red)
+    
+    table.cell(ft, 0, 2, "HTF Trend", text_color=color.gray)
+    table.cell(ft, 1, 2, (strategy.position_size >= 0 ? f2_htf_long : f2_htf_short) ? "PASS" : "GATE", text_color=color.yellow)
+    
+    table.cell(ft, 0, 3, "Bar Conf", text_color=color.gray)
+    table.cell(ft, 1, 3, (barCountL == barConf or barCountS == barConf) ? "PASS" : "WAIT", text_color=color.aqua)
+    
+    table.cell(ft, 0, 4, "ATR Noise", text_color=color.gray)
+    table.cell(ft, 1, 4, f4_noise_pass ? "PASS" : "GATE", text_color=f4_noise_pass ? color.lime : color.red)
+    
+    table.cell(ft, 0, 5, "Version", text_color=color.gray)
+    table.cell(ft, 1, 5, "v26.0419.1202", text_color=color.gray)

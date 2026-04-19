@@ -51,3 +51,5 @@
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
 
 - [`RsiMeanReversionSovereignV6.pine`](./RsiMeanReversionSovereignV6.md): 整合布林帶與 RSI 的均值回歸策略。
+
+- [`TnSovereignFakeoutConfirmedV6.pine`](./TnSovereignFakeoutConfirmedV6.md): 具備四層過濾器的假突破確認主權策略。
