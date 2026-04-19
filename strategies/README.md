@@ -38,6 +38,8 @@
 - [`multi_agent_of_ensemble_v6.pine`](./multi_agent_of_ensemble_v6.md): 多代理人集成訂單流。
 - [`momentum_swarm_sovereign_v6.pine`](./momentum_swarm_sovereign_v6.md): 多資產動能輪動系統。
 
+- [`TnSovereignMtfViopV6.pine`](./TnSovereignMtfViopV6.md): 具備時序審計特徵的多時框 VIOP 策略。
+
 ### 🌍 Macro & Optimization (宏觀建模與優化)
 - [`macro_modeling_sovereign_v6.pine`](./macro_modeling_sovereign_v6.md): 宏觀環境狀態機規訓。
 - [`yield_spread_sovereign_v6.pine`](./yield_spread_sovereign_v6.md): 美債收益率差主權監測。

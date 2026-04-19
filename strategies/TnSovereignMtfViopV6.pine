@@ -1,0 +1,100 @@
+//@version=6
+strategy("Tn Sovereign MTF VIOP v6 [v26.0420.0002]",
+    shorttitle         = "TN_MTF_V26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN TIME-FRAME DISCIPLINE
+// =====================================================
+
+groupHTF = "🌌 宏觀時序規訓 (HTF Context)"
+trendTF  = input.string("5", "宏觀時框 (分鐘)", options=["3","5","15","30","60"], group=groupHTF)
+trendF   = input.int(9,     "宏觀快線 EMA", minval=1, group=groupHTF)
+trendS   = input.int(21,    "宏觀慢線 EMA", minval=1, group=groupHTF)
+stFact   = input.float(3.0, "Supertrend 因子", step=0.1, group=groupHTF)
+stLen    = input.int(10,    "Supertrend ATR 週期", group=groupHTF)
+
+// Secure MTF acquisition (No-repaint)
+[tfFEma, tfSEma, tfStDir] = request.security(
+    syminfo.tickerid, trendTF,
+    [ta.ema(close, trendF)[1],
+     ta.ema(close, trendS)[1],
+     ta.supertrend(stFact, stLen)[1][1]],
+    lookahead = barmerge.lookahead_on)
+
+bool trendBull = tfFEma > tfSEma and tfStDir == 1
+bool trendBear = tfFEma < tfSEma and tfStDir == -1
+
+// =====================================================
+// MODULE 2: EXECUTION LAYERS (ENTRY TF)
+// =====================================================
+
+groupEntry = "🎯 執行層規訓 (Entry Settings)"
+entF    = input.int(9,     "執行快線 EMA", group=groupEntry)
+entS    = input.int(21,    "執行慢線 EMA", group=groupEntry)
+atrLen  = input.int(14,    "ATR 週期", group=groupEntry)
+slMult  = input.float(2.0, "止損 ATR 倍數", group=groupEntry)
+tpMult  = input.float(3.0, "獲利 ATR 倍數", group=groupEntry)
+
+// Filters
+groupFilt = "🛡️ 物理過濾規訓 (Filters)"
+useVol    = input.bool(true,  "成交量激增審計", group=groupFilt)
+volMult   = input.float(1.3,  "成交量倍數", group=groupFilt)
+useNoise  = input.bool(true,  "ATR 噪聲過濾", group=groupFilt)
+noiseMult = input.float(0.3,  "最小位階 (ATR×)", group=groupFilt)
+
+float entFEma = ta.ema(close, entF)
+float entSEma = ta.ema(close, entS)
+float atrVal  = ta.atr(atrLen)
+float volAvg  = ta.sma(volume, 20)
+
+bool f_vol   = not useVol   or volume > volAvg * volMult
+bool f_noise = not useNoise or math.abs(close - close[1]) > atrVal * noiseMult
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+bool longEntry  = ta.crossover(entFEma, entSEma) and trendBull and f_vol and f_noise
+bool shortEntry = ta.crossunder(entFEma, entSEma) and trendBear and f_vol and f_noise
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="MTF-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="MTF-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table st = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(st, 0, 0, "◈ SOVEREIGN", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(st, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(st, 0, 1, "HTF Trend", text_color=color.gray)
+    table.cell(st, 1, 1, trendBull ? "BULL" : trendBear ? "BEAR" : "NEUTRAL", text_color=trendBull ? color.lime : trendBear ? color.red : color.gray)
+    
+    table.cell(st, 0, 2, "Vol Audit", text_color=color.gray)
+    table.cell(st, 1, 2, f_vol ? "PASS" : "GATE", text_color=f_vol ? color.lime : color.red)
+    
+    table.cell(st, 0, 3, "Noise Filter", text_color=color.gray)
+    table.cell(st, 1, 3, f_noise ? "CLEAN" : "NOISE", text_color=f_noise ? color.lime : color.red)
+    
+    table.cell(st, 0, 4, "Version", text_color=color.gray)
+    table.cell(st, 1, 4, "v26.0420.0002", text_color=color.gray)
+
+// Visuals
+plot(entFEma, "Entry Fast", color.new(color.green, 0))
+plot(entSEma, "Entry Slow", color.new(color.red, 0))
+plot(tfFEma,  "HTF Benchmark", color.new(color.orange, 50), 2, style=plot.style_linebr)

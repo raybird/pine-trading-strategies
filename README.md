@@ -54,6 +54,11 @@
 ---
 *Created and evolved by Raybird via TeleNexus Studio.*
 
+### [v26.0420.0002] Tn Sovereign MTF VIOP v6
+- **核心**: 多時框因果鏈與成交量物理規訓。
+- **技術**: Pine Script v6.0, 非重繪 MTF, 實時審計 HUD。
+- **狀態**: 已實體化至 `strategies/`。
+
 ### [v26.0419.1801] Tn Sovereign Advanced Swing v6
 - **核心**: 多維時序對位（W/D/4H）與機構級因果過濾引擎。
 - **技術**: Pine Script v6.0, 動態風險對位, 實時審計 HUD。
