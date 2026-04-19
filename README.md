@@ -68,3 +68,8 @@
 - **核心**: 多維波段結構與主權通道過濾系統。
 - **技術**: Pine Script v6.0, 非重繪 ZigZag, 自適應 ATR 風險管理。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0420.0002] Tn Sovereign MTF VIOP v6
+- **核心**: 雙層時序對位（1M/5M）與物理能量過濾規訓。
+- **技術**: Pine Script v6.0, 非重繪 MTF, 實時審計 HUD。
+- **狀態**: 已實體化至 `strategies/`。
