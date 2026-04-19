@@ -1,0 +1,122 @@
+//@version=6
+strategy("Tn Sovereign Advanced Swing v6 [v26.0419.1801]",
+    shorttitle         = "TN_ASW_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN SIGNAL ENGINE (SWE)
+// Multi-source raw signal detection with v6 dynamic inputs
+// =====================================================
+
+groupSWE = "🌌 訊號規訓 (Signal Engine)"
+useEMA = input.bool(true, "EMA 交叉 + 回調", group=groupSWE)
+useRSI = input.bool(true, "RSI 動能與背離", group=groupSWE)
+useVOL = input.bool(true, "成交量激增審計", group=groupSWE)
+
+// Settings 1. EMA
+fastLen = input.int(9, "快線 EMA", minval=1, group="1. EMA Config", active=useEMA)
+slowLen = input.int(21, "慢線 EMA", minval=1, group="1. EMA Config", active=useEMA)
+
+// Settings 2. RSI
+rsiLen = input.int(14, "RSI 長度", minval=2, group="2. RSI Config", active=useRSI)
+rsiBull = input.int(40, "多頭門檻", group="2. RSI Config", active=useRSI)
+rsiBear = input.int(60, "空頭門檻", group="2. RSI Config", active=useRSI)
+
+// =====================================================
+// MODULE 2: CAUSAL FILTERS (CFE)
+// Logic equivalent to institutional audit layers
+// =====================================================
+
+groupCFE = "🛡️ 因果過濾 (Causal Filters)"
+useRegime = input.bool(true, "市場環境過濾", group=groupCFE)
+regimeLen = input.int(200, "環境判定 EMA", group=groupCFE, active=useRegime)
+
+float mainEma = ta.ema(close, regimeLen)
+bool isBullishRegime = not useRegime or close > mainEma
+bool isBearishRegime = not useRegime or close < mainEma
+
+// =====================================================
+// MODULE 3: MTF ALIGNMENT (MAA)
+// Weekly Bias -> Daily Signal -> 4H Timing
+// =====================================================
+
+groupMAA = "⏱️ 時序對位 (MTF Alignment)"
+useMTF = input.bool(true, "啟用 MTF 因果鏈", group=groupMAA)
+
+// Higher Timeframe Logic (Non-repainting)
+float weeklyEma = request.security(syminfo.tickerid, "W", ta.ema(close, 20)[1], lookahead=barmerge.lookahead_on)
+bool weeklyPassL = not useMTF or close > weeklyEma
+bool weeklyPassS = not useMTF or close < weeklyEma
+
+// =====================================================
+// MODULE 4: RISK & EXECUTION (RE)
+// =====================================================
+
+groupRE = "⚖️ 風險對位 (Risk & Execution)"
+riskPerTrade = input.float(1.0, "單筆風險 %", minval=0.1, group=groupRE)
+atrLen = input.int(14, "ATR 週期", group=groupRE)
+slMult = input.float(2.0, "止損 ATR 倍數", group=groupRE)
+tpRR   = input.float(2.5, "獲利盈虧比 (RR)", group=groupRE)
+
+float atrVal = ta.atr(atrLen)
+
+// Signal Synthesis
+float fEma = ta.ema(close, fastLen)
+float sEma = ta.ema(close, slowLen)
+float rsi  = ta.rsi(close, rsiLen)
+
+bool baseLong = ta.crossover(fEma, sEma) and (not useRSI or rsi > rsiBull)
+bool baseShort = ta.crossunder(fEma, sEma) and (not useRSI or rsi < rsiBear)
+
+bool finalLong = baseLong and isBullishRegime and weeklyPassL
+bool finalShort = baseShort and isBearishRegime and weeklyPassS
+
+// Position Sizing
+float riskAmount = strategy.equity * (riskPerTrade / 100)
+float slDist = atrVal * slMult
+float qty = slDist > 0 ? riskAmount / slDist : 0
+
+if finalLong and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty, comment="ASW-Long")
+    strategy.exit("L-Exit", "Long", stop=close - slDist, limit=close + slDist * tpRR)
+
+if finalShort and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty, comment="ASW-Short")
+    strategy.exit("S-Exit", "Short", stop=close + slDist, limit=close - slDist * tpRR)
+
+// =====================================================
+// MODULE 5: AUDIT DASHBOARD (HUD)
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ SOVEREIGN", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Regime (D)", text_color=color.gray)
+    table.cell(hud, 1, 1, isBullishRegime ? "BULL" : "BEAR", text_color=isBullishRegime ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "MTF Bias (W)", text_color=color.gray)
+    table.cell(hud, 1, 2, weeklyPassL ? "PASS" : "BLOCK", text_color=weeklyPassL ? color.yellow : color.orange)
+    
+    table.cell(hud, 0, 3, "ATR Vol", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "#.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Equity", text_color=color.gray)
+    table.cell(hud, 1, 4, str.tostring(strategy.equity, "#"), text_color=color.white)
+
+    table.cell(hud, 0, 5, "Version", text_color=color.gray)
+    table.cell(hud, 1, 5, "v26.0419.1801", text_color=color.gray)
+
+// Visuals
+plot(weeklyEma, "Weekly Benchmark", color.new(color.gray, 50), 2, plot.style_linebr)
+plot(mainEma, "Regime EMA", color.new(color.blue, 70), 3)
+plotshape(finalLong, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(finalShort, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

@@ -15,6 +15,7 @@
 - [`smc_sovereign_v6.pine`](./smc_sovereign_v6.md): 聰明錢概念 (SMC) 主權化實作。
 - [`tn_sovereign_darvas_v6.pine`](./tn_sovereign_darvas_v6.md): 自動化達瓦斯箱體規訓。
 - [`tn_sovereign_fibonacci_v6.pine`](./tn_sovereign_fibonacci_v6.md): 結構性斐波那契回撤系統。
+- [`TnSovereignAdvancedSwingV6.pine`](./TnSovereignAdvancedSwingV6.md): 多維時序對位進階波段策略。
 
 ### 📊 Volume & Order Flow (成交量與訂單流感知)
 - [`volume_profile_matrix_v6.pine`](./volume_profile_matrix_v6.md): 自適應成交量分佈矩陣。
@@ -46,10 +47,7 @@
 ---
 *註：所有的策略現在均具備 100% 的因果說明文件。*
 
-### 🏛️ Sovereign FlowZone (Batch 7)
+### 🏛️ Sovereign FlowZone & Refinements (Batch 7)
 - [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
-- [`TnSovereignFlowZoneV6.pine`](./TnSovereignFlowZoneV6.md): 因果匯流主權策略。
-
 - [`RsiMeanReversionSovereignV6.pine`](./RsiMeanReversionSovereignV6.md): 整合布林帶與 RSI 的均值回歸策略。
-
 - [`TnSovereignFakeoutConfirmedV6.pine`](./TnSovereignFakeoutConfirmedV6.md): 具備四層過濾器的假突破確認主權策略。
