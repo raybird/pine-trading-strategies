@@ -1,0 +1,105 @@
+//@version=6
+strategy("Tn Sovereign Liquidity Matrix v6 [v26.0420.1802]",
+    shorttitle         = "TN_ALM_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true,
+    max_boxes_count    = 500,
+    max_labels_count   = 500)
+
+// =====================================================
+// MODULE 1: MATRIX CORE ENGINE (MCE)
+// MTF Polarity & Adaptive Fibonacci Grid
+// =====================================================
+
+groupMCE = "🌌 矩陣核心規訓 (Matrix Engine)"
+tfSelection = input.timeframe("D", "宏觀定標時框", group=groupMCE)
+lookbackLen = input.int(200, "成交量回溯長度", minval=1, group=groupMCE)
+fibMult     = input.float(3.0, "斐波那契波動倍數", minval=0.1, step=0.5, group=groupMCE)
+
+// Macro Extraction Logic
+f_macro_data(_len) =>
+    idx = ta.highestbars(volume, _len)
+    a_idx = math.abs(idx)
+    _atr = ta.atr(14)
+    [open[a_idx], high[a_idx], low[a_idx], close[a_idx], _atr[a_idx]]
+
+[m_open, m_high, m_low, m_close, m_atr] = request.security(syminfo.tickerid, tfSelection, f_macro_data(lookbackLen), lookahead=barmerge.lookahead_on)
+
+bool isBullAnchor = m_close >= m_open
+float macroAnchor = isBullAnchor ? m_low : m_high
+
+// Fibonacci Matrix Levels
+var float[] fibs = array.from(0.382, 0.618, 1.000, 1.618, 2.618, 4.236)
+float[] matrixLevels = array.new_float()
+
+if not na(macroAnchor) and not na(m_atr)
+    for f in fibs
+        float offset = f * m_atr * fibMult
+        array.push(matrixLevels, macroAnchor + offset) // Supply Zones
+        array.push(matrixLevels, macroAnchor - offset) // Demand Zones
+
+// =====================================================
+// MODULE 2: CAUSAL SIGNAL SYNTHESIS (CSS)
+// Entry/Exit based on Liquidity Interaction
+// =====================================================
+
+groupCSS = "🛡️ 訊號合成規訓 (Signals)"
+zoneTol  = input.float(0.15, "區域容差 (%)", minval=0.01, step=0.05, group=groupCSS)
+
+float closestSupply = 9999999.9
+float closestDemand = 0.0
+
+for i = 0 to array.size(matrixLevels) - 1
+    float lvl = array.get(matrixLevels, i)
+    if lvl > macroAnchor and lvl < closestSupply
+        closestSupply := lvl
+    if lvl < macroAnchor and lvl > closestDemand
+        closestDemand := lvl
+
+// Entry Logic: Rejection from Matrix Zones
+bool longEntry  = ta.crossover(close, closestDemand) and low < closestDemand * (1 + zoneTol/100)
+bool shortEntry = ta.crossunder(close, closestSupply) and high > closestSupply * (1 - zoneTol/100)
+
+if longEntry and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="ALM-B")
+    strategy.exit("L-Exit", "Long", stop=closestDemand * 0.98, limit=closestSupply * 0.99)
+
+if shortEntry and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="ALM-S")
+    strategy.exit("S-Exit", "Short", stop=closestSupply * 1.02, limit=closestDemand * 1.01)
+
+// =====================================================
+// MODULE 3: SOVEREIGN AUDIT HUD (HUD)
+// =====================================================
+
+var table hud = table.new(position.bottom_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ MATRIX SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Anchor", text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(macroAnchor, format.mintick), text_color=color.yellow)
+    
+    table.cell(hud, 0, 2, "Polarity", text_color=color.gray)
+    table.cell(hud, 1, 2, isBullAnchor ? "BULL" : "BEAR", text_color=isBullAnchor ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Next Supply", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(closestSupply, format.mintick), text_color=color.orange)
+    
+    table.cell(hud, 0, 4, "Next Demand", text_color=color.gray)
+    table.cell(hud, 1, 4, str.tostring(closestDemand, format.mintick), text_color=color.aqua)
+
+    table.cell(hud, 0, 5, "Version", text_color=color.gray)
+    table.cell(hud, 1, 5, "v26.0420.1802", text_color=color.gray)
+
+// Visuals (Ghosting Logic simplified for Strategy)
+for i = 0 to array.size(matrixLevels) - 1
+    float lvl = array.get(matrixLevels, i)
+    color col = lvl > macroAnchor ? color.new(color.red, 85) : color.new(color.lime, 85)
+    line.new(bar_index[10], lvl, bar_index, lvl, color=col, width=1, extend=extend.right)
