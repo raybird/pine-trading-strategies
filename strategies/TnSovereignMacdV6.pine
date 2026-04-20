@@ -1,0 +1,85 @@
+//@version=6
+strategy("Tn Sovereign MACD v6 [v26.0421.0604]",
+    shorttitle         = "TN_MACD_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN MOMENTUM AUDIT (MACD)
+// =====================================================
+
+groupMACD = "🌌 動能規訓 (MACD Config)"
+fastLen   = input.int(12, "快線週期", minval=1, group=groupMACD)
+slowLen   = input.int(26, "慢線週期", minval=1, group=groupMACD)
+sigLen    = input.int(9,  "信號線週期", minval=1, group=groupMACD)
+
+[macdLine, signalLine, histLine] = ta.macd(close, fastLen, slowLen, sigLen)
+
+// Slope Audit (Causal Momentum)
+histSlope = histLine - histLine[1]
+bool slopeBull = histSlope > 0
+bool slopeBear = histSlope < 0
+
+// =====================================================
+// MODULE 2: REGIME & VOLATILITY FILTERS
+// =====================================================
+
+groupAudit = "🛡️ 因果過濾 (Audit Layers)"
+useTrend   = input.bool(true, "啟用 200 EMA 趨勢過濾", group=groupAudit)
+trendLen   = input.int(200,   "趨勢 EMA 週期", group=groupAudit)
+atrLen     = input.int(14,    "ATR 週期", group=groupAudit)
+slMult     = input.float(2.0, "止損 ATR 倍數", step=0.1, group=groupAudit)
+tpMult     = input.float(3.5, "獲利 ATR 倍數", step=0.1, group=groupAudit)
+
+float trendEma = ta.ema(close, trendLen)
+float atrVal   = ta.atr(atrLen)
+
+bool regimeBull = not useTrend or close > trendEma
+bool regimeBear = not useTrend or close < trendEma
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+bool longEntry  = ta.crossover(macdLine, signalLine) and regimeBull and slopeBull
+bool shortEntry = ta.crossunder(macdLine, signalLine) and regimeBear and slopeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="MACD-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="MACD-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ MACD SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Regime (200)", text_color=color.gray)
+    table.cell(hud, 1, 1, regimeBull ? "BULL" : "BEAR", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "Hist Slope", text_color=color.gray)
+    table.cell(hud, 1, 2, slopeBull ? "RISING" : "FALLING", text_color=slopeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Volatility", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "##.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0421.0604", text_color=color.gray)
+
+// Visuals
+plot(trendEma, "Trend Floor", color.new(color.gray, 60), 1)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

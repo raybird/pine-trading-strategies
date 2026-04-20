@@ -57,3 +57,5 @@
 - [`TnSovereignChandelierV6.pine`](./TnSovereignChandelierV6.md): 整合 200 EMA 與物理能量審計的吊燈止損趨勢策略。
 
 - [`TnSovereignAdxTrendV6.pine`](./TnSovereignAdxTrendV6.md): 整合 ADX 趨勢強度審計與 ATR 風險對位的 v6 策略。
+
+- [`TnSovereignMacdV6.pine`](./TnSovereignMacdV6.md): 整合動能斜率審計與 200 EMA 過濾的主權 MACD 策略。
