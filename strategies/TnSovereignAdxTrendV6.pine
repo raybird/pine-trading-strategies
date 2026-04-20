@@ -1,0 +1,81 @@
+//@version=6
+strategy("Tn Sovereign ADX Trend v6 [v26.0421.0005]",
+    shorttitle         = "TN_ADX_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN TREND STRENGTH AUDIT
+// ADX & DMI Logic for Causal Intensity
+// =====================================================
+
+groupADX = "🌌 趨勢強度規訓 (ADX Config)"
+adxLen   = input.int(14, "ADX 長度", minval=1, group=groupADX)
+adxMin   = input.float(25, "最小趨勢門檻", minval=10, maxval=50, group=groupADX)
+
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+bool trendStrong = adxVal >= adxMin
+
+// =====================================================
+// MODULE 2: EXECUTION LAYERS
+// EMA Cross with DMI Confirmation
+// =====================================================
+
+groupEntry = "🎯 執行層規訓 (Execution)"
+fastLen  = input.int(9,  "快線 EMA", minval=1, group=groupEntry)
+slowLen  = input.int(21, "慢線 EMA", minval=1, group=groupEntry)
+atrLen   = input.int(14, "ATR 週期", minval=1, group=groupEntry)
+slMult   = input.float(2.0, "止損 ATR 倍數", step=0.1, group=groupEntry)
+tpMult   = input.float(3.5, "獲利 ATR 倍數", step=0.1, group=groupEntry)
+
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(atrLen)
+
+bool bullCross = ta.crossover(fastEma, slowEma) and trendStrong and diPlus > diMinus
+bool bearCross = ta.crossunder(fastEma, slowEma) and trendStrong and diMinus > diPlus
+
+// =====================================================
+// MODULE 3: CAUSAL EXECUTION
+// =====================================================
+
+if bullCross and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="ADX-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if bearCross and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="ADX-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ ADX SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Strength", text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(adxVal, "##.##"), text_color=trendStrong ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "DMI Bias", text_color=color.gray)
+    table.cell(hud, 1, 2, diPlus > diMinus ? "BULLISH" : "BEARISH", text_color=diPlus > diMinus ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Volatility", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "##.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0421.0005", text_color=color.gray)
+
+// Visuals
+plot(fastEma, "Fast", color.new(color.green, 0), 2)
+plot(slowEma, "Slow", color.new(color.red, 0), 2)
+plotshape(bullCross, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(bearCross, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
