@@ -59,3 +59,5 @@
 - [`TnSovereignAdxTrendV6.pine`](./TnSovereignAdxTrendV6.md): 整合 ADX 趨勢強度審計與 ATR 風險對位的 v6 策略。
 
 - [`TnSovereignMacdV6.pine`](./TnSovereignMacdV6.md): 整合動能斜率審計與 200 EMA 過濾的主權 MACD 策略。
+
+- [`TnSovereignBbBreakoutV6.pine`](./TnSovereignBbBreakoutV6.md): 整合布林帶突破、肯特納擠壓與成交量審計的 v6 策略。
