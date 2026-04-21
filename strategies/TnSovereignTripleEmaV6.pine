@@ -1,0 +1,91 @@
+//@version=6
+strategy("Tn Sovereign Triple EMA v6 [v26.0422.0011]",
+    shorttitle         = "TN_3EMA_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN ALIGNMENT CORE (5/13/34)
+// =====================================================
+
+groupEMA = "🌌 均線規訓 (EMA Config)"
+e1Len    = input.int(5,  "快線週期 (EMA 1)", minval=1, group=groupEMA)
+e2Len    = input.int(13, "中線週期 (EMA 2)", minval=1, group=groupEMA)
+e3Len    = input.int(34, "慢線週期 (EMA 3)", minval=1, group=groupEMA)
+
+float ema1 = ta.ema(close, e1Len)
+float ema2 = ta.ema(close, e2Len)
+float ema3 = ta.ema(close, e3Len)
+
+bool bullAlign = ema1 > ema2 and ema2 > ema3
+bool bearAlign = ema1 < ema2 and ema2 < ema3
+
+// =====================================================
+// MODULE 2: REGIME & ENERGY AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 因果審計 (Audit Layers)"
+useRegime  = input.bool(true, "啟用 200 EMA 全球地板", group=groupAudit)
+regimeLen  = input.int(200, "環境 EMA 週期", group=groupAudit)
+useVol     = input.bool(true, "啟用成交量審計", group=groupAudit)
+
+float regimeEma = ta.ema(close, regimeLen)
+bool regimeBull = not useRegime or close > regimeEma
+bool regimeBear = not useRegime or close < regimeEma
+
+volAvg = ta.sma(volume, 20)
+bool volPass = not useVol or volume > volAvg * 1.1
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+bool longCondition  = bullAlign and not bullAlign[1] and regimeBull and volPass
+bool shortCondition = bearAlign and not bearAlign[1] and regimeBear and volPass
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="3EMA-L")
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="3EMA-S")
+
+// Exit if alignment breaks
+if strategy.position_size > 0 and not bullAlign
+    strategy.close("Long", comment="Exit-L")
+if strategy.position_size < 0 and not bearAlign
+    strategy.close("Short", comment="Exit-S")
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ TRIPLE EMA", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Alignment", text_color=color.gray)
+    table.cell(hud, 1, 1, bullAlign ? "BULL" : bearAlign ? "BEAR" : "NO-SYNC", text_color=bullAlign ? color.lime : bearAlign ? color.red : color.yellow)
+    
+    table.cell(hud, 0, 2, "Regime Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, regimeBull ? "LONG-ONLY" : regimeBear ? "SHORT-ONLY" : "BLOCK", text_color=color.aqua)
+    
+    table.cell(hud, 0, 3, "Vol Audit", text_color=color.gray)
+    table.cell(hud, 1, 3, volPass ? "PASS" : "LOW-E", text_color=volPass ? color.lime : color.orange)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0422.0011", text_color=color.gray)
+
+// Visuals
+plot(ema1, "EMA 5",  color.new(color.green, 20), 1)
+plot(ema2, "EMA 13", color.new(color.lime, 0), 2)
+plot(ema3, "EMA 34", color.new(color.teal, 0), 3)
+plot(regimeEma, "Regime Floor", color.new(color.orange, 60), 1, style=plot.style_linebr)
+plotshape(longCondition, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortCondition, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
