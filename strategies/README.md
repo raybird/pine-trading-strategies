@@ -65,3 +65,5 @@
 - [`TnSovereignSupertrendV6.pine`](./TnSovereignSupertrendV6.md): 整合多維趨勢地板 (200/50 EMA) 的主權超級趨勢策略。
 
 - [`TnSovereignTripleEmaV6.pine`](./TnSovereignTripleEmaV6.md): 整合 5/13/34 對位與 200 EMA 全球地板的主權三均線策略。
+
+- [`TnSovereignSessionQuantV6.pine`](./TnSovereignSessionQuantV6.md): 整合時段規訓與區間突破審計的 v6 策略。
