@@ -1,92 +1,85 @@
 //@version=6
-strategy("Tn Sovereign FlowZone v6 [v26.0419.0000]", 
-     shorttitle="TN_FZ_v26", 
-     overlay=true, 
-     initial_capital=100000, 
-     default_qty_type=strategy.percent_of_equity, 
-     default_qty_value=10, 
-     commission_type=strategy.commission.percent, 
-     commission_value=0.05,
-     process_orders_on_close=true)
+strategy("Tn Sovereign FlowZone v6 [v26.0421.1206]",
+    shorttitle         = "TN_FZ_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true,
+    max_labels_count   = 500)
 
 // =====================================================
-// MODULE 1: SOVEREIGN INPUTS
+// MODULE 1: SOVEREIGN CONFLUENCE CORE
 // =====================================================
 
 groupCore = "🎯 核心規訓 (Core Settings)"
-strategyMode = input.string("Sovereign", "策略模式", options=["Aggressive", "Balanced", "Sovereign"], group=groupCore)
-confThreshold = input.float(7.5, "因果匯流閾值", minval=5.0, maxval=10.0, step=0.1, group=groupCore)
+confThreshold = input.float(7.0, "匯流門檻", minval=5.0, maxval=10.0, step=0.1, group=groupCore)
+trendLen = input.int(200, "環境 EMA 週期", group=groupCore)
 
-groupRisk = "⚖️ 風險管理 (Risk Management)"
-riskPerTrade = input.float(1.5, "單筆風險 (%)", minval=0.1, maxval=5.0, step=0.1, group=groupRisk)
-slAtrMult = input.float(2.0, "止損 ATR 倍數", minval=0.5, maxval=5.0, step=0.1, group=groupRisk)
-tpRatio = input.float(2.5, "獲利盈虧比", minval=1.0, group=groupRisk)
-
-// =====================================================
-// MODULE 2: CAUSAL CONFLUENCE ENGINE
-// =====================================================
-
-// 物理支柱 1: 趨勢對位 (Trend Alignment)
+// Causal Components (Mock for Base, can be expanded)
 ema20 = ta.ema(close, 20)
 ema50 = ta.ema(close, 50)
-ema200 = ta.ema(close, 200)
-bool isTrendLong = close > ema200 and ema20 > ema50
-bool isTrendShort = close < ema200 and ema20 < ema50
+trendEma = ta.ema(close, trendLen)
 
-// 物理支柱 2: 動能規訓 (Momentum)
-rsiVal = ta.rsi(close, 14)
-bool isMomLong = rsiVal > 50 and rsiVal > rsiVal[1]
-bool isMomShort = rsiVal < 50 and rsiVal < rsiVal[1]
+// Confluence Logic: Trend + Momentum + Volume
+volMA = ta.sma(volume, 20)
+volAudit = volume > volMA * 1.2 ? 1.0 : 0.0
+trendAudit = close > trendEma ? 2.0 : -2.0
+momAudit = ta.rsi(close, 14) > 50 ? 1.0 : -1.0
 
-// 物理支柱 3: 波動率審計 (Volatility)
-atrVal = ta.atr(14)
-float volRel = atrVal / ta.sma(atrVal, 50)
-bool isVolHealthy = volRel > 0.8
-
-// 因果評分 (Confluence Score)
-float confluenceScore = 0.0
-confluenceScore += isTrendLong or isTrendShort ? 4.0 : 0.0
-confluenceScore += isMomLong or isMomShort ? 3.0 : 0.0
-confluenceScore += isVolHealthy ? 3.0 : 0.0
+confluenceScore = 5.0 + trendAudit + volAudit + momAudit
 
 // =====================================================
-// MODULE 3: EXECUTION LOGIC
+// MODULE 2: RISK & EXECUTION LAYERS
 // =====================================================
 
-bool longSignal = isTrendLong and isMomLong and isVolHealthy and confluenceScore >= confThreshold
-bool shortSignal = isTrendShort and isMomShort and isVolHealthy and confluenceScore >= confThreshold
+groupRisk = "⚖️ 風險規訓 (Risk Management)"
+atrLen   = input.int(14,    "ATR 週期", group=groupRisk)
+slMult   = input.float(2.0, "止損 ATR 倍數", group=groupRisk)
+tp1Ratio = input.float(1.5, "TP1 盈虧比", group=groupRisk)
+tp2Ratio = input.float(3.0, "TP2 盈虧比", group=groupRisk)
 
-// 倉位大小計算 (基於風險)
-float stopDist = atrVal * slAtrMult
-float riskAmt = strategy.equity * (riskPerTrade / 100)
-float posSize = riskAmt / stopDist
-
-if longSignal and strategy.position_size == 0
-    strategy.entry("Long", strategy.long, qty=posSize, comment="SOV Buy Score: " + str.tostring(confluenceScore, "#.1"))
-    strategy.exit("L-Exit", "Long", stop=close - stopDist, limit=close + stopDist * tpRatio)
-
-if shortSignal and strategy.position_size == 0
-    strategy.entry("Short", strategy.short, qty=posSize, comment="SOV Sell Score: " + str.tostring(confluenceScore, "#.1"))
-    strategy.exit("S-Exit", "Short", stop=close + stopDist, limit=close - stopDist * tpRatio)
+atrVal = ta.atr(atrLen)
+longCondition = ta.crossover(ema20, ema50) and confluenceScore >= confThreshold and close > trendEma
+shortCondition = ta.crossunder(ema20, ema50) and confluenceScore <= (10.0 - confThreshold) and close < trendEma
 
 // =====================================================
-// MODULE 4: VISUALIZATION & HUD
+// MODULE 3: CAUSAL EXECUTION
 // =====================================================
 
-plot(ema20, "Fast EMA", color.new(color.lime, 0))
-plot(ema50, "Mid EMA", color.new(color.blue, 0))
-plot(ema200, "Slow EMA", color.new(color.red, 0), 2)
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="FZ-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tp1Ratio * (slMult * atrVal))
 
-bgcolor(longSignal ? color.new(color.green, 90) : shortSignal ? color.new(color.red, 90) : na)
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="FZ-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tp1Ratio * (slMult * atrVal))
 
-// Dashboard
-var table ui = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 70), border_width=1)
-if barstate.islast
-    table.cell(ui, 0, 0, "Metrics", text_color=color.white)
-    table.cell(ui, 1, 0, "Value", text_color=color.white)
-    table.cell(ui, 0, 1, "Confluence", text_color=color.gray)
-    table.cell(ui, 1, 1, str.tostring(confluenceScore, "#.1") + "/10", bgcolor=confluenceScore >= confThreshold ? color.green : color.red)
-    table.cell(ui, 0, 2, "Regime", text_color=color.gray)
-    table.cell(ui, 1, 2, strategyMode, text_color=color.yellow)
-    table.cell(ui, 0, 3, "Version", text_color=color.gray)
-    table.cell(ui, 1, 3, "v26.0419.0000", text_color=color.gray)
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ FLOWZONE", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Conf Score", text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(confluenceScore, "#.##"), text_color=confluenceScore >= confThreshold ? color.lime : color.orange)
+    
+    table.cell(hud, 0, 2, "Regime", text_color=color.gray)
+    table.cell(hud, 1, 2, close > trendEma ? "BULL" : "BEAR", text_color=close > trendEma ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Energy Audit", text_color=color.gray)
+    table.cell(hud, 1, 3, volAudit > 0 ? "PASS" : "LOW-E", text_color=volAudit > 0 ? color.lime : color.red)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0421.1206", text_color=color.gray)
+
+// Visuals
+plot(trendEma, "Regime Floor", color.new(color.orange, 50), 2)
+plot(ema20, "Fast", color.new(color.lime, 0))
+plot(ema50, "Slow", color.new(color.red, 0))
