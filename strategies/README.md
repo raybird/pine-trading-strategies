@@ -61,3 +61,5 @@
 - [`TnSovereignMacdV6.pine`](./TnSovereignMacdV6.md): 整合動能斜率審計與 200 EMA 過濾的主權 MACD 策略。
 
 - [`TnSovereignBbBreakoutV6.pine`](./TnSovereignBbBreakoutV6.md): 整合布林帶突破、肯特納擠壓與成交量審計的 v6 策略。
+
+- [`TnSovereignSupertrendV6.pine`](./TnSovereignSupertrendV6.md): 整合多維趨勢地板 (200/50 EMA) 的主權超級趨勢策略。

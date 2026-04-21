@@ -1,0 +1,78 @@
+//@version=6
+strategy("Tn Sovereign Supertrend v6 [v26.0421.1803]",
+    shorttitle         = "TN_ST_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN SUPERTREND CORE
+// =====================================================
+
+groupST = "🌌 超級趨勢規訓 (Supertrend)"
+atrLen  = input.int(10,    "ATR 週期", minval=1, group=groupST)
+atrMult = input.float(3.0, "ATR 倍數", step=0.1, group=groupST)
+
+[superTrend, direction] = ta.supertrend(atrMult, atrLen)
+
+// =====================================================
+// MODULE 2: MULTI-REGIME AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 多維趨勢審計 (Regime Audit)"
+useEma200  = input.bool(true, "啟用 200 EMA 趨勢地板", group=groupAudit)
+useEma50   = input.bool(true, "啟用 50 EMA 趨勢確認", group=groupAudit)
+
+ema200 = ta.ema(close, 200)
+ema50  = ta.ema(close, 50)
+
+bool regimeBull = (not useEma200 or close > ema200) and (not useEma50 or close > ema50)
+bool regimeBear = (not useEma200 or close < ema200) and (not useEma50 or close < ema50)
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+// Long: ST flips to Bull (direction < 0) AND Regime is Bullish
+longCondition  = ta.change(direction) < 0 and regimeBull
+// Short: ST flips to Bear (direction > 0) AND Regime is Bearish
+shortCondition = ta.change(direction) > 0 and regimeBear
+
+if longCondition and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="ST-B")
+
+if shortCondition and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="ST-S")
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ SUPERTREND", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Direction", text_color=color.gray)
+    table.cell(hud, 1, 1, direction < 0 ? "BULL" : "BEAR", text_color=direction < 0 ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "Regime Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, regimeBull ? "BULL-BIAS" : regimeBear ? "BEAR-BIAS" : "NEUTRAL", text_color=color.yellow)
+    
+    table.cell(hud, 0, 3, "Volatility (ATR)", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(ta.atr(14), "##.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0421.1803", text_color=color.gray)
+
+// Visuals
+plot(superTrend, "ST Line", direction < 0 ? color.new(color.lime, 0) : color.new(color.red, 0), 2)
+plot(ema200, "EMA 200", color.new(color.gray, 60), 1)
+plot(ema50, "EMA 50", color.new(color.white, 80), 1)
+plotshape(longCondition, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortCondition, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
