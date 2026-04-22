@@ -1,0 +1,97 @@
+//@version=6
+strategy("Tn Sovereign Fakeout v6 [v26.0422.1801]",
+    shorttitle         = "TN_FAKE_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: STRATEGY CORE & FILTERS
+// =====================================================
+
+groupCore = "🎯 核心規訓 (Core Settings)"
+fastLen  = input.int(9,     "快線 EMA", minval=1, group=groupCore)
+slowLen  = input.int(21,    "慢線 EMA", minval=1, group=groupCore)
+atrLen   = input.int(14,    "ATR 週期", minval=1, group=groupCore)
+slMult   = input.float(2.0, "止損 ATR 倍數", group=groupCore)
+tpMult   = input.float(3.0, "獲利 ATR 倍數", group=groupCore)
+
+groupF1 = "🛡️ F1: 成交量過濾 (Volume)"
+useVol  = input.bool(true,  "啟用成交量審計", group=groupF1)
+volMult = input.float(1.5,  "成交量倍數", step=0.1, group=groupF1)
+
+groupF2 = "🛡️ F2: 高時框趨勢 (HTF)"
+useHTF  = input.bool(true,  "啟用 HTF 趨勢地板", group=groupF2)
+htfTF   = input.string("240", "HTF 時框", options=["60","240","D","W"], group=groupF2)
+htfLen  = input.int(200,    "HTF EMA 週期", group=groupF2)
+
+groupF3 = "🛡️ F3: ATR 雜訊過濾"
+useNoise = input.bool(true,  "啟用 ATR 雜訊過濾", group=groupF3)
+atrMin   = input.float(0.3,  "最小波幅 (ATR×)", step=0.1, group=groupF3)
+
+// =====================================================
+// MODULE 2: CAUSAL CALCULATIONS
+// =====================================================
+
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(atrLen)
+float volAvg  = ta.sma(volume, 20)
+float htfEma  = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+
+// Filter Logic
+bool f1_pass = not useVol or volume > volAvg * volMult
+bool f2_bull = not useHTF or close > htfEma
+bool f2_bear = not useHTF or close < htfEma
+bool f3_pass = not useNoise or math.abs(close - close[1]) > atrVal * atrMin
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+bool longSignal  = ta.crossover(fastEma, slowEma) and f1_pass and f2_bull and f3_pass
+bool shortSignal = ta.crossunder(fastEma, slowEma) and f1_pass and f2_bear and f3_pass
+
+if longSignal and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="F-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if shortSignal and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="F-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ FAKEOUT SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "F1: Volume", text_color=color.gray)
+    table.cell(hud, 1, 1, f1_pass ? "PASS" : "FAIL", text_color=f1_pass ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "F2: HTF Regime", text_color=color.gray)
+    table.cell(hud, 1, 2, f2_bull ? "BULL" : "BEAR", text_color=f2_bull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "F3: ATR Noise", text_color=color.gray)
+    table.cell(hud, 1, 3, f3_pass ? "PASS" : "NOISY", text_color=f3_pass ? color.lime : color.orange)
+    
+    table.cell(hud, 0, 4, "HTF Timeframe", text_color=color.gray)
+    table.cell(hud, 1, 4, htfTF, text_color=color.aqua)
+
+    table.cell(hud, 0, 5, "Version", text_color=color.gray)
+    table.cell(hud, 1, 5, "v26.0422.1801", text_color=color.gray)
+
+// Visuals
+plot(fastEma, "Fast", color.new(color.green, 0), 1)
+plot(slowEma, "Slow", color.new(color.red, 0), 2)
+plot(htfEma, "HTF Floor", color.new(color.orange, 50), 2)
+plotshape(longSignal, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortSignal, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
