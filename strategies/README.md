@@ -71,3 +71,5 @@
 - [`TnSovereignStochV6.pine`](./TnSovereignStochV6.md): 整合隨機指標區域審計與 200 EMA 過濾的主權反轉策略。
 
 - [`TnSovereignFakeoutV6.pine`](./TnSovereignFakeoutV6.md): 整合四層物理過濾（量能、HTF、ATR）的主權防假突破策略。
+
+- [`TnSovereignRsiAtrV6.pine`](./TnSovereignRsiAtrV6.md): 整合 RSI 動能門檻與 ATR 動態風險管理的主權 v6 策略。
