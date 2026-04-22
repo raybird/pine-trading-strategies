@@ -67,3 +67,5 @@
 - [`TnSovereignTripleEmaV6.pine`](./TnSovereignTripleEmaV6.md): 整合 5/13/34 對位與 200 EMA 全球地板的主權三均線策略。
 
 - [`TnSovereignSessionQuantV6.pine`](./TnSovereignSessionQuantV6.md): 整合時段規訓與區間突破審計的 v6 策略。
+
+- [`TnSovereignStochV6.pine`](./TnSovereignStochV6.md): 整合隨機指標區域審計與 200 EMA 過濾的主權反轉策略。
