@@ -81,3 +81,5 @@
 - [`TnSovereignCCIV6.pine`](./TnSovereignCCIV6.md): 整合雙重 CCI 對位與 200 EMA 趨勢地板的主權修正策略。
 
 - [`TnSovereignHMAV6.pine`](./TnSovereignHMAV6.md): 整合雙重 HMA 對位與成交量能量審計的主權動量策略。
+
+- [`TnSovereignVortexV6.pine`](./TnSovereignVortexV6.md): 整合渦流極性審計與 200 EMA 過濾的主權動量策略。
