@@ -75,3 +75,5 @@
 - [`TnSovereignRsiAtrV6.pine`](./TnSovereignRsiAtrV6.md): 整合 RSI 動能門檻與 ATR 動態風險管理的主權 v6 策略。
 
 - [`TnSovereignVolumeDeltaV6.pine`](./TnSovereignVolumeDeltaV6.md): 整合累積 Delta 背離偵測與 200 EMA 過濾的主權訂單流策略。
+
+- [`TnSovereignSMCV6.pine`](./TnSovereignSMCV6.md): 整合流動性掃蕩與訂單塊確認的 v6 SMC 策略。

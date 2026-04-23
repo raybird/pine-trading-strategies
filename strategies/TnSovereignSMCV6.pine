@@ -1,0 +1,86 @@
+//@version=6
+strategy("Tn Sovereign SMC v6 [v26.0423.1537]",
+    shorttitle         = "TN_SMC_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN LIQUIDITY & SMC CORE
+// =====================================================
+
+groupSMC = "🌌 聰明錢規訓 (SMC Config)"
+lookback = input.int(20, "高低點回測週期", minval=5, group=groupSMC)
+useSweep = input.bool(true, "啟用流動性掃蕩審計", group=groupSMC)
+
+// Identify Structural Swings
+float pivotHigh = ta.highest(high, lookback)[1]
+float pivotLow  = ta.lowest(low, lookback)[1]
+
+// Liquidity Sweep: Price pierces pivot then closes back inside
+bool bullSweep = low < pivotLow and close > pivotLow
+bool bearSweep = high > pivotHigh and close < pivotHigh
+
+// =====================================================
+// MODULE 2: ORDER BLOCK & REGIME AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 結構因果過濾 (Audit Layers)"
+trendLen   = input.int(200, "環境 EMA 地板", group=groupAudit)
+useOB      = input.bool(true, "啟用訂單塊確認", group=groupAudit)
+
+float trendEma = ta.ema(close, trendLen)
+bool regimeBull = close > trendEma
+bool regimeBear = close < trendEma
+
+// Order Block Strike: Climactic volume on rejection bar
+volMA = ta.sma(volume, 20)
+bool obStrike = volume > volMA * 1.5 and math.abs(close - open) < (high - low) * 0.4
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+bool longEntry  = bullSweep and (not useOB or obStrike) and regimeBull
+bool shortEntry = bearSweep and (not useOB or obStrike) and regimeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="SMC-B")
+    strategy.exit("L-Exit", "Long", stop=low - ta.atr(14), limit=close + ta.atr(14) * 3)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="SMC-S")
+    strategy.exit("S-Exit", "Short", stop=high + ta.atr(14), limit=close - ta.atr(14) * 3)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ SMC SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Liquidity", text_color=color.gray)
+    table.cell(hud, 1, 1, bullSweep ? "B-SWEEP" : bearSweep ? "S-SWEEP" : "STABLE", text_color=bullSweep ? color.lime : bearSweep ? color.red : color.gray)
+    
+    table.cell(hud, 0, 2, "OB Strike", text_color=color.gray)
+    table.cell(hud, 1, 2, obStrike ? "HIT" : "MISS", text_color=obStrike ? color.orange : color.gray)
+    
+    table.cell(hud, 0, 3, "Regime", text_color=color.gray)
+    table.cell(hud, 1, 3, regimeBull ? "BULL" : "BEAR", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0423.1537", text_color=color.gray)
+
+// Visuals
+plot(pivotHigh, "Liq High", color.new(color.red, 50), 1, style=plot.style_steplinebr)
+plot(pivotLow,  "Liq Low",  color.new(color.green, 50), 1, style=plot.style_steplinebr)
+plot(trendEma, "Regime Floor", color.new(color.gray, 60), 1)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
