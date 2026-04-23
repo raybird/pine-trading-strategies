@@ -1,0 +1,82 @@
+//@version=6
+strategy("Tn Sovereign CCI v6 [v26.0423.1802]",
+    shorttitle         = "TN_CCI_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN CCI DISCIPLINE
+// =====================================================
+
+groupCCI = "🌌 商品路徑規訓 (CCI Config)"
+cciFast  = input.int(20,  "快線 CCI 週期", minval=1, group=groupCCI)
+cciSlow  = input.int(40,  "慢線 CCI 週期", minval=1, group=groupCCI)
+extLevel = input.float(100, "極端區域門檻", step=10, group=groupCCI)
+
+float valFast = ta.cci(close, cciFast)
+float valSlow = ta.cci(close, cciSlow)
+
+// =====================================================
+// MODULE 2: REGIME & CAUSAL AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 因果過濾 (Audit Layers)"
+trendLen   = input.int(200,   "趨勢地板 (EMA)", group=groupAudit)
+atrLen     = input.int(14,    "ATR 週期", group=groupAudit)
+slMult     = input.float(2.0, "止損 ATR 倍數", group=groupAudit)
+tpMult     = input.float(4.0, "獲利 ATR 倍數", group=groupAudit)
+
+float trendEma = ta.ema(close, trendLen)
+float atrVal   = ta.atr(atrLen)
+
+bool regimeBull = close > trendEma
+bool regimeBear = close < trendEma
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+// Long: Both CCI cross above -100 (from extreme) AND Bullish Regime
+bool longEntry  = ta.crossover(valFast, -extLevel) and valSlow > -extLevel and regimeBull
+// Short: Both CCI cross below +100 (from extreme) AND Bearish Regime
+bool shortEntry = ta.crossunder(valFast, extLevel) and valSlow < extLevel and regimeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="CCI-B")
+    strategy.exit("L-Exit", "Long", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="CCI-S")
+    strategy.exit("S-Exit", "Short", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ CCI SOVEREIGN", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "CCI (F/S)", text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(valFast, "##.#") + " / " + str.tostring(valSlow, "##.#"), text_color=color.yellow)
+    
+    table.cell(hud, 0, 2, "Regime Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, regimeBull ? "BULL-BIAS" : regimeBear ? "BEAR-BIAS" : "NEUTRAL", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Volatility", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "##.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0423.1802", text_color=color.gray)
+
+// Visuals
+plot(trendEma, "Trend Floor", color.new(color.gray, 60), 1)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

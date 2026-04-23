@@ -77,3 +77,5 @@
 - [`TnSovereignVolumeDeltaV6.pine`](./TnSovereignVolumeDeltaV6.md): 整合累積 Delta 背離偵測與 200 EMA 過濾的主權訂單流策略。
 
 - [`TnSovereignSMCV6.pine`](./TnSovereignSMCV6.md): 整合流動性掃蕩與訂單塊確認的 v6 SMC 策略。
+
+- [`TnSovereignCCIV6.pine`](./TnSovereignCCIV6.md): 整合雙重 CCI 對位與 200 EMA 趨勢地板的主權修正策略。
