@@ -1,0 +1,87 @@
+//@version=6
+strategy("Tn Sovereign HMA v6 [v26.0424.0604]",
+    shorttitle         = "TN_HMA_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN HMA DISCIPLINE
+// =====================================================
+
+groupHMA = "🌌 赫爾均線規訓 (HMA Config)"
+hmaFast  = input.int(21,  "快線 HMA 週期", minval=1, group=groupHMA)
+hmaSlow  = input.int(55,  "慢線 HMA 週期", minval=1, group=groupHMA)
+
+float hFast = ta.hma(close, hmaFast)
+float hSlow = ta.hma(close, hmaSlow)
+
+bool bullPol = hFast > hFast[1] and hFast > hSlow
+bool bearPol = hFast < hFast[1] and hFast < hSlow
+
+// =====================================================
+// MODULE 2: ENERGY & REGIME AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 因果過濾 (Audit Layers)"
+trendLen   = input.int(200,   "趨勢地板 (EMA)", group=groupAudit)
+volMult    = input.float(1.2, "能量閾值 (Volx)", step=0.1, group=groupAudit)
+atrLen     = input.int(14,    "ATR 週期", group=groupAudit)
+
+float trendEma = ta.ema(close, trendLen)
+float volAvg   = ta.sma(volume, 20)
+float atrVal   = ta.atr(atrLen)
+
+bool regimeBull = close > trendEma
+bool regimeBear = close < trendEma
+bool volPass    = volume > volAvg * volMult
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+// Long: HMA Polar Flip + Volume Burst + Bullish Regime
+bool longEntry  = ta.crossover(hFast, hFast[1]) and bullPol and volPass and regimeBull
+// Short: HMA Polar Flip + Volume Burst + Bearish Regime
+bool shortEntry = ta.crossunder(hFast, hFast[1]) and bearPol and volPass and regimeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="HMA-B")
+    strategy.exit("L-Exit", "Long", stop=close - 2.5 * atrVal, limit=close + 5.0 * atrVal)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="HMA-S")
+    strategy.exit("S-Exit", "Short", stop=close + 2.5 * atrVal, limit=close - 5.0 * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ HMA SOVEREIGN", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Polarity", text_color=color.gray)
+    table.cell(hud, 1, 1, bullPol ? "BULL" : bearPol ? "BEAR" : "NEUTRAL", text_color=bullPol ? color.lime : bearPol ? color.red : color.gray)
+    
+    table.cell(hud, 0, 2, "Energy Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, volPass ? "PASS" : "LOW-E", text_color=volPass ? color.aqua : color.orange)
+    
+    table.cell(hud, 0, 3, "Regime Bias", text_color=color.gray)
+    table.cell(hud, 1, 3, regimeBull ? "UP" : regimeBear ? "DOWN" : "RANGE", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0424.0604", text_color=color.gray)
+
+// Visuals
+plot(hFast, "HMA Fast", color.new(color.green, 20), 1)
+plot(hSlow, "HMA Slow", color.new(color.teal, 0), 2)
+plot(trendEma, "Regime Floor", color.new(color.gray, 60), 1)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
