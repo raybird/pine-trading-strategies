@@ -1,0 +1,88 @@
+//@version=6
+strategy("Tn Sovereign Keltner v6 [v26.0424.1831]",
+    shorttitle         = "TN_KC_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN KELTNER DISCIPLINE
+// =====================================================
+
+groupKC = "🌌 肯特納通道規訓 (KC Config)"
+kcLen   = input.int(20,   "通道週期", minval=1, group=groupKC)
+kcMult  = input.float(2.0, "通道倍數", step=0.1, group=groupKC)
+
+[kcBasis, kcUpper, kcLower] = ta.kc(close, kcLen, kcMult, true)
+
+bool bullPol = close > kcBasis
+bool bearPol = close < kcBasis
+
+// =====================================================
+// MODULE 2: MOMENTUM & REGIME AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 因果過濾 (Audit Layers)"
+adxLen     = input.int(14,    "ADX 週期", group=groupAudit)
+adxThresh  = input.int(25,    "ADX 門檻", group=groupAudit)
+trendLen   = input.int(200,   "趨勢地板 (EMA)", group=groupAudit)
+atrLen     = input.int(14,    "ATR 週期", group=groupAudit)
+
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+float trendEma = ta.ema(close, trendLen)
+float atrVal   = ta.atr(atrLen)
+
+bool adxStrong  = adx > adxThresh
+bool regimeBull = close > trendEma
+bool regimeBear = close < trendEma
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+// Long: Close crosses above Upper KC AND Strong ADX AND Bullish Regime
+bool longEntry  = ta.crossover(close, kcUpper) and adxStrong and regimeBull
+// Short: Close crosses below Lower KC AND Strong ADX AND Bearish Regime
+bool shortEntry = ta.crossunder(close, kcLower) and adxStrong and regimeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="KC-B")
+    strategy.exit("L-Exit", "Long", stop=kcBasis, limit=close + 4.0 * atrVal)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="KC-S")
+    strategy.exit("S-Exit", "Short", stop=kcBasis, limit=close - 4.0 * atrVal)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ KELTNER SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "ADX (Strength)", text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(adx, "##.#"), text_color=adxStrong ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "Regime Bias", text_color=color.gray)
+    table.cell(hud, 1, 2, regimeBull ? "BULL" : regimeBear ? "BEAR" : "RANGE", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 3, "Volatility", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(atrVal, "##.##"), text_color=color.aqua)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0424.1831", text_color=color.gray)
+
+// Visuals
+plot(kcBasis, "KC Basis", color.new(color.gray, 50))
+plot(kcUpper, "KC Upper", color.new(color.red, 30))
+plot(kcLower, "KC Lower", color.new(color.green, 30))
+plot(trendEma, "Regime Floor", color.new(color.gray, 60), 2)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

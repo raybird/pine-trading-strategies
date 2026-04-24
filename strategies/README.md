@@ -83,3 +83,5 @@
 - [`TnSovereignHMAV6.pine`](./TnSovereignHMAV6.md): 整合雙重 HMA 對位與成交量能量審計的主權動量策略。
 
 - [`TnSovereignVortexV6.pine`](./TnSovereignVortexV6.md): 整合渦流極性審計與 200 EMA 過濾的主權動量策略。
+
+- [`TnSovereignKeltnerV6.pine`](./TnSovereignKeltnerV6.md): 整合肯特納通道突破與 ADX 動能過濾的主權趨勢策略。
