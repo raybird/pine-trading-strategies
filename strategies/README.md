@@ -87,3 +87,5 @@
 - [`TnSovereignKeltnerV6.pine`](./TnSovereignKeltnerV6.md): 整合肯特納通道突破與 ADX 動能過濾的主權趨勢策略。
 
 - [`TnSovereignCMOV6.pine`](./TnSovereignCMOV6.md): 整合 CMO 動能背離與極端區域審計的主權修正策略。
+
+- [`TnSovereignFisherV6.pine`](./TnSovereignFisherV6.md): 整合費雪轉換極性審計與 200 EMA 過濾的主權反轉策略。
