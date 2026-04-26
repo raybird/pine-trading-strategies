@@ -91,3 +91,5 @@
 - [`TnSovereignFisherV6.pine`](./TnSovereignFisherV6.md): 整合費雪轉換極性審計與 200 EMA 過濾的主權反轉策略。
 
 - [`TnSovereignSTCV6.pine`](./TnSovereignSTCV6.md): 整合謝夫趨勢週期 (STC) 與 200 EMA 過濾的主權週期策略。
+
+- [`TnSovereignVWAPV6.pine`](./TnSovereignVWAPV6.md): 整合動態錨定 VWAP 與標準差通道的主權均值回歸策略。

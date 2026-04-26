@@ -1,0 +1,103 @@
+//@version=6
+strategy("Tn Sovereign VWAP v6 [v26.0426.1831]",
+    shorttitle         = "TN_VWAP_v26",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 10,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+// =====================================================
+// MODULE 1: SOVEREIGN VWAP DISCIPLINE
+// =====================================================
+
+groupVWAP = "🌌 成交量加權規訓 (VWAP Config)"
+anchor    = input.string("Session", "錨定週期", options=["Session", "Day", "Week"], group=groupVWAP)
+stdevMult = input.float(2.0, "標準差倍數", step=0.1, group=groupVWAP)
+
+// VWAP Calculation
+var float sumPV = 0.0
+var float sumV  = 0.0
+var float sumP2V = 0.0
+
+is_new_session = ta.change(time(anchor))
+
+if is_new_session
+    sumPV := 0.0
+    sumV := 0.0
+    sumP2V := 0.0
+
+sumPV += close * volume
+sumV  += volume
+sumP2V += math.pow(close, 2) * volume
+
+float vwapVal = sumPV / sumV
+float variance = (sumP2V / sumV) - math.pow(vwapVal, 2)
+float stdevVal = math.sqrt(math.max(0, variance))
+
+float upperBand = vwapVal + stdevMult * stdevVal
+float lowerBand = vwapVal - stdevMult * stdevVal
+
+// =====================================================
+// MODULE 2: REGIME & MOMENTUM AUDIT
+// =====================================================
+
+groupAudit = "🛡️ 因果過濾 (Audit Layers)"
+trendLen   = input.int(200,   "趨勢地板 (EMA)", group=groupAudit)
+rsiLen     = input.int(14,    "RSI 輔助週期", group=groupAudit)
+
+float trendEma = ta.ema(close, trendLen)
+float rsiVal   = ta.rsi(close, rsiLen)
+
+bool regimeBull = close > trendEma
+bool regimeBear = close < trendEma
+
+// =====================================================
+// MODULE 3: CAUSAL SIGNALS & EXECUTION
+// =====================================================
+
+// Long: Price below Lower Band AND RSI Oversold AND Bullish Regime (Deep Value)
+bool longEntry  = ta.crossunder(close, lowerBand) and rsiVal < 35 and regimeBull
+// Short: Price above Upper Band AND RSI Overbought AND Bearish Regime (Mean Reversion)
+bool shortEntry = ta.crossover(close, upperBand) and rsiVal > 65 and regimeBear
+
+if longEntry and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment="VWAP-B")
+    strategy.exit("L-Exit", "Long", limit=vwapVal, stop=close - ta.atr(14) * 2)
+
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment="VWAP-S")
+    strategy.exit("S-Exit", "Short", limit=vwapVal, stop=close + ta.atr(14) * 2)
+
+// =====================================================
+// MODULE 4: SOVEREIGN AUDIT HUD
+// =====================================================
+
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ VWAP SOVEREIGN", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
+    
+    table.cell(hud, 0, 1, "Price vs VWAP", text_color=color.gray)
+    float pDiff = (close - vwapVal) / vwapVal * 100
+    table.cell(hud, 1, 1, str.tostring(pDiff, "##.##") + "%", text_color=pDiff > 0 ? color.lime : color.red)
+    
+    table.cell(hud, 0, 2, "RSI Audit", text_color=color.gray)
+    table.cell(hud, 1, 2, str.tostring(rsiVal, "##.#"), text_color=rsiVal > 70 ? color.red : rsiVal < 30 ? color.lime : color.gray)
+    
+    table.cell(hud, 0, 3, "Regime Bias", text_color=color.gray)
+    table.cell(hud, 1, 3, regimeBull ? "BULL" : regimeBear ? "BEAR" : "NEUTRAL", text_color=regimeBull ? color.lime : color.red)
+    
+    table.cell(hud, 0, 4, "Version", text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0426.1831", text_color=color.gray)
+
+// Visuals
+plot(vwapVal, "VWAP", color.new(color.orange, 0), 2)
+plot(upperBand, "Upper StdDev", color.new(color.red, 40))
+plot(lowerBand, "Lower StdDev", color.new(color.green, 40))
+plot(trendEma, "Regime Floor", color.new(color.gray, 60), 1)
+plotshape(longEntry, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(shortEntry, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
