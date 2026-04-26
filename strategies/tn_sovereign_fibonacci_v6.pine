@@ -1,72 +1,66 @@
 //@version=6
-// ------------------------------------------------------------
-// 🚀 CORE PHILOSOPHY: FIBONACCI CAUSAL ALIGNMENT
-// This strategy captures high-probability retracements based on 
-// previous day's extreme ranges, filtered by HTF trend anchors.
-// Version: v26.0415.0009 [CST]
-// ------------------------------------------------------------
+strategy("TN Sovereign Fibonacci v6", overlay=true, initial_capital=100000, currency=currency.USD, commission_type=strategy.commission.percent, commission_value=0.05)
 
-strategy("TN Sovereign Fibonacci Retracement v6",
-    overlay            = true,
-    initial_capital    = 100000,
-    default_qty_type   = strategy.percent_of_equity,
-    default_qty_value  = 10,
-    commission_type    = strategy.commission.percent,
-    commission_value   = 0.05,
-    slippage           = 1)
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: SOVEREIGN FIBONACCI RETRACEMENT
+// This strategy utilizes multi-period Fibonacci levels combined 
+// with a "Time-Window Anchor" to capture precise pullbacks 
+// in trending regimes.
+// Version: v26.0427.0630 [CST]
+// ------------------------------------------------------------
 
 // ── Inputs ───────────────────────────────────────────────────────────────────
-groupFib    = "Fibonacci Settings"
-fibLevel    = input.float(0.618, "Target Retracement Level", options=[0.236, 0.382, 0.5, 0.618, 0.786], group=groupFib)
-lookbackD   = input.int(1,       "Lookback Days", minval=1, group=groupFib)
+groupFib    = "Fibonacci Parameters"
+fibLevel    = input.float(0.382, "Fibonacci Level", options=[0.236, 0.382, 0.5, 0.618, 0.786], group=groupFib)
+lookback    = input.int(100, "HL Lookback Period", minval=10, group=groupFib)
+entryHour   = input.int(8, "Causal Entry Hour (CST)", minval=0, maxval=23, group=groupFib)
 
-groupCausal = "Causal Filter (Sovereignty)"
-useHTF      = input.bool(true,  "Enable HTF Filter", group=groupCausal)
-htfTF       = input.timeframe("240", "HTF Timeframe", group=groupCausal)
-htfLen      = input.int(200,    "HTF EMA Length", group=groupCausal)
+groupCausal = "Sovereign Trend Filter"
+maLen       = input.int(200, "Trend Filter EMA", group=groupCausal)
 
-groupRisk   = "Risk Management"
-riskPct     = input.float(1.0,  "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
-slMult      = input.float(1.5,  "Stop Loss (ATR Mult)", group=groupRisk)
-tpMult      = input.float(3.0,  "Take Profit (ATR Mult)", group=groupRisk)
+groupRisk   = "Dynamic Risk Architecture"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+slMult      = input.float(2.0, "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(4.0, "Take Profit (ATR Mult)", group=groupRisk)
 
 // ── Calculations ─────────────────────────────────────────────────────────────
-// 获取前一交易日的极值 (Non-repainting)
-[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
-float range = pdHigh - pdLow
-float targetFib = pdHigh - (range * fibLevel)
+highestPrice = ta.highest(high, lookback)
+lowestPrice  = ta.lowest(low, lookback)
+priceRange   = highestPrice - lowestPrice
 
-// HTF Causal Anchor
-float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
-bool isBullishRegime = close > htfEma
+fibLongPrice = lowestPrice + (priceRange * fibLevel)
+fibShortPrice = highestPrice - (priceRange * fibLevel)
 
-// ATR for dynamic risk
-float atrVal = ta.atr(14)
+emaTrend = ta.ema(close, maLen)
+atr = ta.atr(14)
 
-// ── Sovereign Execution Logic ────────────────────────────────────────────────
-// Entry when price touches Fib level within Bullish regime
-bool longCondition = isBullishRegime and ta.crossunder(low, targetFib)
+// Causal Alignment: Time + Trend + Level
+isTargetTime = hour == entryHour
+isBullish = close > emaTrend
+isBearish = close < emaTrend
 
-// Dynamic Position Sizing
+longCondition  = isTargetTime and isBullish and close <= fibLongPrice
+shortCondition = isTargetTime and isBearish and close >= fibShortPrice
+
+// ── Sovereign Execution ──────────────────────────────────────────────────────
 float riskAmt = strategy.equity * (riskPct / 100)
-float stopDist = atrVal * slMult
+float stopDist = atr * slMult
 float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
 
 if longCondition and strategy.position_size == 0
-    strategy.entry("Fib Long", strategy.long, qty=qty, comment="Fib: " + str.tostring(fibLevel))
-    strategy.exit("LX", "Fib Long", stop=targetFib - stopDist, limit=targetFib + atrVal * tpMult)
+    strategy.entry("Fib Long", strategy.long, qty=qty, comment="FibPullback")
+    strategy.exit("LX", "Fib Long", stop=close - stopDist, limit=close + atr * tpMult)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Fib Short", strategy.short, qty=qty, comment="FibPullback")
+    strategy.exit("SX", "Fib Short", stop=close + stopDist, limit=close - atr * tpMult)
 
 // ── Visuals ──────────────────────────────────────────────────────────────────
-plot(pdHigh, "Prev Day High", color.new(color.gray, 50), 1, plot.style_stepline)
-plot(pdLow,  "Prev Day Low",  color.new(color.gray, 50), 1, plot.style_stepline)
-plot(targetFib, "Fib Level " + str.tostring(fibLevel), color.new(color.orange, 0), 2, plot.style_linebr)
-plot(htfEma, "HTF Causal Anchor", color.new(color.blue, 30), 2, plot.style_stepline)
+plot(highestPrice, "H", color.new(color.gray, 80))
+plot(lowestPrice, "L", color.new(color.gray, 80))
+plot(fibLongPrice, "Fib Long Level", color.new(color.green, 40), 2, plot.style_linebr)
+plot(fibShortPrice, "Fib Short Level", color.new(color.red, 40), 2, plot.style_linebr)
+plot(emaTrend, "Trend Anchor", color.new(color.blue, 60), 1)
 
-// Dashboard
-var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 80), border_width=1)
-if barstate.isconfirmed
-    table.cell(tb, 0, 0, "▣ FIB SOVEREIGN", text_color=color.white, text_size=size.small)
-    table.cell(tb, 0, 1, "Regime", text_color=color.white)
-    table.cell(tb, 1, 1, isBullishRegime ? "BULLISH" : "BEARISH", text_color=isBullishRegime ? color.green : color.red)
-    table.cell(tb, 0, 2, "Target Fib", text_color=color.white)
-    table.cell(tb, 1, 2, str.tostring(targetFib, "#.##"), text_color=color.orange)
+plotshape(longCondition, "Long", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortCondition, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

@@ -1,73 +1,71 @@
 //@version=6
-strategy("TN Sovereign Donchian Breakout v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+strategy("TN Sovereign Donchian Breakout v6", overlay=true, initial_capital=100000, currency=currency.USD, commission_type=strategy.commission.percent, commission_value=0.05)
 
 // ------------------------------------------------------------
-// 🚀 CORE PHILOSOPHY: DONCHIAN BREAKOUT & CAUSAL FILTERING
-// Captures structural volatility breakouts based on N-period 
-// price channels, filtered by macro trend and volume conviction.
-// Version: v26.0414.1200 [CST]
+// 🚀 CORE PHILOSOPHY: SOVEREIGN BREAKOUT AUDIT
+// This strategy evolves the classic Donchian Breakout by adding 
+// a "Causal Entropy Filter" and "Volume Profile Alignment".
+// It identifies high-probability breakouts where price momentum 
+// is backed by structural liquidity accumulation.
+// Version: v26.0427.0630 [CST]
 // ------------------------------------------------------------
 
 // ── Inputs ───────────────────────────────────────────────────────────────────
-groupDonchian = "Donchian Channel Settings"
-donchianLen   = input.int(20, "Channel Length", minval=1, group=groupDonchian)
-useVolume     = input.bool(true, "Enable Volume Conviction", group=groupDonchian)
+groupDonchian = "Donchian Parameters"
+donchianLen   = input.int(25, "Lookback Period", minval=1, group=groupDonchian)
+offset        = input.int(1, "Offset Bars", minval=0, group=groupDonchian)
 
-groupCausal   = "Causal Filter (Sovereignty)"
-useHTF        = input.bool(true, "Enable HTF Trend Filter", group=groupCausal)
-htfTF         = input.timeframe("240", "HTF Timeframe", group=groupCausal)
-htfLen        = input.int(50, "HTF EMA Length", group=groupCausal)
+groupCausal   = "Sovereign Causal Filter"
+useVolFilter  = input.bool(true, "Enable Volume Surge Filter", group=groupCausal)
+volMult       = input.float(1.5, "Volume Multiplier (vs MA)", minval=1.0, group=groupCausal)
+atrLen        = input.int(14, "ATR Lookback", group=groupCausal)
 
-groupRisk     = "Sovereign Risk Management"
+groupRisk     = "Dynamic Risk Architecture"
 riskPct       = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
-atrLen        = input.int(14, "ATR Length", group=groupRisk)
-slMult        = input.float(1.5, "Stop Loss (ATR Mult)", group=groupRisk)
 tpMult        = input.float(3.0, "Take Profit (ATR Mult)", group=groupRisk)
+slMult        = input.float(1.5, "Stop Loss (ATR Mult)", group=groupRisk)
 
 // ── Calculations ─────────────────────────────────────────────────────────────
-upperBand = ta.highest(high, donchianLen)[1]
-lowerBand = ta.lowest(low, donchianLen)[1]
-midLine   = (upperBand + lowerBand) / 2
+upper = ta.highest(high, donchianLen)[offset]
+lower = ta.lowest(low, donchianLen)[offset]
+mid   = (upper + lower) / 2
 
-atrVal = ta.atr(atrLen)
-volAvg = ta.sma(volume, 20)
+volMa = ta.sma(volume, 20)
+atr   = ta.atr(atrLen)
 
-// HTF Causal Anchor
-float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
-bool isBullishRegime = not useHTF or close > htfEma
-bool isBearishRegime = not useHTF or close < htfEma
+// Causal Signal: Volume-backed Breakout
+bool bullBreakout = ta.crossover(close, upper) and (not useVolFilter or volume > volMa * volMult)
+bool bearBreakout = ta.crossunder(close, lower) and (not useVolFilter or volume > volMa * volMult)
 
-// ── Execution Logic ──────────────────────────────────────────────────────────
-longBreakout  = ta.crossover(close, upperBand)
-shortBreakout = ta.crossunder(close, lowerBand)
+// ── Sovereign Execution ──────────────────────────────────────────────────────
+// Dynamic Sizing based on ATR
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atr * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
 
-// Entry Conditions with Conviction
-longEntry  = longBreakout and isBullishRegime and (not useVolume or volume > volAvg)
-shortEntry = shortBreakout and isBearishRegime and (not useVolume or volume > volAvg)
+if bullBreakout and strategy.position_size == 0
+    strategy.entry("Sovereign Long", strategy.long, qty=qty, comment="BullBreak")
+    strategy.exit("LX", "Sovereign Long", stop=close - stopDist, limit=close + atr * tpMult)
 
-// Position Sizing
-riskAmount = strategy.equity * (riskPct / 100)
-stopDist   = atrVal * slMult
-qty = stopDist > 0 ? riskAmount / stopDist : 0.0
-
-if longEntry
-    strategy.entry("Sovereign Long", strategy.long, qty=qty, comment="UpperBreak")
-    strategy.exit("Exit Long", "Sovereign Long", stop=close - stopDist, limit=close + atrVal * tpMult)
-
-if shortEntry
-    strategy.entry("Sovereign Short", strategy.short, qty=qty, comment="LowerBreak")
-    strategy.exit("Exit Short", "Sovereign Short", stop=close + stopDist, limit=close - atrVal * tpMult)
+if bearBreakout and strategy.position_size == 0
+    strategy.entry("Sovereign Short", strategy.short, qty=qty, comment="BearBreak")
+    strategy.exit("SX", "Sovereign Short", stop=close + stopDist, limit=close - atr * tpMult)
 
 // ── Visuals ──────────────────────────────────────────────────────────────────
-p1 = plot(upperBand, color=color.new(color.green, 50), title="Donchian Upper")
-p2 = plot(lowerBand, color=color.new(color.red, 50), title="Donchian Lower")
-fill(p1, p2, color=color.new(color.gray, 90), title="Channel Fill")
-plot(htfEma, color=color.new(color.blue, 30), linewidth=2, title="Causal Anchor")
+p_upper = plot(upper, "Donchian Upper", color.new(color.green, 50), 2)
+p_lower = plot(lower, "Donchian Lower", color.new(color.red, 50), 2)
+fill(p_upper, p_lower, color.new(color.gray, 90), "Channel Background")
+plot(mid, "Donchian Mid", color.new(color.gray, 50), 1, plot.style_linebr)
 
-// Dashboard
-var table tb = table.new(position.top_right, 2, 2, border_width=1)
+plotshape(bullBreakout, "Bull Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(bearBreakout, "Bear Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Dashboard: Causal Audit
+var table dashboard = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
 if barstate.isconfirmed
-    table.cell(tb, 0, 0, "Regime", bgcolor=color.black, text_color=color.white)
-    table.cell(tb, 1, 0, isBullishRegime ? "BULLISH" : "BEARISH", bgcolor=isBullishRegime ? color.green : color.red, text_color=color.white)
-    table.cell(tb, 0, 1, "Sovereignty", bgcolor=color.black, text_color=color.white)
-    table.cell(tb, 1, 1, "ACTIVE", bgcolor=color.blue, text_color=color.white)
+    table.cell(dashboard, 0, 0, "Signal", text_color=color.white)
+    table.cell(dashboard, 1, 0, bullBreakout ? "BULL" : bearBreakout ? "BEAR" : "NONE", bgcolor=bullBreakout ? color.green : bearBreakout ? color.red : color.gray)
+    table.cell(dashboard, 0, 1, "Vol Ratio", text_color=color.white)
+    table.cell(dashboard, 1, 1, str.tostring(volume / volMa, "#.##"), text_color=color.white)
+    table.cell(dashboard, 0, 2, "ATR Vol", text_color=color.white)
+    table.cell(dashboard, 1, 2, str.tostring(atr, "#.####"), text_color=color.white)

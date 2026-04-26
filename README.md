@@ -68,3 +68,4 @@
 - **核心**: 多維時序對位（W/D/4H）與機構級因果過濾引擎。
 - **技術**: Pine Script v6.0, 動態風險對位, 實時審計 HUD。
 - **狀態**: 已實體化至 `strategies/`。
+## v26.0427.0630 Updates\n- Added : Volume-backed breakout strategy.\n- Added : Time-anchored trend pullback strategy.
