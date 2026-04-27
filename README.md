@@ -71,3 +71,8 @@
 ## v26.0427.0630 Updates
 - Added `tn_sovereign_donchian_v6`: Volume-backed breakout strategy.
 - Added `tn_sovereign_fibonacci_v6`: Time-anchored trend pullback strategy.
+
+### [v26.0427.1830] Tn Sovereign Liquidity Hunt v6
+- **核心**: 流動性獵殺 (Liquidity Sweep) 與機構位移審計。
+- **技術**: Pine Script v6.0 標準, 動態 ATR 風險架構。
+- **狀態**: 已實體化至 `strategies/`。
