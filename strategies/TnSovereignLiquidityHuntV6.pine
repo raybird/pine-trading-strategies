@@ -1,0 +1,74 @@
+//@version=6
+strategy("TN Sovereign Liquidity Hunt v6", overlay=true, initial_capital=100000, currency=currency.USD, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: SOVEREIGN LIQUIDITY SWEEP & AUDIT
+// This strategy identifies "Liquidity Sweeps" (wicks piercing key levels) 
+// followed by "Institutional Displacement" (high-volume breakouts).
+// It adheres to Pine Script v6 strict standards.
+// Version: v26.0427.1830 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupHunt   = "Liquidity Hunt Parameters"
+lookback    = input.int(20, "Pivot Lookback", minval=5, group=groupHunt)
+wickRatio   = input.float(1.5, "Wick-to-Body Ratio", minval=1.0, group=groupHunt)
+
+groupAudit  = "Causal Displacement Audit"
+volMult     = input.float(1.8, "Volume Displacement Mult", minval=1.1, group=groupAudit)
+atrLen      = input.int(14, "ATR Lookback", group=groupAudit)
+
+groupRisk   = "Sovereign Risk Architecture"
+riskPct     = input.float(1.0, "Risk % Per Trade", minval=0.1, step=0.1, group=groupRisk)
+tpMult      = input.float(3.5, "Take Profit (ATR Mult)", group=groupRisk)
+slMult      = input.float(1.5, "Stop Loss (ATR Mult)", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+upperPivot = ta.highest(high[1], lookback)
+lowerPivot = ta.lowest(low[1], lookback)
+
+volMa = ta.sma(volume, 20)
+atr   = ta.atr(atrLen)
+
+bodySize = math.abs(close - open)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+// Liquidity Sweep Recognition
+bool bullSweep = low < lowerPivot and close > lowerPivot and lowerWick > bodySize * wickRatio
+bool bearSweep = high > upperPivot and close < upperPivot and upperWick > bodySize * wickRatio
+
+// Institutional Displacement Confirmation
+bool bullSignal = bullSweep and volume > volMa * 1.2
+bool bearSignal = bearSweep and volume > volMa * 1.2
+
+// ── Sovereign Execution Logic ────────────────────────────────────────────────
+// v6: Must use if-blocks instead of 'when' parameter
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atr * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if bullSignal and strategy.position_size == 0
+    strategy.entry("Long Sweep", strategy.long, qty=qty, comment="BullSweep")
+    strategy.exit("LX", "Long Sweep", stop=close - stopDist, limit=close + atr * tpMult)
+
+if bearSignal and strategy.position_size == 0
+    strategy.entry("Short Sweep", strategy.short, qty=qty, comment="BearSweep")
+    strategy.exit("SX", "Short Sweep", stop=close + stopDist, limit=close - atr * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(upperPivot, "Upper Liquidity Pool", color.new(color.red, 70), 1, plot.style_stepline)
+plot(lowerPivot, "Lower Liquidity Pool", color.new(color.green, 70), 1, plot.style_stepline)
+
+plotshape(bullSignal, "Bull Hunt", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(bearSignal, "Bear Hunt", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Dashboard: Sovereign Audit
+var table dashboard = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(dashboard, 0, 0, "Hunt Mode", text_color=color.white)
+    table.cell(dashboard, 1, 0, "ACTIVE", bgcolor=color.green, text_color=color.white)
+    table.cell(dashboard, 0, 1, "Vol Ratio", text_color=color.white)
+    table.cell(dashboard, 1, 1, str.tostring(volume / volMa, "#.##"), text_color=color.white)
+    table.cell(dashboard, 0, 2, "ATR", text_color=color.white)
+    table.cell(dashboard, 1, 2, str.tostring(atr, "#.####"), text_color=color.white)
