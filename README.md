@@ -81,3 +81,8 @@
 - **核心**: 多尺度 EMA 交叉與動態成交量因果過濾。
 - **技術**: Pine Script v6.0 標準, ATR 動態風險對位。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0428.0630] Tn Sovereign Lorentzian v6
+- **核心**: 洛倫茲分類 (Lorentzian Classification) 與多維特徵因果審計。
+- **技術**: Pine Script v6.0 標準, 洛倫茲空間距離度量, 動態風險對位。
+- **狀態**: 已實體化至 `strategies/`。
