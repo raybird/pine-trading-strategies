@@ -1,0 +1,74 @@
+//@version=6
+strategy("TN Sovereign Optimized Trend v6", overlay=true, initial_capital=100000, currency=currency.USD, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ------------------------------------------------------------
+// 🚀 CORE PHILOSOPHY: REGIME-AWARE TREND OPTIMIZATION
+// This strategy integrates multi-scale trend anchors with dynamic 
+// ATR volatility regimes. It prioritizes "Institutional Alignment" 
+// by filtering trend signals through structural volume audits.
+// Version: v26.0427.1842 [CST]
+// ------------------------------------------------------------
+
+// ── Inputs ───────────────────────────────────────────────────────────────────
+groupTrend  = "Trend Parameters"
+emaFastLen  = input.int(20, "Fast EMA", minval=5, group=groupTrend)
+emaSlowLen  = input.int(50, "Slow EMA", minval=10, group=groupTrend)
+trendMA     = input.int(200, "Macro Filter EMA", minval=100, group=groupTrend)
+
+groupCausal = "Causal & Volume Audit"
+rsiLen      = input.int(14, "RSI Confirmation", group=groupCausal)
+volMult     = input.float(1.2, "Volume Surge Mult", minval=1.0, group=groupCausal)
+
+groupRisk   = "Sovereign Risk Architecture"
+riskPct     = input.float(1.0, "Risk % per Trade", minval=0.1, step=0.1, group=groupRisk)
+atrLen      = input.int(14, "ATR Lookback", group=groupRisk)
+slMult      = input.float(2.0, "Stop Loss (ATR Mult)", group=groupRisk)
+tpMult      = input.float(4.0, "Take Profit (ATR Mult)", group=groupRisk)
+
+// ── Calculations ─────────────────────────────────────────────────────────────
+fastEMA = ta.ema(close, emaFastLen)
+slowEMA = ta.ema(close, emaSlowLen)
+macroEMA = ta.ema(close, trendMA)
+
+rsiVal = ta.rsi(close, rsiLen)
+volMA = ta.sma(volume, 20)
+atr = ta.atr(atrLen)
+
+// Regime Definition
+bool isBullRegime = close > macroEMA
+bool isBearRegime = close < macroEMA
+
+// Signal Logic (v6: Must use explicit if-conditions or boolean vars)
+bool longSignal = ta.crossover(fastEMA, slowEMA) and isBullRegime and rsiVal > 50 and volume > volMA * volMult
+bool shortSignal = ta.crossunder(fastEMA, slowEMA) and isBearRegime and rsiVal < 50 and volume > volMA * volMult
+
+// ── Sovereign Execution ──────────────────────────────────────────────────────
+float riskAmt = strategy.equity * (riskPct / 100)
+float stopDist = atr * slMult
+float qty = stopDist > 0 ? riskAmt / stopDist : 0.0
+
+if longSignal and strategy.position_size == 0
+    strategy.entry("Long Trend", strategy.long, qty=qty, comment="BullTrend")
+    strategy.exit("LX", "Long Trend", stop=close - stopDist, limit=close + atr * tpMult)
+
+if shortSignal and strategy.position_size == 0
+    strategy.entry("Short Trend", strategy.short, qty=qty, comment="BearTrend")
+    strategy.exit("SX", "Short Trend", stop=close + stopDist, limit=close - atr * tpMult)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(fastEMA, "Fast EMA", color.new(color.teal, 0), 2)
+plot(slowEMA, "Slow EMA", color.new(color.orange, 0), 2)
+plot(macroEMA, "Macro Anchor", color.new(color.gray, 50), 3, plot.style_stepline)
+
+plotshape(longSignal, "Long", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortSignal, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Dashboard: Causal Audit
+var table info = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(info, 0, 0, "Regime", text_color=color.white)
+    table.cell(info, 1, 0, isBullRegime ? "BULLISH" : "BEARISH", bgcolor=isBullRegime ? color.green : color.red)
+    table.cell(info, 0, 1, "Vol Confirmation", text_color=color.white)
+    table.cell(info, 1, 1, volume > volMA * volMult ? "PASSED" : "WAIT", bgcolor=volume > volMA * volMult ? color.green : color.orange)
+    table.cell(info, 0, 2, "ATR Volatility", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(atr, "#.####"), text_color=color.white)
