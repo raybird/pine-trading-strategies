@@ -76,3 +76,8 @@
 - **核心**: 流動性獵殺 (Liquidity Sweep) 與機構位移審計。
 - **技術**: Pine Script v6.0 標準, 動態 ATR 風險架構。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0427.1842] Tn Sovereign Optimized Trend v6
+- **核心**: 多尺度 EMA 交叉與動態成交量因果過濾。
+- **技術**: Pine Script v6.0 標準, ATR 動態風險對位。
+- **狀態**: 已實體化至 `strategies/`。
