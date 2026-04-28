@@ -86,3 +86,8 @@
 - **核心**: 洛倫茲分類 (Lorentzian Classification) 與多維特徵因果審計。
 - **技術**: Pine Script v6.0 標準, 洛倫茲空間距離度量, 動態風險對位。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0429.0631] Tn Sovereign Footprint POC v6
+- **核心**: 模擬足跡圖 POC 突破與機構意圖審計。
+- **技術**: Pine Script v6.0, UDT 狀態管理, 動態 ATR 風險對位。
+- **狀態**: 已實體化至 `strategies/`。
