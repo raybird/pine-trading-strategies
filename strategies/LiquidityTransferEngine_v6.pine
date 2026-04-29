@@ -1,0 +1,113 @@
+//@version=6
+// 🌌 Liquidity Transfer Engine [v26.0429.2000]
+// Inspired by PhenLabs SMC Framework
+// Strategy Focus: Institutional Liquidity Grabs & Draw on Liquidity
+indicator("Liquidity Transfer Engine [PhenLabs Style]", overlay=true, max_lines_count=500, max_boxes_count=500)
+
+// ==========================================
+// 📌 INPUTS & SETTINGS
+// ==========================================
+grp_liq = "Liquidity Detection"
+liq_lookback = input.int(20, "Pivot Lookback", minval=2, group=grp_liq)
+liq_margin   = input.float(0.1, "Sweep Margin (%)", step=0.05, group=grp_liq) / 100
+
+grp_vis = "Visualization"
+show_dashboard = input.bool(true, "Show Info Dashboard", group=grp_vis)
+dash_pos       = input.string("Top Right", "Dashboard Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_vis)
+col_bull       = input.color(color.new(#00ffbb, 0), "Bullish Color", group=grp_vis)
+col_bear       = input.color(color.new(#ff0055, 0), "Bearish Color", group=grp_vis)
+
+// ==========================================
+// 📌 CORE ENGINE LOGIC
+// ==========================================
+var float high_liq = na
+var float low_liq  = na
+var line  high_line = na
+var line  low_line  = na
+
+// Detect Pivot Highs/Lows (Liquidity Pools)
+ph = ta.pivothigh(high, liq_lookback, liq_lookback)
+pl = ta.pivotlow(low, liq_lookback, liq_lookback)
+
+if not na(ph)
+    high_liq := ph
+    line.delete(high_line)
+    high_line := line.new(bar_index - liq_lookback, ph, bar_index, ph, color=col_bear, width=1, style=line.style_dashed)
+
+if not na(pl)
+    low_liq := pl
+    line.delete(low_line)
+    low_line := line.new(bar_index - liq_lookback, pl, bar_index, pl, color=col_bull, width=1, style=line.style_dashed)
+
+// Sweep Detection (Liquidity Grab)
+bool bull_sweep = low < low_liq and close > low_liq
+bool bear_sweep = high > high_liq and close < high_liq
+
+// Liquidity Transfer State
+var string transfer_state = "Neutral"
+var float target_price = na
+
+if bull_sweep
+    transfer_state := "Bullish Transfer"
+    target_price := high_liq
+    label.new(bar_index, low, "LIQ GRAB", color=col_bull, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if bear_sweep
+    transfer_state := "Bearish Transfer"
+    target_price := low_liq
+    label.new(bar_index, high, "LIQ GRAB", color=col_bear, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// ==========================================
+// 📌 PROBABILITY ENGINE (6-FACTOR SIMULATION)
+// ==========================================
+calc_probability() =>
+    float prob = 0.0
+    // 1. Volume Confirmation
+    if volume > ta.sma(volume, 20)
+        prob += 20
+    // 2. Momentum (RSI)
+    rsi = ta.rsi(close, 14)
+    if (transfer_state == "Bullish Transfer" and rsi < 40) or (transfer_state == "Bearish Transfer" and rsi > 60)
+        prob += 15
+    // 3. Structure Alignment
+    ema_fast = ta.ema(close, 50)
+    ema_slow = ta.ema(close, 200)
+    if (transfer_state == "Bullish Transfer" and ema_fast > ema_slow) or (transfer_state == "Bearish Transfer" and ema_fast < ema_slow)
+        prob += 25
+    // 4. Volatility (ATR)
+    if ta.atr(14) > ta.sma(ta.atr(14), 20)
+        prob += 10
+    // 5. Price Action (Engulfing-like)
+    if (transfer_state == "Bullish Transfer" and close > open and close > high[1]) or (transfer_state == "Bearish Transfer" and close < open and close < low[1])
+        prob += 20
+    // 6. Time of Day (NY Session approx)
+    if (hour >= 13 and hour <= 20)
+        prob += 10
+    prob
+
+current_prob = calc_probability()
+
+// ==========================================
+// 📌 DASHBOARD VISUALIZATION
+// ==========================================
+var table dash = table.new(
+     dash_pos == "Top Right" ? position.top_right : 
+     dash_pos == "Bottom Right" ? position.bottom_right : 
+     dash_pos == "Top Left" ? position.top_left : position.bottom_left, 
+     2, 4, bgcolor=color.new(color.black, 20), border_width=1, border_color=color.gray)
+
+if show_dashboard and barstate.islast
+    table.cell(dash, 0, 0, "Engine State", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, transfer_state, text_color=transfer_state == "Neutral" ? color.gray : (transfer_state == "Bullish Transfer" ? col_bull : col_bear), text_size=size.small)
+    
+    table.cell(dash, 0, 1, "Transfer Prob.", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(current_prob) + "%", text_color=current_prob > 70 ? col_bull : (current_prob < 40 ? col_bear : color.yellow), text_size=size.small)
+    
+    table.cell(dash, 0, 2, "Draw Target", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(target_price, "#.##"), text_color=color.white, text_size=size.small)
+
+// ==========================================
+// 📌 ALERTS
+// ==========================================
+alertcondition(bull_sweep, "Bullish Liquidity Grab", "Bullish sweep detected - Transfer initiated.")
+alertcondition(bear_sweep, "Bearish Liquidity Grab", "Bearish sweep detected - Transfer initiated.")
