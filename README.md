@@ -93,3 +93,5 @@
 - **狀態**: 已實體化至 `strategies/`。
 - [Liquidity Transfer Engine v6](./strategies/LiquidityTransferEngine_v6.md) - Institutional Liquidity Grabs & Draw on Liquidity (v26.0429.2000)
 - [TnSovereignOrbMultiV6](./strategies/TnSovereignOrbMultiV6.md): Sovereign Multi-Model ORB strategy [v26.0429.1833]
+- [TnSovereignFakeoutConfirmedV6](./strategies/TnSovereignFakeoutConfirmedV6.md): 4-Layer Filtered Sovereign strategy [v26.0430.0830]
+
