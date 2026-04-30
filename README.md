@@ -94,4 +94,6 @@
 - [Liquidity Transfer Engine v6](./strategies/LiquidityTransferEngine_v6.md) - Institutional Liquidity Grabs & Draw on Liquidity (v26.0429.2000)
 - [TnSovereignOrbMultiV6](./strategies/TnSovereignOrbMultiV6.md): Sovereign Multi-Model ORB strategy [v26.0429.1833]
 - [TnSovereignFakeoutConfirmedV6](./strategies/TnSovereignFakeoutConfirmedV6.md): 4-Layer Filtered Sovereign strategy [v26.0430.0830]
+- [TnSovereignLiquidityMatrixV6](./strategies/TnSovereignLiquidityMatrixV6.md): Adaptive Macro-Anchored Matrix strategy [v26.0430.1830]
+
 

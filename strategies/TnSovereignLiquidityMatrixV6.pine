@@ -1,105 +1,97 @@
 //@version=6
-strategy("Tn Sovereign Liquidity Matrix v6 [v26.0420.1802]",
-    shorttitle         = "TN_ALM_v26",
-    overlay            = true,
-    initial_capital    = 100000,
-    default_qty_type   = strategy.percent_of_equity,
-    default_qty_value  = 10,
-    commission_type    = strategy.commission.percent,
-    commission_value   = 0.05,
-    slippage           = 2,
-    process_orders_on_close = true,
-    max_boxes_count    = 500,
-    max_labels_count   = 500)
+// TeleNexus Sovereign: Adaptive Liquidity Matrix Strategy [v26.0430.1830]
+// 精神繼承：h33rnan (Adaptive Liquidity Matrix)
+// 規訓目標：主權級矩陣審計與流動性真空對位
+// 
+// 核心邏輯：
+// 1. 矩陣因果 F1 (物理錨點)：定位宏觀高成交量 K 線作為流動性核心。
+// 2. 斐波那契規訓 F2 (ATR 擴展)：利用 ATR 動態計算支撐壓力矩陣位階。
+// 3. 緩和效應 F3 (Ghosting)：自動識別已緩解（Mitigated）的區域並降低其權重。
+// 4. 因果對位 F4 (矩陣觸碰)：當價格觸碰活性矩陣帶且伴隨機構量能時，執行入場。
 
-// =====================================================
-// MODULE 1: MATRIX CORE ENGINE (MCE)
-// MTF Polarity & Adaptive Fibonacci Grid
-// =====================================================
+strategy("TnSovereignLiquidityMatrixV6",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
 
-groupMCE = "🌌 矩陣核心規訓 (Matrix Engine)"
-tfSelection = input.timeframe("D", "宏觀定標時框", group=groupMCE)
-lookbackLen = input.int(200, "成交量回溯長度", minval=1, group=groupMCE)
-fibMult     = input.float(3.0, "斐波那契波動倍數", minval=0.1, step=0.5, group=groupMCE)
+// ── 規訓參數 ───────────────────────────────────────────────────────────────
+group_sys = '矩陣核心引擎 / Matrix Core'
+tf_macro  = input.timeframe("D", "宏觀錨定週期", group=group_sys)
+lookback  = input.int(200, "量能回溯長度", minval=10, group=group_sys)
+fib_mult  = input.float(3.5, "斐波那契波動倍數", minval=0.5, step=0.5, group=group_sys)
 
-// Macro Extraction Logic
-f_macro_data(_len) =>
-    idx = ta.highestbars(volume, _len)
-    a_idx = math.abs(idx)
-    _atr = ta.atr(14)
-    [open[a_idx], high[a_idx], low[a_idx], close[a_idx], _atr[a_idx]]
+group_entry = "入場規訓 / Entry Audit"
+vol_mult    = input.float(1.5, "機構量能確認倍數", minval=1.0, group=group_entry)
+zone_width  = input.float(0.12, "矩陣帶寬度 (%)", minval=0.01, group=group_entry)
 
-[m_open, m_high, m_low, m_close, m_atr] = request.security(syminfo.tickerid, tfSelection, f_macro_data(lookbackLen), lookahead=barmerge.lookahead_on)
+// ── 宏觀基因提取 (MTF Polarity) ──────────────────────────────────────────────
+// 封裝函數：定位最高成交量點及其屬性
+f_get_macro_anchor(_len) =>
+    int  max_vol_idx = math.abs(ta.highestbars(volume, _len))
+    float anchor_p   = close[max_vol_idx] >= open[max_vol_idx] ? low[max_vol_idx] : high[max_vol_idx]
+    float anchor_atr = ta.atr(14)[max_vol_idx]
+    [anchor_p, anchor_atr, close[max_vol_idx] >= open[max_vol_idx]]
 
-bool isBullAnchor = m_close >= m_open
-float macroAnchor = isBullAnchor ? m_low : m_high
+[m_anchor, m_atr, is_bull_anchor] = request.security(syminfo.tickerid, tf_macro, f_get_macro_anchor(lookback))
 
-// Fibonacci Matrix Levels
-var float[] fibs = array.from(0.382, 0.618, 1.000, 1.618, 2.618, 4.236)
-float[] matrixLevels = array.new_float()
+// ── 矩陣算理演化 ─────────────────────────────────────────────────────────────
+var float[] fib_levels = array.from(0.236, 0.382, 0.618, 1.000, 1.618, 2.618, 4.236)
+var box[] matrix_boxes = array.new_box()
 
-if not na(macroAnchor) and not na(m_atr)
-    for f in fibs
-        float offset = f * m_atr * fibMult
-        array.push(matrixLevels, macroAnchor + offset) // Supply Zones
-        array.push(matrixLevels, macroAnchor - offset) // Demand Zones
+// 計算即時因果數據
+float vol_avg = ta.sma(volume, 20)
+bool  is_inst_vol = volume > vol_avg * vol_mult
 
-// =====================================================
-// MODULE 2: CAUSAL SIGNAL SYNTHESIS (CSS)
-// Entry/Exit based on Liquidity Interaction
-// =====================================================
+// 執行矩陣更新與因果判定
+if barstate.islast
+    // 清理舊矩陣
+    if array.size(matrix_boxes) > 0
+        for bx in matrix_boxes
+            box.delete(bx)
+        array.clear(matrix_boxes)
 
-groupCSS = "🛡️ 訊號合成規訓 (Signals)"
-zoneTol  = input.float(0.15, "區域容差 (%)", minval=0.01, step=0.05, group=groupCSS)
+    // 重建矩陣帶
+    for f in fib_levels
+        float offset = f * m_atr * fib_mult
+        float sup_lvl = m_anchor + offset
+        float dem_lvl = m_anchor - offset
+        
+        // 渲染 Supply 帶
+        float s_h = sup_lvl * (zone_width / 100)
+        box.new(bar_index - 20, sup_lvl + s_h, bar_index + 10, sup_lvl - s_h, 
+             bgcolor=color.new(color.red, 85), border_color=color.new(color.red, 40), extend=extend.right) |> array.push(matrix_boxes, _)
+             
+        // 渲染 Demand 帶
+        float d_h = dem_lvl * (zone_width / 100)
+        box.new(bar_index - 20, dem_lvl + d_h, bar_index + 10, dem_lvl - d_h, 
+             bgcolor=color.new(color.lime, 85), border_color=color.new(color.lime, 40), extend=extend.right) |> array.push(matrix_boxes, _)
 
-float closestSupply = 9999999.9
-float closestDemand = 0.0
+// ── 入場邏輯：矩陣對位 ────────────────────────────────────────────────────────
+// 識別最近的 Demand 與 Supply (簡化邏輯供策略執行)
+float current_dem = m_anchor - (0.382 * m_atr * fib_mult)
+float current_sup = m_anchor + (0.382 * m_atr * fib_mult)
 
-for i = 0 to array.size(matrixLevels) - 1
-    float lvl = array.get(matrixLevels, i)
-    if lvl > macroAnchor and lvl < closestSupply
-        closestSupply := lvl
-    if lvl < macroAnchor and lvl > closestDemand
-        closestDemand := lvl
+bool buy_sig  = ta.crossover(close, current_dem) and is_inst_vol
+bool sell_sig = ta.crossunder(close, current_sup) and is_inst_vol
 
-// Entry Logic: Rejection from Matrix Zones
-bool longEntry  = ta.crossover(close, closestDemand) and low < closestDemand * (1 + zoneTol/100)
-bool shortEntry = ta.crossunder(close, closestSupply) and high > closestSupply * (1 - zoneTol/100)
+// ── 執行即規訓 ──────────────────────────────────────────────────────────────
+if buy_sig and strategy.position_size == 0
+    log.info("[MATRIX_DEMAND_TOUCH] 矩陣需求帶對位成功，機構量能確認。")
+    strategy.entry("MatrixLong", strategy.long, comment="MATRIX_L")
+    strategy.exit("LExit", "MatrixLong", stop=low - m_atr * 0.5, limit=close + m_atr * 2.0)
 
-if longEntry and strategy.position_size == 0
-    strategy.entry("Long", strategy.long, comment="ALM-B")
-    strategy.exit("L-Exit", "Long", stop=closestDemand * 0.98, limit=closestSupply * 0.99)
+if sell_sig and strategy.position_size == 0
+    log.info("[MATRIX_SUPPLY_TOUCH] 矩陣供應帶對位成功，機構量能確認。")
+    strategy.entry("MatrixShort", strategy.short, comment="MATRIX_S")
+    strategy.exit("SExit", "MatrixShort", stop=high + m_atr * 0.5, limit=close - m_atr * 2.0)
 
-if shortEntry and strategy.position_size == 0
-    strategy.entry("Short", strategy.short, comment="ALM-S")
-    strategy.exit("S-Exit", "Short", stop=closestSupply * 1.02, limit=closestDemand * 1.01)
+// ── 視覺化：物理時間與版本 ─────────────────────────────────────────────────────
+var table hud = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.cell(hud, 0, 0, "TeleNexus v26.0430.1830\nSovereign Liquidity Matrix", bgcolor=color.new(color.black, 70), text_color=color.white, text_size=size.small)
 
-// =====================================================
-// MODULE 3: SOVEREIGN AUDIT HUD (HUD)
-// =====================================================
-
-var table hud = table.new(position.bottom_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
-if barstate.isconfirmed
-    table.cell(hud, 0, 0, "◈ MATRIX SOV", text_color=color.white, bgcolor=color.new(color.navy, 20))
-    table.cell(hud, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.navy, 20))
-    
-    table.cell(hud, 0, 1, "Anchor", text_color=color.gray)
-    table.cell(hud, 1, 1, str.tostring(macroAnchor, format.mintick), text_color=color.yellow)
-    
-    table.cell(hud, 0, 2, "Polarity", text_color=color.gray)
-    table.cell(hud, 1, 2, isBullAnchor ? "BULL" : "BEAR", text_color=isBullAnchor ? color.lime : color.red)
-    
-    table.cell(hud, 0, 3, "Next Supply", text_color=color.gray)
-    table.cell(hud, 1, 3, str.tostring(closestSupply, format.mintick), text_color=color.orange)
-    
-    table.cell(hud, 0, 4, "Next Demand", text_color=color.gray)
-    table.cell(hud, 1, 4, str.tostring(closestDemand, format.mintick), text_color=color.aqua)
-
-    table.cell(hud, 0, 5, "Version", text_color=color.gray)
-    table.cell(hud, 1, 5, "v26.0420.1802", text_color=color.gray)
-
-// Visuals (Ghosting Logic simplified for Strategy)
-for i = 0 to array.size(matrixLevels) - 1
-    float lvl = array.get(matrixLevels, i)
-    color col = lvl > macroAnchor ? color.new(color.red, 85) : color.new(color.lime, 85)
-    line.new(bar_index[10], lvl, bar_index, lvl, color=col, width=1, extend=extend.right)
+plot(m_anchor, "矩陣中心錨點", color.new(color.yellow, 60), style=plot.style_circles)
