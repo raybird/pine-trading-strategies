@@ -1,0 +1,123 @@
+//@version=6
+// TeleNexus Sovereign: ICT 2022 Model Strategy [v26.0501.1830]
+// 精神繼承：ICT (Inner Circle Trader) - 2022 Mentorship Model
+// 規訓目標：主權級機構意圖解碼與流動性對位
+// 
+// 核心因果邏輯：
+// 1. 獵殺 (Liquidity Sweep)：識別散戶止損區被刺穿後的假突破。
+// 2. 位移 (Displacement)：強力的物理位移確認機構真實入場。
+// 3. 失衡 (FVG)：識別價格留下的因果真空帶。
+// 4. 對位 (OTE)：在最優回撤區間 (62%-79%) 執行高因果入長/短。
+
+strategy("TnSovereignIctV6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── 規訓參數 ───────────────────────────────────────────────────────────────
+group_strat = "核心規訓 / Core Strategy"
+lookback    = input.int(60,    "流動性回溯長度", minval=10, group=group_strat)
+disp_mult   = input.float(1.2, "位移強度 (ATR倍數)", step=0.1, group=group_strat)
+ote_low     = input.float(0.62, "OTE 低位 (62%)", group=group_strat)
+ote_high    = input.float(0.79, "OTE 高位 (79%)", group=group_strat)
+
+group_risk  = "風險規訓 / Risk Management"
+sl_offset   = input.float(1.0, "止損偏移 (ATR)", group=group_risk)
+tp_rr       = input.float(2.5, "最低盈虧比 (R:R)", group=group_risk)
+
+// ── 因果計算組件 ────────────────────────────────────────────────────────────
+float atr = ta.atr(14)
+float hh  = ta.highest(high[1], lookback)
+float ll  = ta.lowest(low[1], lookback)
+
+// ── 1. 獵殺偵測 (Liquidity Sweep) ──────────────────────────────────────────
+bool sweep_high = high > hh and close < hh
+bool sweep_low  = low < ll and close > ll
+
+// ── 2. 位移與失衡 (Displacement & FVG) ──────────────────────────────────────
+// 定義 Displacement：實體大於 ATR 指定倍數
+bool displacement = math.abs(close - open) > atr * disp_mult
+
+// 偵測 FVG (Fair Value Gap)
+bool fvg_bull = low > high[2] and displacement[1]
+bool fvg_bear = high < low[2] and displacement[1]
+
+// ── 3. 意圖對位 (OTE Implementation) ────────────────────────────────────────
+var float setup_top = na
+var float setup_low = na
+var int   setup_dir = 0 // 1: Bull, -1: Bear
+var int   setup_age = 0
+
+// 捕獲 Setup 極值
+if (fvg_bull or sweep_low) and setup_dir <= 0
+    setup_top := high
+    setup_low := low[1]
+    setup_dir := 1
+    setup_age := 0
+
+if (fvg_bear or sweep_high) and setup_dir >= 0
+    setup_top := high[1]
+    setup_low := low
+    setup_dir := -1
+    setup_age := 0
+
+// 更新 Setup 狀態
+if setup_dir != 0
+    setup_age += 1
+    if setup_dir == 1
+        setup_top := math.max(setup_top, high)
+    else
+        setup_low := math.min(setup_low, low)
+    
+    // 超時失效 (40 根 K 線內未觸碰 OTE 則取消)
+    if setup_age > 40
+        setup_dir := 0
+
+// 計算 OTE 價格帶
+float fib_range = setup_top - setup_low
+float buy_zone_hi = setup_top - fib_range * ote_low
+float buy_zone_lo = setup_top - fib_range * ote_high
+float sell_zone_lo = setup_low + fib_range * ote_low
+float sell_zone_hi = setup_low + fib_range * ote_high
+
+// ── 4. 執行即規訓 ────────────────────────────────────────────────────────────
+bool long_entry = setup_dir == 1 and low <= buy_zone_hi and low >= buy_zone_lo
+bool short_entry = setup_dir == -1 and high >= sell_zone_lo and high <= sell_zone_hi
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_ICT_LONG] OTE 區間對位，執行因果入長")
+    strategy.entry("IctLong", strategy.long, comment="OTE_IN")
+    strategy.exit("LExit", "IctLong", stop=setup_low - atr * sl_offset, limit=close + (close - setup_low) * tp_rr)
+    setup_dir := 0 // 結案
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_ICT_SHORT] OTE 區間對位，執行因果入短")
+    strategy.entry("IctShort", strategy.short, comment="OTE_IN")
+    strategy.exit("SExit", "IctShort", stop=setup_top + atr * sl_offset, limit=close - (setup_top - close) * tp_rr)
+    setup_dir := 0 // 結案
+
+// ── 視覺化呈現 ───────────────────────────────────────────────────────────────
+plot(hh, "外部看漲流動性", color.new(color.red, 70), style=plot.style_stepline)
+plot(ll, "外部看跌流動性", color.new(color.lime, 70), style=plot.style_stepline)
+
+// 繪製 OTE 區間 (僅在有 Setup 時)
+var box ote_box = box.new(na, na, na, na, bgcolor=color.new(color.gray, 90), border_color=color.new(color.gray, 50))
+if setup_dir == 1
+    box.set_lefttop(ote_box, bar_index - setup_age, buy_zone_hi)
+    box.set_rightbottom(ote_box, bar_index, buy_zone_lo)
+    box.set_bgcolor(ote_box, color.new(color.lime, 90))
+else if setup_dir == -1
+    box.set_lefttop(ote_box, bar_index - setup_age, sell_zone_hi)
+    box.set_rightbottom(ote_box, bar_index, sell_zone_lo)
+    box.set_bgcolor(ote_box, color.new(color.red, 90))
+else
+    box.set_lefttop(ote_box, na, na)
+
+// 物理時間與版本標註
+var table info = table.new(position.bottom_right, 1, 1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0501.1830\nSovereign ICT 2022 Model", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
