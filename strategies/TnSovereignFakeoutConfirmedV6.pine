@@ -1,13 +1,13 @@
 //@version=6
-// TeleNexus Sovereign: Fakeout-Confirmed Strategy [v26.0430.0830]
-// 精神繼承：Ugur Pala (Fakeout-Confirmed 4-Layer)
+// TeleNexus Sovereign: Fakeout-Confirmed Strategy [v26.0502.0830]
+// 精神繼承：Ugur Pala (Fakeout-Confirmed 4-Filter Layer)
 // 規訓目標：主權級信號過濾與因果對位
 // 
 // 核心邏輯：
-// 1. 因果密度 F1 (量能)：確認機構參與度。
-// 2. 趨勢共振 F2 (高時區)：確保路徑對齊。
-// 3. 穩定性審計 F3 (K線確認)：過濾隨機噪聲。
-// 4. 波動率門檻 F4 (ATR)：確保物理位移具備統計顯著性。
+// 1. 因果密度 F1 (量能)：確認機構參與度，過濾散戶噪聲。
+// 2. 趨勢共振 F2 (HTF)：確保路徑對齊大週期引力。
+// 3. 穩定性審計 F3 (K線確認)：訊號產生後需經過指定數量 K 線驗證。
+// 4. 波動率門檻 F4 (ATR)：確保物理位移具備統計顯著性，排除盤整磨損。
 
 strategy("TnSovereignFakeoutConfirmedV6",
      overlay            = true,
@@ -46,7 +46,7 @@ float slowEma = ta.ema(close, slowLen)
 float atrVal  = ta.atr(atrLen)
 float volAvg  = ta.sma(volume, volLen)
 
-// 使用 request.security 獲取高時區趨勢，並採用 lookahead 模式對齊物理時間（無未來數據）
+// 使用 request.security 獲取高時區趨勢，對齊物理時間
 float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
 
 // ── 四極過濾規訓 ──────────────────────────────────────────────────────────────
@@ -109,4 +109,4 @@ plotshape(shortEntry, "因果空頭", shape.triangledown,  location.abovebar, co
 // 物理時間與版本標註
 var table info = table.new(position.bottom_right, 1, 1)
 if barstate.islast
-    table.cell(info, 0, 0, "TeleNexus v26.0430.0830\nSovereign Fakeout Confirmed", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 0, "TeleNexus v26.0502.0830\nSovereign Fakeout Confirmed", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
