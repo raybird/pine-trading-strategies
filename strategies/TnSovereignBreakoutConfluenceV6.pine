@@ -1,0 +1,99 @@
+//@version=6
+// TeleNexus Sovereign: Breakout Confluence Strategy [v26.0501.1830]
+// 精神繼承：Minervini, Qullamaggie, Zanger (7-Strategy Confluence)
+// 規訓目標：主權級突破識別與多維因果匯流
+// 
+// 核心因果矩陣：
+// 1. VCP 規訓 (20%)：驗證波動率壓縮與價格位階。
+// 2. TTM 擠壓 (15%)：捕捉動能爆發前的物理壓縮狀態。
+// 3. 量能審計 (15%)：確認機構入場真實性（量增價漲）。
+// 4. 相對強度 (15%)：確保資產優於基準大盤。
+// 5. 均線對位 (15%)：確認 10/21/50 EMA 的主權排序。
+// 6. RSI 動能 (10%)：識別「甜蜜區」動能 (55-70)。
+// 7. 阻力對位 (10%)：審計與近期高點的物理距離。
+
+strategy("TnSovereignBreakoutConfluenceV6",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── 規訓參數 ───────────────────────────────────────────────────────────────
+group_strat = "核心規訓 / Core Strategy"
+minScore    = input.float(75, "入場門檻 (0-100)", minval=50, group=group_strat)
+atrLen      = input.int(14,   "ATR 長度", group=group_strat)
+slMult      = input.float(1.5, "止損倍數 (ATR)", step=0.1, group=group_strat)
+tpMult      = input.float(3.0, "止盈倍數 (ATR)", step=0.1, group=group_strat)
+
+// ── 因果計算組件 (7-Factor Audit) ──────────────────────────────────────────
+// 1. VCP / Trend Template
+float sma50  = ta.sma(close, 50)
+float sma150 = ta.sma(close, 150)
+float sma200 = ta.sma(close, 200)
+bool vcp_base = close > sma50 and sma50 > sma150 and sma150 > sma200
+float vcpScore = vcp_base ? 100.0 : 0.0
+
+// 2. TTM Squeeze
+float bbUpper = ta.bb(close, 20, 2.0)[0]
+float kcUpper = ta.ema(close, 20) + ta.atr(20) * 1.5
+bool  squeezeOn = bbUpper < kcUpper
+float ttmScore = squeezeOn ? 100.0 : 0.0
+
+// 3. Volume Audit
+float volAvg = ta.sma(volume, 50)
+bool  volSurge = volume > volAvg * 1.5
+float volScore = volSurge ? 100.0 : 50.0
+
+// 4. Relative Strength (vs SPY)
+float assetRet = ta.change(close, 50) / close[50]
+float spyClose = request.security("SPY", timeframe.period, close)
+float spyRet   = ta.change(spyClose, 50) / spyClose[50]
+float rsScore  = assetRet > spyRet ? 100.0 : 0.0
+
+// 5. MA Setup
+float ema10 = ta.ema(close, 10)
+float ema21 = ta.ema(close, 21)
+float ema50 = ta.ema(close, 50)
+bool  maAligned = ema10 > ema21 and ema21 > ema50
+float maScore = maAligned ? 100.0 : 0.0
+
+// 6. RSI Momentum
+float rsiVal = ta.rsi(close, 14)
+float rsiScore = rsiVal >= 55 and rsiVal <= 70 ? 100.0 : 0.0
+
+// 7. Near Resistance
+float recentHigh = ta.highest(high, 50)
+float distFromHigh = (recentHigh - close) / close * 100
+float resistScore = distFromHigh < 5.0 ? 100.0 : 0.0
+
+// ── 最終因果合成 (Total Confluence Score) ───────────────────────────────────
+float totalScore = (vcpScore * 0.20) + (ttmScore * 0.15) + (volScore * 0.15) + 
+                   (rsScore * 0.15) + (maScore * 0.15) + (rsiScore * 0.10) + (resistScore * 0.10)
+
+// ── 執行即規訓 ──────────────────────────────────────────────────────────────
+bool entrySignal = totalScore >= minScore
+float atrVal = ta.atr(atrLen)
+
+if entrySignal and strategy.position_size == 0
+    log.info("[CONFLUENCE_BREAKOUT] 突破匯流分值達標: " + str.tostring(totalScore) + "，執行入場")
+    strategy.entry("SovereignBreakout", strategy.long, comment="IN_" + str.tostring(math.round(totalScore)))
+    strategy.exit("Exit", "SovereignBreakout", 
+         stop=close - slMult * atrVal, 
+         limit=close + tpMult * atrVal,
+         comment_loss="SL", 
+         comment_profit="TP")
+
+// ── 視覺化呈現 ───────────────────────────────────────────────────────────────
+plot(ema10, "主權 10 EMA", color.new(color.lime, 40))
+plot(ema21, "主權 21 EMA", color.new(color.blue, 40))
+plot(ema50, "主權 50 EMA", color.new(color.orange, 40))
+
+plotshape(entrySignal, "突破信號", shape.triangleup, location.belowbar, color.lime, size=size.normal)
+
+// 物理時間與版本標註
+var table info = table.new(position.bottom_right, 1, 1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0501.1830\nSovereign Confluence Breakout", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)

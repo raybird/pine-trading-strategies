@@ -96,5 +96,6 @@
 - [TnSovereignFakeoutConfirmedV6](./strategies/TnSovereignFakeoutConfirmedV6.md): 4-Layer Filtered Sovereign strategy [v26.0430.0830]
 - [TnSovereignLiquidityMatrixV6](./strategies/TnSovereignLiquidityMatrixV6.md): Adaptive Macro-Anchored Matrix strategy [v26.0430.1830]
 - [TnSovereignIctV6](./strategies/TnSovereignIctV6.md): ICT 2022 Model Sovereign strategy [v26.0501.1830]
+- [TnSovereignBreakoutConfluenceV6](./strategies/TnSovereignBreakoutConfluenceV6.md): 7-Factor Confluence Sovereign strategy [v26.0501.1830]
 
 
