@@ -1,5 +1,5 @@
 //@version=6
-// TeleNexus Sovereign: Adaptive Liquidity Matrix Strategy [v26.0430.1830]
+// TeleNexus Sovereign: Adaptive Liquidity Matrix Strategy [v26.0502.0830]
 // 精神繼承：h33rnan (Adaptive Liquidity Matrix)
 // 規訓目標：主權級矩陣審計與流動性真空對位
 // 
@@ -29,7 +29,6 @@ vol_mult    = input.float(1.5, "機構量能確認倍數", minval=1.0, group=gro
 zone_width  = input.float(0.12, "矩陣帶寬度 (%)", minval=0.01, group=group_entry)
 
 // ── 宏觀基因提取 (MTF Polarity) ──────────────────────────────────────────────
-// 封裝函數：定位最高成交量點及其屬性
 f_get_macro_anchor(_len) =>
     int  max_vol_idx = math.abs(ta.highestbars(volume, _len))
     float anchor_p   = close[max_vol_idx] >= open[max_vol_idx] ? low[max_vol_idx] : high[max_vol_idx]
@@ -71,7 +70,6 @@ if barstate.islast
              bgcolor=color.new(color.lime, 85), border_color=color.new(color.lime, 40), extend=extend.right) |> array.push(matrix_boxes, _)
 
 // ── 入場邏輯：矩陣對位 ────────────────────────────────────────────────────────
-// 識別最近的 Demand 與 Supply (簡化邏輯供策略執行)
 float current_dem = m_anchor - (0.382 * m_atr * fib_mult)
 float current_sup = m_anchor + (0.382 * m_atr * fib_mult)
 
@@ -92,6 +90,6 @@ if sell_sig and strategy.position_size == 0
 // ── 視覺化：物理時間與版本 ─────────────────────────────────────────────────────
 var table hud = table.new(position.top_right, 1, 1)
 if barstate.islast
-    table.cell(hud, 0, 0, "TeleNexus v26.0430.1830\nSovereign Liquidity Matrix", bgcolor=color.new(color.black, 70), text_color=color.white, text_size=size.small)
+    table.cell(hud, 0, 0, "TeleNexus v26.0502.0830\nSovereign Liquidity Matrix", bgcolor=color.new(color.black, 70), text_color=color.white, text_size=size.small)
 
 plot(m_anchor, "矩陣中心錨點", color.new(color.yellow, 60), style=plot.style_circles)
