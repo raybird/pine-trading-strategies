@@ -96,10 +96,13 @@
 - [TnSovereignFakeoutConfirmedV6](./strategies/TnSovereignFakeoutConfirmedV6.md): 4-Layer Filtered Sovereign strategy [v26.0430.0830]
 - [TnSovereignLiquidityMatrixV6](./strategies/TnSovereignLiquidityMatrixV6.md): Adaptive Macro-Anchored Matrix strategy [v26.0430.1830]
 - [TnSovereignSignalForgeV6](./strategies/TnSovereignSignalForgeV6.md): Flagship Multi-Model Sovereign strategy [v26.0502.1830]
+- [TnSovereignFakeoutFilterV6](./strategies/TnSovereignFakeoutFilterV6.md): 4-Layer Causal Audit Sovereign strategy [v26.0503.0830]
 - [TnSovereignIctV6](./strategies/TnSovereignIctV6.md): ICT 2022 Model Sovereign strategy [v26.0501.1830]
 - [TnSovereignBreakoutConfluenceV6](./strategies/TnSovereignBreakoutConfluenceV6.md): 7-Factor Confluence Sovereign strategy [v26.0501.1830]
 - [TnSovereignSignalForgeV6](./strategies/TnSovereignSignalForgeV6.md): ML-Powered Multi-Model Sovereign strategy [v26.0502.1830]
+- [TnSovereignFakeoutFilterV6](./strategies/TnSovereignFakeoutFilterV6.md): 4-Layer Causal Audit Sovereign strategy [v26.0503.0830]
 - [TnSovereignLiquidityMatrixV6](./strategies/TnSovereignLiquidityMatrixV6.md): Adaptive Macro-Anchored Matrix strategy [v26.0502.0830]
 - [TnSovereignSignalForgeV6](./strategies/TnSovereignSignalForgeV6.md): Flagship Multi-Model Sovereign strategy [v26.0502.1830]
+- [TnSovereignFakeoutFilterV6](./strategies/TnSovereignFakeoutFilterV6.md): 4-Layer Causal Audit Sovereign strategy [v26.0503.0830]
 
 

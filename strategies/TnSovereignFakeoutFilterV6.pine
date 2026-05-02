@@ -1,0 +1,85 @@
+//@version=6
+// TeleNexus Sovereign: Fakeout Filter Strategy [v26.0503.0830]
+// 精神繼承：Ugur Pala (Fakeout Filter 4-Layer)
+// 規訓目標：主權級信號過濾與因果穩定性審計
+// 
+// 核心邏輯：
+// 1. 因果量能 F1 (Volume)：確認機構資金參與，排除流動性陷阱。
+// 2. 趨勢引力 F2 (HTF)：跨尺度對齊，確保小週期動作符合大週期引力。
+// 3. 物理顯著性 F3 (ATR)：過濾低熵震盪，確保價格位移具備統計顯著性。
+// 4. 路徑對稱性 F4 (Alignment)：確認因果路徑的幾何一致性。
+
+strategy("TnSovereignFakeoutFilterV6",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── 規訓參數 ───────────────────────────────────────────────────────────────
+group_strat = "核心規訓 / Core Strategy"
+fastLen     = input.int(9,     "快速因果長度", minval=1, group=group_strat)
+slowLen     = input.int(21,    "慢速因果長度", minval=1, group=group_strat)
+minScore    = input.int(3,     "最低因果門檻 (0-4)", minval=1, maxval=4, group=group_strat)
+
+group_f1    = "F1: 因果量能 / Volume Audit"
+volLen      = input.int(20,    "量能平均長度", group=group_f1)
+volMult     = input.float(1.5, "量能突發權重", group=group_f1)
+
+group_f2    = "F2: 趨勢引力 / HTF Alignment"
+htfTF       = input.string("60", "引力週期 (min)", options=["15","30","60","240","D"], group=group_f2)
+htfLen      = input.int(50,    "HTF 趨勢長度", group=group_f2)
+
+group_f3    = "F3: 物理顯著性 / ATR Filter"
+atrLen      = input.int(14,    "波動長度", group=group_f3)
+atrMult     = input.float(0.3, "最小位移權重", group=group_f3)
+
+// ── 因果計算組件 ────────────────────────────────────────────────────────────
+float fastEma = ta.ema(close, fastLen)
+float slowEma = ta.ema(close, slowLen)
+float atrVal  = ta.atr(atrLen)
+float volAvg  = ta.sma(volume, volLen)
+
+// 使用 request.security 獲取高時區趨勢，並採用 lookahead 模式對齊物理時間（無未來數據）
+float htfEma = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfLen)[1], lookahead=barmerge.lookahead_on)
+
+// ── 四極因果審計 ──────────────────────────────────────────────────────────────
+bool f1_vol    = volume > volAvg * volMult
+bool f2_htf    = close > htfEma
+bool f3_atr    = math.abs(close - close[1]) > atrVal * atrMult
+bool f4_align  = fastEma > slowEma
+
+// 因果密度得分 (Score 0-4)
+int causalScore = (f1_vol ? 1 : 0) + (f2_htf ? 1 : 0) + (f3_atr ? 1 : 0) + (f4_align ? 1 : 0)
+bool isSovereign = causalScore >= minScore
+
+// ── 執行即規訓 ───────────────────────────────────────────────────────────────
+bool rawLong  = ta.crossover(fastEma, slowEma)
+bool rawShort = ta.crossunder(fastEma, slowEma)
+
+if rawLong and isSovereign and strategy.position_size == 0
+    log.info("[SOVEREIGN_LONG] 因果密度達標 (" + str.tostring(causalScore) + ")，執行入場")
+    strategy.entry("SovereignLong", strategy.long, comment="SCORE_" + str.tostring(causalScore))
+
+if rawShort and (causalScore <= (4 - minScore)) and strategy.position_size == 0
+    log.info("[SOVEREIGN_SHORT] 因果逆轉識別，執行入場")
+    strategy.entry("SovereignShort", strategy.short, comment="REVERSE_" + str.tostring(causalScore))
+
+// 止損止盈：基於 ATR 的動態對位
+strategy.exit("LongExit", "SovereignLong", stop=close - atrVal * 2.0, limit=close + atrVal * 4.0)
+strategy.exit("ShortExit", "SovereignShort", stop=close + atrVal * 2.0, limit=close - atrVal * 4.0)
+
+// ── 視覺化呈現 ───────────────────────────────────────────────────────────────
+plot(fastEma, "快速因果線", color.new(color.aqua, 20))
+plot(slowEma, "慢速因果線", color.new(color.orange, 20), linewidth=2)
+plot(htfEma,  "主權趨勢線", color.new(color.gray, 50), style=plot.style_stepline)
+
+// 物理時間與版本標註
+var table info = table.new(position.bottom_right, 1, 1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0503.0830\nSovereign Fakeout Filter", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
+
+// 背景渲染：因果密度感應
+bgcolor(isSovereign ? color.new(color.green, 90) : na)
