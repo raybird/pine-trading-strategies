@@ -73,7 +73,11 @@ float composite = (rsi_score * w_rsi) + (vol_score * w_vol) + (vwap_score * w_vw
 int agreement = 0
 agreement += (rsi_score != 0 ? 1 : 0)
 agreement += (vol_score != 0 ? 1 : 0)
+agreement += (vwap_score != 0 ? 1 : 0)
 agreement += (ema_score != 0 ? 1 : 0)
+agreement += (macd_score != 0 ? 1 : 0)
+agreement += (bb_score != 0 ? 1 : 0)
+agreement += (vi_score != 0 ? 1 : 0)
 
 // ── 執行即規訓 ──────────────────────────────────────────────────────────────
 bool long_entry = composite > sig_threshold and agreement >= sig_min_agree
