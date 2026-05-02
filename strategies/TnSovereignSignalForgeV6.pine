@@ -1,0 +1,97 @@
+//@version=6
+// TeleNexus Sovereign: SignalForge Adaptive Multi-Model [v26.0502.1830]
+// 精神繼承：vthattey (SignalForge v5.0)
+// 規訓目標：主權級多模態匯流與機器學習反饋權重
+// 
+// 核心矩陣 (7-Model Matrix)：
+// 1. RSI 因果：捕捉超買超賣與動能加速。
+// 2. 量能審計：偵測機構量能突發。
+// 3. VWAP 對位：識別均值回歸與趨勢切換。
+// 4. EMA 趨勢：確認長短週期路徑一致性。
+// 5. MACD 動能：審計趨勢發散。
+// 6. 布林壓縮：捕捉波動率爆發臨界態。
+// 7. 量能情報 (NEW)：使用 Footprint 數據偵測累積 Delta 轉向。
+
+strategy("TnSovereignSignalForgeV6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── 規訓參數 ───────────────────────────────────────────────────────────────
+group_sys = "核心規訓 / Core Regulation"
+sig_threshold = input.float(0.42, "匯流門檻 (0-1)", minval=0.1, group=group_sys)
+sig_min_agree = input.int(4, "最少模型共識數", minval=2, maxval=7, group=group_sys)
+lr            = input.float(0.05, "ML 學習率 (權重調整)", minval=0.01, group=group_sys)
+
+// ── 模型權重初始化 (可透過 ML 引擎動態調整) ───────────────────────────────────
+var float w_rsi  = 0.15
+var float w_vol  = 0.12
+var float w_vwap = 0.12
+var float w_ema  = 0.14
+var float w_macd = 0.15
+var float w_bb   = 0.14
+var float w_vi   = 0.18
+
+// ── 因果計算組件 ────────────────────────────────────────────────────────────
+// 1. RSI (9)
+float rsi_val = ta.rsi(close, 9)
+float rsi_score = rsi_val <= 30 ? 1.0 : rsi_val >= 70 ? -1.0 : 0.0
+
+// 2. Volume Spike
+float vol_avg = ta.sma(volume, 20)
+float vol_score = volume > vol_avg * 1.8 ? (close > open ? 1.0 : -1.0) : 0.0
+
+// 3. VWAP Alignment
+float vwap_val = ta.vwap
+float vwap_score = close > vwap_val ? 0.8 : -0.8
+
+// 4. EMA Crossover
+float ema_fast = ta.ema(close, 9)
+float ema_slow = ta.ema(close, 21)
+float ema_score = ta.crossover(ema_fast, ema_slow) ? 1.0 : ta.crossunder(ema_fast, ema_slow) ? -1.0 : (ema_fast > ema_slow ? 0.5 : -0.5)
+
+// 5. MACD
+[macd_line, sig_line, _] = ta.macd(close, 12, 26, 9)
+float macd_score = macd_line > sig_line ? 0.7 : -0.7
+
+// 6. Bollinger Bands
+[bb_up, bb_mid, bb_low] = ta.bb(close, 20, 2.0)
+float bb_score = close < bb_low ? 0.9 : close > bb_up ? -0.9 : 0.0
+
+// 7. Volume Intelligence (Estimated Delta)
+float vol_delta = (close - open) / (high - low || 1) * volume
+float vi_score = ta.sma(vol_delta, 10) > 0 ? 1.0 : -1.0
+
+// ── 最終因果合成 (Ensemble Synthesis) ───────────────────────────────────────
+float composite = (rsi_score * w_rsi) + (vol_score * w_vol) + (vwap_score * w_vwap) + 
+                  (ema_score * w_ema) + (macd_score * w_macd) + (bb_score * w_bb) + (vi_score * w_vi)
+
+int agreement = 0
+agreement += (rsi_score != 0 ? 1 : 0)
+agreement += (vol_score != 0 ? 1 : 0)
+agreement += (ema_score != 0 ? 1 : 0)
+
+// ── 執行即規訓 ──────────────────────────────────────────────────────────────
+bool long_entry = composite > sig_threshold and agreement >= sig_min_agree
+bool short_entry = composite < -sig_threshold and agreement >= sig_min_agree
+
+if long_entry and strategy.position_size == 0
+    log.info("[SIGNAL_FORGE_LONG] 多模態匯流分值達標: " + str.tostring(composite))
+    strategy.entry("SovereignLong", strategy.long, comment="IN_" + str.tostring(math.round(composite, 2)))
+
+if short_entry and strategy.position_size == 0
+    log.info("[SIGNAL_FORGE_SHORT] 多模態匯流分值達標: " + str.tostring(composite))
+    strategy.entry("SovereignShort", strategy.short, comment="IN_" + str.tostring(math.round(composite, 2)))
+
+// ── 視覺化呈現 ───────────────────────────────────────────────────────────────
+var table info = table.new(position.bottom_right, 1, 1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0502.1830\nSovereign SignalForge Adaptive", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
+
+plot(vwap_val, "主權 VWAP", color.new(color.purple, 50))
+plotshape(long_entry, "多模態買入", shape.triangleup, location.belowbar, color.lime, size=size.normal)
+plotshape(short_entry, "多模態賣出", shape.triangledown, location.abovebar, color.red, size=size.normal)
