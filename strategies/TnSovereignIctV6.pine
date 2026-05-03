@@ -1,5 +1,5 @@
 //@version=6
-// TeleNexus Sovereign: ICT 2022 Mentorship Model [v26.0504.0630]
+// TeleNexus Sovereign: ICT 2022 Mentorship Model [v26.0504.0633]
 // Spirit Inheritance: S1mon-code/ICT-Pine (Institutional Footprint)
 // Goal: Causal Intent Alignment & Execution Sovereignty
 //
@@ -23,12 +23,20 @@ strategy("TnSovereignIctV6",
 group_sys   = "▼ Regulation"
 lookback    = input.int(60,    "Sweep Lookback Bars", minval=10, group=group_sys)
 disp_atr    = input.float(1.2, "Displacement ≥ N×ATR", step=0.1, group=group_sys)
-ote_low     = input.float(0.62, "OTE Low (Retracement %)", group=group_sys)
-ote_high    = input.float(0.79, "OTE High (Retracement %)", group=group_sys)
+ote_low     = input.float(0.62, "Retracement Low (OTE)", group=group_sys)
+ote_high    = input.float(0.79, "Retracement High (OTE)", group=group_sys)
 
 group_risk  = "▼ Risk Management"
 sl_offset   = input.float(1.0, "Stop Loss Offset (ATR)", group=group_risk)
 tp_rr       = input.float(3.0, "Target R:R", group=group_risk)
+
+// ── UDT Definitions ─────────────────────────────────────────────────────────
+type Setup
+    int   direction // 1: Bull, -1: Bear
+    float leg_start
+    float leg_end
+    int   age
+    bool  active
 
 // ── Causal Components ───────────────────────────────────────────────────────
 float atr = ta.atr(14)
@@ -48,56 +56,57 @@ bool fvg_bull = low > high[2] and is_displacement[1]
 bool fvg_bear = high < low[2] and is_displacement[1]
 
 // 3. Setup Tracking
-var float leg_start = na
-var float leg_end   = na
-var int   setup_dir = 0 // 1: Bull, -1: Bear
-var int   setup_age = 0
+var Setup current_setup = Setup.new(0, na, na, 0, false)
 
 // Capture the start of a displacement leg after a sweep
-if (fvg_bull or sweep_low) and setup_dir <= 0
-    leg_start := low[1]
-    leg_end   := high
-    setup_dir := 1
-    setup_age := 0
+if (fvg_bull or sweep_low) and not current_setup.active
+    current_setup.leg_start := low[1]
+    current_setup.leg_end   := high
+    current_setup.direction := 1
+    current_setup.age       := 0
+    current_setup.active    := true
 
-if (fvg_bear or sweep_high) and setup_dir >= 0
-    leg_start := high[1]
-    leg_end   := low
-    setup_dir := -1
-    setup_age := 0
+if (fvg_bear or sweep_high) and not current_setup.active
+    current_setup.leg_start := high[1]
+    current_setup.leg_end   := low
+    current_setup.direction := -1
+    current_setup.age       := 0
+    current_setup.active    := true
 
 // Update leg extreme during expansion
-if setup_dir != 0
-    setup_age += 1
-    if setup_dir == 1
-        leg_end := math.max(leg_end, high)
+if current_setup.active
+    current_setup.age += 1
+    if current_setup.direction == 1
+        current_setup.leg_end := math.max(current_setup.leg_end, high)
     else
-        leg_end := math.min(leg_end, low)
+        current_setup.leg_end := math.min(current_setup.leg_end, low)
     
     // Invalidation: if price closes past the start of the leg or too much time passed
-    if (setup_dir == 1 and close < leg_start) or (setup_dir == -1 and close > leg_start) or setup_age > 50
-        setup_dir := 0
+    if (current_setup.direction == 1 and close < current_setup.leg_start) or 
+       (current_setup.direction == -1 and close > current_setup.leg_start) or 
+       current_setup.age > 50
+        current_setup.active := false
 
 // 4. OTE Calculation
-float fib_range = math.abs(leg_end - leg_start)
-float entry_hi  = setup_dir == 1 ? leg_end - fib_range * ote_low  : leg_start + fib_range * ote_low
-float entry_lo  = setup_dir == 1 ? leg_end - fib_range * ote_high : leg_start + fib_range * ote_high
+float fib_range = math.abs(current_setup.leg_end - current_setup.leg_start)
+float entry_hi  = current_setup.direction == 1 ? current_setup.leg_end - fib_range * ote_low  : current_setup.leg_start + fib_range * ote_low
+float entry_lo  = current_setup.direction == 1 ? current_setup.leg_end - fib_range * ote_high : current_setup.leg_start + fib_range * ote_high
 
 // ── Execution Logic ─────────────────────────────────────────────────────────
-bool long_entry  = setup_dir == 1 and low <= entry_hi and low >= entry_lo
-bool short_entry = setup_dir == -1 and high >= entry_hi and high <= entry_lo
+bool long_entry  = current_setup.active and current_setup.direction == 1 and low <= entry_hi and low >= entry_lo
+bool short_entry = current_setup.active and current_setup.direction == -1 and high >= entry_hi and high <= entry_lo
 
 if long_entry and strategy.position_size == 0
     log.info("[SOVEREIGN_ICT_LONG] OTE Alignment detected. Executing conviction entry.")
     strategy.entry("IctLong", strategy.long, comment="OTE_L")
-    strategy.exit("LExit", "IctLong", stop=leg_start - atr * sl_offset, limit=close + (close - leg_start) * tp_rr)
-    setup_dir := 0
+    strategy.exit("LExit", "IctLong", stop=current_setup.leg_start - atr * sl_offset, limit=close + (close - current_setup.leg_start) * tp_rr)
+    current_setup.active := false
 
 if short_entry and strategy.position_size == 0
     log.info("[SOVEREIGN_ICT_SHORT] OTE Alignment detected. Executing conviction entry.")
     strategy.entry("IctShort", strategy.short, comment="OTE_S")
-    strategy.exit("SExit", "IctShort", stop=leg_start + atr * sl_offset, limit=close - (leg_start - close) * tp_rr)
-    setup_dir := 0
+    strategy.exit("SExit", "IctShort", stop=current_setup.leg_start + atr * sl_offset, limit=close - (current_setup.leg_start - close) * tp_rr)
+    current_setup.active := false
 
 // ── Visuals ──────────────────────────────────────────────────────────────────
 plot(hh, "External Buy-side Liquidity", color.new(color.red, 70), style=plot.style_stepline)
@@ -105,18 +114,19 @@ plot(ll, "External Sell-side Liquidity", color.new(color.lime, 70), style=plot.s
 
 // Render OTE zone
 var box ote_zone = box.new(na, na, na, na, bgcolor=color.new(color.gray, 90), border_color=color.new(color.gray, 50))
-if setup_dir == 1
-    box.set_lefttop(ote_zone, bar_index - setup_age, entry_hi)
-    box.set_rightbottom(ote_zone, bar_index, entry_lo)
-    box.set_bgcolor(ote_zone, color.new(color.lime, 90))
-else if setup_dir == -1
-    box.set_lefttop(ote_zone, bar_index - setup_age, entry_lo)
-    box.set_rightbottom(ote_zone, bar_index, entry_hi)
-    box.set_bgcolor(ote_zone, color.new(color.red, 90))
+if current_setup.active
+    if current_setup.direction == 1
+        box.set_lefttop(ote_zone, bar_index - current_setup.age, entry_hi)
+        box.set_rightbottom(ote_zone, bar_index, entry_lo)
+        box.set_bgcolor(ote_zone, color.new(color.lime, 90))
+    else
+        box.set_lefttop(ote_zone, bar_index - current_setup.age, entry_lo)
+        box.set_rightbottom(ote_zone, bar_index, entry_hi)
+        box.set_bgcolor(ote_zone, color.new(color.red, 90))
 else
     box.set_lefttop(ote_zone, na, na)
 
 // Status Labels
 var table info = table.new(position.bottom_right, 1, 1)
 if barstate.islast
-    table.cell(info, 0, 0, "TeleNexus v26.0504.0630\nSovereign ICT Model", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 0, "TeleNexus v26.0504.0633\nSovereign ICT Model", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.small)

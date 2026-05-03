@@ -1,9 +1,9 @@
-# TnSovereignIctV6 (v26.0504.0630)
+# TnSovereignIctV6 (v26.0504.0633)
 
 > **「市場不是隨機的波動，而是意圖與引力的精密對位。」**
 
 ## 1. 核心精髓 (Essence)
-本策略繼承自 ICT (Inner Circle Trader) 2022 Mentorship 模型，並注入 TeleNexus 的「主權因果」規訓。它摒棄了傳統的指標交叉，轉而審計市場的微觀結構：流動性獵殺、強力位移、與因果真空（FVG）。這是一個專為捕捉「機構足跡」設計的高級執行系統。
+本策略繼承自 ICT (Inner Circle Trader) 2022 Mentorship 模型，並注入 TeleNexus 的「主權因果」規訓。它摒棄了傳統的指標交叉，轉而審計市場的微觀結構：流動性獵殺 (Liquidity Sweep)、強力位移 (Displacement) 與因果真空 (FVG)。這是一個專為捕捉「機構足跡」設計的高級執行系統。
 
 ## 2. 三位一體因果鏈 (Causal Chain)
 - **流動性獵殺 (Liquidity Sweep)**: 自動識別回溯 60 根 K 線內的外部流動性位階。當價格刺穿這些位階並迅速收回時，視為有效的獵殺信號，代表散戶止損已被清理。
@@ -16,7 +16,7 @@
 - **止損**: 物理極值對位止損，兼顧生存率與資本保護。
 
 ## 4. 規訓記錄 (Audit Log)
-- **v26.0504.0630**: 首版實體化。將 Simon 的大規模 ICT 框架蒸餾為核心執行邏輯，優化了 Setup 的生命週期管理與超時失效機制。
+- **v26.0504.0633**: 首版實體化。將 Simon 的大規模 ICT 框架蒸餾為核心執行邏輯，實裝了基於 UDT 的 Setup 生命週期管理。
 
 ---
-*Calibrated at Mon May 4 06:30:20 CST 2026 | Calibration: Sovereign*
+*Calibrated at Mon May 4 06:33:19 CST 2026 | Calibration: Sovereign*
