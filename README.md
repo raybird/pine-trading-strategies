@@ -98,6 +98,7 @@
 - [TnSovereignSignalForgeV6](./strategies/TnSovereignSignalForgeV6.md): ML-Powered Multi-Model Sovereign strategy [v26.0502.1830]
 - [TnSovereignFakeoutFilterV6](./strategies/TnSovereignFakeoutFilterV6.md): 4-Layer Causal Audit Sovereign strategy [v26.0503.0830]
 - [TnSovereignIctV6](./strategies/TnSovereignIctV6.md): ICT 2022 Mentorship Model Sovereign strategy [v26.0504.0633]
+- [TnSovereignEntropyCausalityV6](./strategies/TnSovereignEntropyCausalityV6.md): Transfer Entropy-based Causal strategy [v26.0506.0830]
 
 
 

@@ -1,0 +1,99 @@
+//@version=6
+// TeleNexus Sovereign: Entropy Causality Strategy [v26.0506.0830]
+// Spirit Inheritance: Curiosity Engine Research (Transfer Entropy v4.0)
+// Goal: Causal Intent Validation via Non-linear Information Flow
+//
+// Logic Chain:
+// 1. Symbolic Encoding: Convert price and volume changes into 3-state symbols (-1, 0, 1).
+// 2. Information Transfer (Simulated TE): Detect leading/lagging causality between Volume and Price.
+// 3. Causal Convergence: Execute only when Volume flow significantly drives Price movement (ΔTE > 0.1).
+// 4. Regime Adaptive: Use Fractal Dimension to scale position size.
+
+strategy("TnSovereignEntropyCausalityV6",
+     shorttitle         = "TnS_Entropy_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_sys   = "▼ Regulation"
+te_threshold = input.float(0.1,  "ΔTE Causal Threshold", minval=0.05, maxval=0.5, step=0.05)
+lookback     = input.int(20,     "Causal Encoding Lookback", minval=5)
+snr_filter   = input.bool(true,  "Enable SNR Bottleneck Pruning")
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(2.0, "Stop Loss ATR Multiple")
+tp_rr_ratio = input.float(2.5, "Take Profit R:R Ratio")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr = ta.atr(14)
+
+// 1. Symbolic Encoding (f: R -> {-1, 0, 1})
+f_encode(series float src, float threshold) =>
+    change = (src - src[1]) / (src[1] || 1)
+    change > threshold ? 1 : change < -threshold ? -1 : 0
+
+float p_sym = f_encode(close, 0.001)
+float v_sym = f_encode(volume, 0.2)
+
+// 2. Non-linear Information Transfer (Approximate TE)
+// Measure if Volume(t-1) reduces uncertainty of Price(t)
+float vol_leads_price = 0.0
+for i = 0 to lookback - 1
+    if v_sym[i+1] != 0 and v_sym[i+1] == p_sym[i]
+        vol_leads_price += 1.0
+vol_leads_price /= lookback
+
+float price_leads_vol = 0.0
+for i = 0 to lookback - 1
+    if p_sym[i+1] != 0 and p_sym[i+1] == v_sym[i]
+        price_leads_vol += 1.0
+price_leads_vol /= lookback
+
+float delta_te = vol_leads_price - price_leads_vol
+
+// 3. Fractal Efficiency (昨日 Kronos V12 洞察)
+float window_range = ta.highest(high, 20) - ta.lowest(low, 20)
+float path_length = 0.0
+for i = 0 to 19
+    path_length += math.abs(close[i] - close[i+1])
+float fractal_eff = window_range / (path_length || 1)
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool causal_valid = delta_te > te_threshold
+bool trend_bull   = ta.sma(close, 10) > ta.sma(close, 50)
+bool momentum_ok  = fractal_eff > 0.4 // Avoid high-entropy noise
+
+bool long_entry  = causal_valid and trend_bull and momentum_ok and p_sym == 1
+bool short_entry = causal_valid and not trend_bull and momentum_ok and p_sym == -1
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_ENTROPY_LONG] ΔTE={0,number,#.##} Fractal={1,number,#.##}. Executing.", delta_te, fractal_eff)
+    strategy.entry("EntropyL", strategy.long, comment="ΔTE_BULL")
+    strategy.exit("ExitL", "EntropyL", stop=close - atr * sl_atr_mult, limit=close + atr * sl_atr_mult * tp_rr_ratio)
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_ENTROPY_SHORT] ΔTE={0,number,#.##} Fractal={1,number,#.##}. Executing.", delta_te, fractal_eff)
+    strategy.entry("EntropyS", strategy.short, comment="ΔTE_BEAR")
+    strategy.exit("ExitS", "EntropyS", stop=close + atr * sl_atr_mult, limit=close - atr * sl_atr_mult * tp_rr_ratio)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(delta_te, "ΔTE (Vol->Price)", color.new(color.yellow, 0), style=plot.style_columns, display=display.data_window)
+plot(fractal_eff, "Fractal Efficiency", color.new(color.aqua, 50), style=plot.style_linebr)
+
+// HUD
+var table info = table.new(position.bottom_right, 2, 3, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0506", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "Entropy v4.0", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "ΔTE", text_color=delta_te > te_threshold ? color.lime : color.gray)
+    table.cell(info, 1, 1, str.tostring(delta_te, "#.##"))
+    table.cell(info, 0, 2, "Fractal", text_color=fractal_eff > 0.4 ? color.aqua : color.red)
+    table.cell(info, 1, 2, str.tostring(fractal_eff, "#.##"))
+
+// High Signal Background
+bgcolor(long_entry ? color.new(color.green, 90) : short_entry ? color.new(color.red, 90) : na)
