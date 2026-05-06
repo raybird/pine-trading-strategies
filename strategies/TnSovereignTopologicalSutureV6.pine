@@ -1,0 +1,91 @@
+//@version=6
+// TeleNexus Sovereign: Topological Suture Strategy [v26.0507.1830]
+// Spirit Inheritance: Multiscale Connectivity & Entropy Resonance (Kronos V16)
+// Goal: Causal Synchronization across Time-Scale Fragments
+//
+// Logic Chain:
+// 1. Multiscale Efficiency: Measure fractal efficiency at 10, 20, and 40 bars.
+// 2. Connectivity Audit: Calculate the product/synchronization of multiscale paths.
+// 3. Entropy Resonance: Confirm institutional 'cohesion' via volume Z-score.
+// 4. Topological Suture: Execute when global connectivity reaches peak sovereignty (50.0 density).
+
+strategy("TnSovereignTopologicalSutureV6",
+     shorttitle         = "TnS_Suture_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_sys   = "▼ Regulation"
+conn_threshold = input.float(0.45, "Min Connectivity Threshold", minval=0.1, maxval=1.0)
+vol_z_threshold = input.float(2.0, "Min Volume Z-Score", minval=1.0)
+suture_density  = input.float(50.0, "Causal Density Weight")
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(2.5, "Stop Loss ATR Multiple")
+tp_rr_ratio = input.float(3.5, "Take Profit R:R Ratio")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr = ta.atr(14)
+
+// 1. Multiscale Efficiency (Fractal Dimension Audit)
+f_calculate_efficiency(int len) =>
+    float window_range = ta.highest(high, len) - ta.lowest(low, len)
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    window_range / (path_length || 1)
+
+float e10 = f_calculate_efficiency(10)
+float e20 = f_calculate_efficiency(20)
+float e40 = f_calculate_efficiency(40)
+
+// 2. Topological Connectivity
+float connectivity = (e10 * e20 * e40) / (math.max(math.max(e10, e20), e40) || 1)
+
+// 3. Entropy Resonance (Volume Cohesion)
+float vol_sma = ta.sma(volume, 20)
+float vol_std = ta.stdev(volume, 20)
+float vol_z   = (volume - vol_sma) / (vol_std || 1)
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool is_resonant = connectivity > conn_threshold and math.abs(vol_z) > vol_z_threshold
+bool trend_bull  = ta.sma(close, 10) > ta.sma(close, 50)
+bool structure_ok = e10 > 0.6 // Ensure the micro-scale is ordered
+
+bool long_entry  = is_resonant and trend_bull and structure_ok and close > close[1]
+bool short_entry = is_resonant and not trend_bull and structure_ok and close < close[1]
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_SUTURE_LONG] Connectivity={0,number,#.##} VolZ={1,number,#.##}. Suturing.", connectivity, vol_z)
+    strategy.entry("SutureL", strategy.long, comment="TOPOLOGICAL_BULL")
+    strategy.exit("ExitL", "SutureL", stop=close - atr * sl_atr_mult, limit=close + atr * sl_atr_mult * tp_rr_ratio)
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_SUTURE_SHORT] Connectivity={0,number,#.##} VolZ={1,number,#.##}. Suturing.", connectivity, vol_z)
+    strategy.entry("SutureS", strategy.short, comment="TOPOLOGICAL_BEAR")
+    strategy.exit("ExitS", "SutureS", stop=close + atr * sl_atr_mult, limit=close - atr * sl_atr_mult * tp_rr_ratio)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(connectivity, "Topological Connectivity", color.new(color.fuchsia, 0), style=plot.style_columns, display=display.data_window)
+plot(e10, "Micro Efficiency (10)", color.new(color.aqua, 70))
+plot(e40, "Macro Efficiency (40)", color.new(color.yellow, 70))
+
+// HUD
+var table info = table.new(position.bottom_right, 2, 4, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus v26.0507", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "V16 Suture", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "Connectivity", text_color=connectivity > conn_threshold ? color.lime : color.gray)
+    table.cell(info, 1, 1, str.tostring(connectivity, "#.##"))
+    table.cell(info, 0, 2, "Vol Z-Score", text_color=math.abs(vol_z) > vol_z_threshold ? color.aqua : color.gray)
+    table.cell(info, 1, 2, str.tostring(vol_z, "#.##"))
+    table.cell(info, 0, 3, "Density", text_color=color.white)
+    table.cell(info, 1, 3, str.tostring(suture_density, "#.#"))
+
+// High Signal Background
+bgcolor(long_entry ? color.new(color.green, 90) : short_entry ? color.new(color.red, 90) : na)
