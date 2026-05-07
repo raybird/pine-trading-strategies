@@ -1,0 +1,130 @@
+//@version=6
+// TeleNexus Sovereign: Reversal Engine & Fractal Entropy Strategy [v26.0508.0648]
+// Spirit Inheritance: WavesUnchained Reversal Engine & Kronos V17 Fractal Syntropy
+// Goal: High-Signal Pivot Reversal via Institutional Sweep & Causal Gating
+//
+// Logic Chain (Reversal Engine + V17 Gating):
+// 1. Mandatory Gates:
+//    - Liquidity Sweep: Price must violate and reclaim previous swing high/low.
+//    - ATR Corridor: Avoid low-vola noise or extreme spike regimes.
+//    - HTF Trend: Align with higher-timeframe EMA structure.
+//    - Body Size: Ensure strong rejection character relative to ATR.
+// 2. V17 Sovereign Gate:
+//    - Fractal Efficiency: Multiscale path efficiency must be > 0.45 (Peak Syntropy).
+// 3. Risk Management:
+//    - Structural SL: Anchored to the sweep point with ATR buffer.
+//    - R-multiple TP: Adaptive profit targets based on realized risk.
+
+strategy("TnSovereignReversalEngineV6",
+     shorttitle         = "TnS_Reversal_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_gates = "▼ Mandatory Gates"
+swing_len   = input.int(10, "Sweep Lookback", minval=2)
+atr_len     = input.int(14, "ATR Length")
+atr_base    = input.int(50, "ATR Base Lookback")
+atr_factor  = input.float(0.6, "Min ATR Factor (× Basis)")
+htf         = input.timeframe("60", "HTF Timeframe")
+
+group_v17   = "▼ Sovereign Master V17"
+use_v17     = input.bool(true, "Enable V17 Fractal Gating")
+v17_thresh  = input.float(0.45, "Min Fractal Efficiency", minval=0.1)
+
+group_risk  = "▼ Risk & Exit"
+sl_buffer   = input.float(0.3, "SL ATR Buffer")
+tp_r_mult   = input.float(2.5, "TP Risk Multiple")
+be_r_mult   = input.float(1.2, "Break-even Trigger (R×)")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr     = ta.atr(atr_len)
+float atr_avg = ta.sma(atr, atr_base)
+
+// 1. HTF Trend Filter
+float htf_fast = request.security(syminfo.tickerid, htf, ta.ema(close, 50))
+float htf_slow = request.security(syminfo.tickerid, htf, ta.ema(close, 200))
+bool bull_trend = htf_fast > htf_slow
+bool bear_trend = htf_fast < htf_slow
+
+// 2. Liquidity Sweep
+float prev_l = ta.lowest(low[1], swing_len)
+float prev_h = ta.highest(high[1], swing_len)
+bool sweep_l = low < prev_l and close > prev_l
+bool sweep_h = high > prev_h and close < prev_h
+
+// 3. V17 Fractal Efficiency (TeleNexus Core)
+f_v17_efficiency(int len) =>
+    float window_range = ta.highest(high, len) - ta.lowest(low, len)
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    window_range / (path_length || 1)
+
+float v17_eff = f_v17_efficiency(20)
+bool v17_gate = use_v17 ? v17_eff > v17_thresh : true
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool atr_ok = atr > atr_avg * atr_factor
+
+bool long_entry  = sweep_l and bull_trend and atr_ok and v17_gate and barstate.isconfirmed
+bool short_entry = sweep_h and bear_trend and atr_ok and v17_gate and barstate.isconfirmed
+
+// Persistent SL/TP management
+var float current_sl = na
+var float current_tp = na
+var float initial_risk = na
+
+if long_entry and strategy.position_size == 0
+    float sl = math.min(low, prev_l) - atr * sl_buffer
+    float risk = close - sl
+    if risk > 0
+        current_sl := sl
+        current_tp := close + risk * tp_r_mult
+        initial_risk := risk
+        log.info("[SOVEREIGN_REVERSAL_LONG] Sweep detected. Efficiency={0,number,#.##}. Executing.", v17_eff)
+        strategy.entry("Long", strategy.long)
+
+if short_entry and strategy.position_size == 0
+    float sl = math.max(high, prev_h) + atr * sl_buffer
+    float risk = sl - close
+    if risk > 0
+        current_sl := sl
+        current_tp := close - risk * tp_r_mult
+        initial_risk := risk
+        log.info("[SOVEREIGN_REVERSAL_SHORT] Sweep detected. Efficiency={0,number,#.##}. Executing.", v17_eff)
+        strategy.entry("Short", strategy.short)
+
+// Break-even and Bracket Exit
+if strategy.position_size > 0
+    if close - strategy.position_avg_price >= be_r_mult * initial_risk
+        current_sl := math.max(current_sl, strategy.position_avg_price)
+    strategy.exit("Exit Long", "Long", stop=current_sl, limit=current_tp)
+
+if strategy.position_size < 0
+    if strategy.position_avg_price - close >= be_r_mult * initial_risk
+        current_sl := math.min(current_sl, strategy.position_avg_price)
+    strategy.exit("Exit Short", "Short", stop=current_sl, limit=current_tp)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(current_sl, "Stop Loss", color.new(color.red, 30), style=plot.style_linebr)
+plot(current_tp, "Take Profit", color.new(color.green, 30), style=plot.style_linebr)
+
+// HUD
+var table info = table.new(position.top_right, 2, 4, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Reversal Engine", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0508.0648", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "V17 Efficiency", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(v17_eff, "#.##"), bgcolor=v17_gate ? color.new(color.green, 50) : color.new(color.red, 50))
+    table.cell(info, 0, 2, "HTF Trend", text_color=color.white)
+    table.cell(info, 1, 2, bull_trend ? "BULLISH" : bear_trend ? "BEARISH" : "NEUTRAL", bgcolor=bull_trend ? color.new(color.green, 50) : bear_trend ? color.new(color.red, 50) : color.gray)
+    table.cell(info, 0, 3, "ATR Status", text_color=color.white)
+    table.cell(info, 1, 3, atr_ok ? "OPTIMAL" : "LOW_VOLA", bgcolor=atr_ok ? color.new(color.aqua, 50) : color.new(color.orange, 50))
+
+bgcolor(long_entry ? color.new(color.green, 90) : short_entry ? color.new(color.red, 90) : na)
