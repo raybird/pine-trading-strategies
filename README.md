@@ -102,6 +102,7 @@
 - [TnSovereignImbalanceConfluenceV6](./strategies/TnSovereignImbalanceConfluenceV6.md): Imbalance & Fractal Resonance strategy [v26.0506.1830]
 - [TnSovereignTopologicalSutureV6](./strategies/TnSovereignTopologicalSutureV6.md): Topological Connectivity-based strategy [v26.0507.1830]
 - [TnSovereignAliceV6](./strategies/TnSovereignAliceV6.md): Alice 5-Method TW Stock strategy [v26.0507.1015]
+- [TnSovereignIctComboV6](./strategies/TnSovereignIctComboV6.md): 7-Factor Institutional Confluence strategy [v26.0508.0643]
 - [TnSovereignIctSmcComboV6](./strategies/TnSovereignIctSmcComboV6.md): ICT/SMC 7-Factor Confluence strategy [v26.0508.0631]
 
 

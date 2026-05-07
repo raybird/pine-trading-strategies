@@ -1,0 +1,192 @@
+//@version=6
+// TeleNexus Sovereign: ICT Combo Multi-Confluence Strategy [v26.0508.0643]
+// Spirit Inheritance: arkcode369 Combo Strategy & Kronos V17 Fractal Entropy
+// Goal: 7-Factor Institutional Confluence + Fractal Sovereignty Gate
+//
+// Logic Matrix:
+// 1. HTF Bias: 20 EMA on Higher Timeframe (Default D1).
+// 2. Killzone: London/NY Session volatility window.
+// 3. FVG Audit: Fair Value Gap detection.
+// 4. Liquidity Sweep: Sensing wick-based liquidity grabs.
+// 5. MSS: Market Structure Shift (Structural break).
+// 6. PD Array: Premium/Discount zone audit of previous day.
+// 7. V17 Gate: Multiscale Fractal Efficiency filter (Ultimate Sovereignty).
+
+strategy("TnSovereignIctComboV6",
+     shorttitle         = "TnS_ICT_Combo_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── Types ──────────────────────────────────────────────────────────────────
+type CausalScore
+    int long = 0
+    int short = 0
+
+type State
+    float last_sl = na
+    float entry_px = na
+    bool tp1_hit = false
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_conf  = "▼ Confluence"
+min_score   = input.int(4, "Min Confluence Score (1-7)", minval=1, maxval=7)
+htf_res     = input.timeframe("D", "HTF Resolution")
+use_v17     = input.bool(true, "Enable V17 Fractal Sovereignty Gate")
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.5, "SL ATR Multiple")
+tp1_rr      = input.float(1.0, "TP1 R:R")
+tp2_rr      = input.float(3.0, "TP2 R:R")
+tp1_qty     = input.float(50, "TP1 Close %")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+atr = ta.atr(14)
+
+// 1. HTF Bias
+float htf_ema = request.security(syminfo.tickerid, htf_res, ta.ema(close, 20))
+bool bias_up = close > htf_ema
+bool bias_dn = close < htf_ema
+
+// 2. Killzone (NY Time)
+bool in_kz = not na(time(timeframe.period, "0200-0500:23456", "America/New_York")) or
+             not na(time(timeframe.period, "0700-1000:23456", "America/New_York")) or
+             not na(time(timeframe.period, "1330-1600:23456", "America/New_York"))
+
+// 3. FVG Recent
+f_fvg(int lb) =>
+    bool bull = false
+    bool bear = false
+    for i = 0 to math.min(lb, bar_index - 2)
+        if low[i] > high[i + 2]
+            bull := true
+        if high[i] < low[i + 2]
+            bear := true
+    [bull, bear]
+
+[bull_fvg, bear_fvg] = f_fvg(10)
+
+// 4. Sweep Recent
+f_sweep(int lb) =>
+    bool bull = false
+    bool bear = false
+    for i = 0 to math.min(lb, bar_index - 5)
+        float ph = ta.highest(high, 10)[i + 1]
+        float pl = ta.lowest(low, 10)[i + 1]
+        if low[i] < pl and close[i] > pl
+            bull := true
+        if high[i] > ph and close[i] < ph
+            bear := true
+    [bull, bear]
+
+[bull_sweep, bear_sweep] = f_sweep(15)
+
+// 5. MSS Recent
+f_mss(int lb) =>
+    bool bull = false
+    bool bear = false
+    for i = 0 to math.min(lb, bar_index - 10)
+        float ph = ta.highest(high, 10)[i + 1]
+        float pl = ta.lowest(low, 10)[i + 1]
+        if close[i] > ph
+            bull := true
+        if close[i] < pl
+            bear := true
+    [bull, bear]
+
+[bull_mss, bear_mss] = f_mss(20)
+
+// 6. PD Array (Prev Day)
+[d_hi, d_lo] = request.security(syminfo.tickerid, "D", [high[1], low[1]])
+d_mid = math.avg(d_hi, d_lo)
+bool in_discount = close < d_mid
+bool in_premium  = close > d_mid
+
+// 7. V17 Gate (Fractal Entropy)
+float window_range = ta.highest(high, 20) - ta.lowest(low, 20)
+float path_length = 0.0
+for i = 0 to 19
+    path_length += math.abs(close[i] - close[i+1])
+float fractal_eff = window_range / (path_length || 1)
+bool v17_pass = use_v17 ? fractal_eff > 0.4 : true
+
+// ── Scoring ─────────────────────────────────────────────────────────────────
+var score = CausalScore.new()
+score.long := (bias_up ? 1 : 0) + (in_kz ? 1 : 0) + (bull_fvg ? 1 : 0) + (bull_sweep ? 1 : 0) + (bull_mss ? 1 : 0) + (in_discount ? 1 : 0) + (atr > 0 ? 1 : 0)
+score.short := (bias_dn ? 1 : 0) + (in_kz ? 1 : 0) + (bear_fvg ? 1 : 0) + (bear_sweep ? 1 : 0) + (bear_mss ? 1 : 0) + (in_premium ? 1 : 0) + (atr > 0 ? 1 : 0)
+
+bool long_sig  = score.long >= min_score and v17_pass
+bool short_sig = score.short >= min_score and v17_pass
+
+// ── Execution ───────────────────────────────────────────────────────────────
+var s = State.new()
+
+// Swing points for SL
+f_is_swing_low(int lb) =>
+    bool ok = true
+    for i = 0 to lb * 2
+        if i != lb and low[i] < low[lb]
+            ok := false
+            break
+    ok
+
+f_is_swing_high(int lb) =>
+    bool ok = true
+    for i = 0 to lb * 2
+        if i != lb and high[i] > high[lb]
+            ok := false
+            break
+    ok
+
+var float sl_level_l = na
+var float sl_level_s = na
+if f_is_swing_low(5)
+    sl_level_l := low[5]
+if f_is_swing_high(5)
+    sl_level_s := high[5]
+
+if long_sig and strategy.position_size <= 0 and not na(sl_level_l)
+    float sl = sl_level_l - atr * sl_atr_mult
+    float risk = close - sl
+    if risk > 0
+        s.entry_px := close
+        s.tp1_hit := false
+        strategy.entry("L-ICT", strategy.long, comment="CONF_" + str.tostring(score.long))
+        strategy.exit("X1", from_entry="L-ICT", stop=sl, limit=close + risk * tp1_rr, qty_percent=tp1_qty)
+        strategy.exit("X2", from_entry="L-ICT", stop=sl, limit=close + risk * tp2_rr)
+
+if short_sig and strategy.position_size >= 0 and not na(sl_level_s)
+    float sl = sl_level_s + atr * sl_atr_mult
+    float risk = sl - close
+    if risk > 0
+        s.entry_px := close
+        s.tp1_hit := false
+        strategy.entry("S-ICT", strategy.short, comment="CONF_" + str.tostring(score.short))
+        strategy.exit("X1", from_entry="S-ICT", stop=sl, limit=close - risk * tp1_rr, qty_percent=tp1_qty)
+        strategy.exit("X2", from_entry="S-ICT", stop=sl, limit=close - risk * tp2_rr)
+
+// ── Visual Suture ───────────────────────────────────────────────────────────
+var table hud = table.new(position.bottom_right, 2, 8, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Sovereign Audit", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(hud, 1, 0, "v26.0508", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(hud, 0, 1, "HTF Bias", text_color=bias_up ? color.lime : bias_dn ? color.red : color.gray)
+    table.cell(hud, 1, 1, bias_up ? "BULL" : bias_dn ? "BEAR" : "NEUTRAL")
+    table.cell(hud, 0, 2, "Killzone", text_color=in_kz ? color.aqua : color.gray)
+    table.cell(hud, 1, 2, in_kz ? "ACTIVE" : "OFF")
+    table.cell(hud, 0, 3, "FVG / Sweep", text_color=color.white)
+    table.cell(hud, 1, 3, (bull_fvg ? "F+" : "") + (bear_fvg ? "F-" : "") + (bull_sweep ? "S+" : "") + (bear_sweep ? "S-" : ""))
+    table.cell(hud, 0, 4, "MSS", text_color=bull_mss ? color.lime : bear_mss ? color.red : color.gray)
+    table.cell(hud, 1, 4, bull_mss ? "BOS+" : bear_mss ? "BOS-" : "WAIT")
+    table.cell(hud, 0, 5, "Confluence", text_color=color.white)
+    table.cell(hud, 1, 5, "L:" + str.tostring(score.long) + " S:" + str.tostring(score.short))
+    table.cell(hud, 0, 6, "Fractal D", text_color=v17_pass ? color.lime : color.red)
+    table.cell(hud, 1, 6, str.tostring(fractal_eff, "#.##"))
+    table.cell(hud, 0, 7, "SOVEREIGNTY", bgcolor=v17_pass ? color.new(color.green, 50) : color.new(color.red, 50))
+    table.cell(hud, 1, 7, v17_pass ? "LOCKED" : "VOID")
+
+bgcolor(long_sig ? color.new(color.green, 90) : short_sig ? color.new(color.red, 90) : na)
