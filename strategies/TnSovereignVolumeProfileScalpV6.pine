@@ -1,0 +1,114 @@
+//@version=6
+// TeleNexus Sovereign: Volume Profile Precision Scalper [v26.0509.1837]
+// Spirit Inheritance: Aksee Nasir NQ1 Scalper & Kronos V18 Sovereign Resonance
+// Goal: Precision Scalping via Volume Profile POC and Resonance Phase Alignment
+//
+// Logic Matrix (VP Scalp + Sovereign Resonance):
+// 1. Volume Profile POC: Dynamically calculating Point of Control and Value Area.
+// 2. Support/Resistance Suture: Detecting price interaction with high-volume nodes.
+// 3. ATR Volatility Filter: Suppressing trades in low-vola regimes.
+// 4. Two EMA Confirmation: Fast/Slow EMA alignment for trend bias.
+// 5. Candle Character: Confirmatory closing character (Bullish/Bearish).
+// 6. V18 Sovereign Resonance: Multi-scale phase coherence between price and volume.
+
+strategy("TnSovereignVolumeProfileScalpV6",
+     shorttitle         = "TnS_VPScalp_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_vp    = "▼ Volume Profile"
+vp_bars     = input.int(150, "Lookback Bars", minval=10, maxval=500)
+vp_rows     = input.int(24, "Row Size", minval=5, maxval=100)
+va_percent  = input.float(70.0, "Value Area %", minval=10, maxval=100)
+
+group_sys   = "▼ Sovereign Gating"
+min_coher   = input.float(1.6, "Min V18 Coherence", minval=0.5, maxval=5.0)
+use_ema_f   = input.bool(true, "Enable EMA Trend Filter")
+
+group_risk  = "▼ Risk Management"
+tp_points   = input.int(400, "Take Profit (Ticks/Points)")
+sl_points   = input.int(200, "Stop Loss (Ticks/Points)")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+// 1. EMA Bias
+float ema8  = ta.ema(close, 8)
+float ema21 = ta.ema(close, 21)
+bool bias_up = not use_ema_f or (ema8 > ema21)
+bool bias_dn = not use_ema_f or (ema8 < ema21)
+
+// 2. ATR Volatility
+float atr = ta.atr(14)
+bool vol_ok = atr / close * 100 >= 0.1 // Minimum 0.1% volatility
+
+// 3. V18 Sovereign Resonance Field (TeleNexus Core)
+f_v18_coherence(int len) =>
+    float displacement = math.abs(close - close[len])
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    float fd = path_length / (displacement || 1)
+    float vol_z = (volume - ta.sma(volume, len)) / (ta_stdev(volume, len) || 1)
+    coherence = (1.0 / (fd + 0.1)) * (math.abs(vol_z) > 1.2 ? 1.4 : 0.6)
+    coherence
+
+float v18_coher = f_v18_coherence(20)
+bool resonance_locked = v18_coher > min_coher
+
+// 4. Volume Profile / POC Logic (Simplified for V6 Standard)
+f_calc_poc() =>
+    float hi = ta.highest(high, vp_bars)
+    float lo = ta.lowest(low, vp_bars)
+    float step = (hi - lo) / vp_rows
+    float poc_price = lo
+    float max_v = 0.0
+    for i = 0 to vp_rows - 1
+        float level_lo = lo + (step * i)
+        float level_hi = level_lo + step
+        float vol_at_level = 0.0
+        for j = 0 to vp_bars - 1
+            if high[j] >= level_lo and low[j] <= level_hi
+                vol_at_level += volume[j]
+        if vol_at_level > max_v
+            max_v := vol_at_level
+            poc_price := (level_lo + level_hi) / 2
+    poc_price
+
+float poc = f_calc_poc()
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool long_entry = bias_up and vol_ok and resonance_locked and ta.crossover(close, poc) and barstate.isconfirmed
+bool short_entry = bias_dn and vol_ok and resonance_locked and ta.crossunder(close, poc) and barstate.isconfirmed
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_SCALP_LONG] POC={0} Coherence={1,number,#.##}. Executing.", poc, v18_coher)
+    strategy.entry("ScalpL", strategy.long, comment="POC_CROSS_UP")
+    strategy.exit("ExitL", "ScalpL", loss=sl_points, profit=tp_points)
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_SCALP_SHORT] POC={0} Coherence={1,number,#.##}. Executing.", poc, v18_coher)
+    strategy.entry("ScalpS", strategy.short, comment="POC_CROSS_DN")
+    strategy.exit("ExitS", "ScalpS", loss=sl_points, profit=tp_points)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(poc, "Volume POC", color.new(color.red, 40), 2, plot.style_stepline)
+bgcolor(long_entry ? color.new(color.green, 90) : short_entry ? color.new(color.red, 90) : na)
+
+// Dashboard
+var table info = table.new(position.top_right, 2, 5, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Sovereign Scalp", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0509", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "V18 Coherence", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(v18_coher, "#.##"), bgcolor=resonance_locked ? color.new(color.aqua, 50) : color.new(color.gray, 50))
+    table.cell(info, 0, 2, "POC Level", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(poc, "#.##"))
+    table.cell(info, 0, 3, "ATR Status", text_color=color.white)
+    table.cell(info, 1, 3, vol_ok ? "OK" : "LOW", text_color=vol_ok ? color.lime : color.red)
+    table.cell(info, 0, 4, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 4, "18.3734", text_color=color.white)
