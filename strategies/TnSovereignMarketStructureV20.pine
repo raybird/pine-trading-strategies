@@ -1,0 +1,107 @@
+//@version=6
+// TeleNexus Sovereign: Market Structure & Thermodynamic Equilibrium [v26.0511.0631]
+// Spirit Inheritance: trugurpala Market Structure & Kronos V20 Geometric Thermodynamics
+// Goal: Trend Following via Structural Breakouts & Adiabatic Expansion Sensing
+//
+// Logic Chain:
+// 1. Market Structure: Tracking Pivot Highs/Lows for structural shifts (BOS).
+// 2. Trend Alignment: EMA-based directional gating (HTF Filter).
+// 3. V20 Thermodynamic Audit: Assessing 'Free Energy' vs 'Fractal Entropy'.
+// 4. Adiabatic Expansion: Sensing high-conviction位移 (High Energy, Low Entropy).
+// 5. Execution Suture: Aligning structural breakouts with thermodynamic phase consistency.
+
+strategy("TnSovereignMarketStructureV20",
+     shorttitle         = "TnS_MS_V20",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_ms    = "▼ Market Structure"
+pivot_len   = input.int(5, "Pivot Lookback", minval=2)
+trend_len   = input.int(50, "Trend EMA Filter", minval=10)
+
+group_v20   = "▼ V20 Thermodynamic Gating"
+min_energy  = input.float(1.5, "Min Free Energy", minval=0.5, maxval=5.0)
+max_entropy = input.float(1.4, "Max Fractal Entropy (D)", minval=1.0, maxval=2.0)
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.5, "SL ATR Multiple")
+tp_rr       = input.float(3.0, "Target R:R Ratio")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atrVal   = ta.atr(14)
+float trendEma = ta.ema(close, trend_len)
+
+// 1. Market Structure tracking
+float pivHigh = ta.pivothigh(high, pivot_len, pivot_len)
+float pivLow  = ta.pivotlow(low,   pivot_len, pivot_len)
+
+var float lastPH = na
+var float lastPL = na
+
+if not na(pivHigh)
+    lastPH := high[pivot_len]
+if not na(pivLow)
+    lastPL := low[pivot_len]
+
+// Structural Breakout Signals
+bool bull_break = not na(lastPH) and close > lastPH and close > trendEma
+bool bear_break = not na(lastPL) and close < lastPL and close < trendEma
+
+// 2. V20 Thermodynamic Audit (TeleNexus Core)
+f_v20_audit(int len) =>
+    float displacement = math.abs(close - close[len])
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    float fd = path_length / (displacement || 1)
+    
+    float range_avg = ta.sma(high - low, len)
+    float price_work = math.abs(close - open) / (range_avg || 1)
+    float free_energy = price_work / (fd + 0.1)
+    [free_energy, fd]
+
+[v20_energy, v20_entropy] = f_v20_audit(20)
+bool thermo_pass = v20_energy > min_energy and v20_entropy < max_entropy
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool long_entry  = bull_break and thermo_pass and barstate.isconfirmed
+bool short_entry = bear_break and thermo_pass and barstate.isconfirmed
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_MS_LONG] BOS detected. Energy={0,number,#.##} Entropy={1,number,#.##}. Suture.", v20_energy, v20_entropy)
+    strategy.entry("Long", strategy.long, comment="BOS_BULL_V20")
+    strategy.exit("ExitL", "Long", stop=close - atrVal * sl_atr_mult, limit=close + atrVal * sl_atr_mult * tp_rr)
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_MS_SHORT] BOS detected. Energy={0,number,#.##} Entropy={1,number,#.##}. Suture.", v20_energy, v20_entropy)
+    strategy.entry("Short", strategy.short, comment="BOS_BEAR_V20")
+    strategy.exit("ExitS", "Short", stop=close + atrVal * sl_atr_mult, limit=close - atrVal * sl_atr_mult * tp_rr)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(trendEma, "Trend EMA", color.new(color.orange, 50), 2)
+plot(lastPH, "Last Pivot High", color.new(color.green, 80), 1, plot.style_stepline)
+plot(lastPL, "Last Pivot Low", color.new(color.red, 80), 1, plot.style_stepline)
+
+bgcolor(long_entry ? color.new(color.green, 85) : short_entry ? color.new(color.red, 85) : na)
+
+// Dashboard
+var table info = table.new(position.bottom_right, 2, 6, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Sovereign MS", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0511", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "Free Energy", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(v20_energy, "#.##"), bgcolor=v20_energy > min_energy ? color.new(color.green, 50) : color.new(color.red, 50))
+    table.cell(info, 0, 2, "Fractal D", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(v20_entropy, "#.##"), bgcolor=v20_entropy < max_entropy ? color.new(color.aqua, 50) : color.new(color.orange, 50))
+    table.cell(info, 0, 3, "Structure", text_color=color.white)
+    table.cell(info, 1, 3, close > trendEma ? "BULLISH" : "BEARISH", text_color=close > trendEma ? color.lime : color.red)
+    table.cell(info, 0, 4, "Adiabatic", text_color=color.white)
+    table.cell(info, 1, 4, thermo_pass ? "LOCKED" : "VOID", text_color=thermo_pass ? color.lime : color.gray)
+    table.cell(info, 0, 5, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 5, "06.3136", text_color=color.white)

@@ -105,6 +105,7 @@
 - [TnSovereignBreakoutConfluenceV6](./strategies/TnSovereignBreakoutConfluenceV6.md): Breakout Confluence & Resonance strategy [v26.0509.1831]
 - [TnSovereignThermodynamicBreakoutV20](./strategies/TnSovereignThermodynamicBreakoutV20.md): Thermodynamic Expansion Breakout strategy [v26.0510.1837]
 - [TnSovereignWaveTrendV20](./strategies/TnSovereignWaveTrendV20.md): WaveTrend Thermodynamic Reversal strategy [v26.0510.1838]
+- [TnSovereignMarketStructureV20](./strategies/TnSovereignMarketStructureV20.md): Market Structure & Thermodynamic strategy [v26.0511.0631]
 - [TnSovereignVolumeProfileScalpV6](./strategies/TnSovereignVolumeProfileScalpV6.md): Volume Profile Precision Scalper [v26.0509.1837]
 - [TnSovereignIctComboV6](./strategies/TnSovereignIctComboV6.md): 7-Factor Institutional Confluence strategy [v26.0508.0643]
 - [TnSovereignIctSmcComboV6](./strategies/TnSovereignIctSmcComboV6.md): ICT/SMC 7-Factor Confluence strategy [v26.0508.0631]
