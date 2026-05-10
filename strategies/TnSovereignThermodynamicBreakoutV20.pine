@@ -1,0 +1,107 @@
+//@version=6
+// TeleNexus Sovereign: Thermodynamic Breakout Equilibrium [v26.0510.1837]
+// Spirit Inheritance: yaniv1157 BCS & Kronos V20 Geometric Thermodynamics
+// Goal: Peak Sovereign Breakout via Adiabatic Expansion & Free Energy Audit
+//
+// Logic Matrix (Thermodynamic Breakout):
+// 1. VCP / Trend Template: Structural maturity check.
+// 2. TTM Squeeze: Potential energy compression sensing.
+// 3. Volume Phase Coherence: Mutual info between price and volume manifolds.
+// 4. V20 Free Energy Audit: Ratio of price displacement work to fractal entropy.
+// 5. Adiabatic Expansion: Real-time sensing of 'ordered growth' (high work, low entropy).
+// 6. Institutional Proxy: VWP Momentum as a surrogate for conviction.
+
+strategy("TnSovereignThermodynamicBreakoutV20",
+     shorttitle         = "TnS_ThermoBreak_V20",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 15,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_sys   = "▼ V20 Thermodynamic Gating"
+min_energy  = input.float(1.5, "Min Free Energy Threshold", minval=0.5, maxval=5.0)
+max_entropy = input.float(1.4, "Max Fractal Entropy (D)", minval=1.0, maxval=2.0)
+use_adiabatic = input.bool(true, "Enable Adiabatic Expansion Filter")
+
+group_bcs   = "▼ Breakout Confluence (BCS)"
+min_score   = input.int(70, "Min BCS Score (0-100)", minval=50, maxval=100)
+vcp_lb      = input.int(50, "VCP Lookback")
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.8, "SL ATR Multiple")
+tp_rr       = input.float(3.5, "Target R:R Ratio")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr = ta.atr(14)
+
+// 1. VCP / Trend Template
+float sma50   = ta.sma(close, 50)
+float sma150  = ta.sma(close, 150)
+float sma200  = ta.sma(close, 200)
+bool tt_ok    = close > sma50 and sma50 > sma150 and sma150 > sma200
+
+float vcp_score = tt_ok ? 40 : 0
+vcp_score += (ta.atr(14) < ta.atr(14)[vcp_lb]) ? 30 : 0
+vcp_score += (ta.highest(high, 252) - close) / ta.highest(high, 252) * 100 < 15 ? 30 : 0
+
+// 2. TTM Squeeze & Volume
+[bb_mid, bb_up, bb_low] = ta.bb(close, 20, 2.0)
+float kc_mid   = ta.sma(close, 20)
+float kc_range = 1.5 * ta.atr(20)
+bool sqz_on    = (bb_low > kc_mid - kc_range) and (bb_up < kc_mid + kc_range)
+float ttm_score = sqz_on ? 100 : (ta.linreg(close - bb_mid, 12, 0) > 0 ? 50 : 0)
+
+float inst_flow = ta.cmo(volume * close, 14) // Institutional Proxy
+float vol_score = (inst_flow > 20 ? 60 : 0) + (volume > ta.sma(volume, 50) ? 40 : 0)
+
+// 3. V20 Thermodynamic Audit
+f_v20_metrics(int len) =>
+    float displacement = math.abs(close - close[len])
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    float fractal_d = path_length / (displacement || 1)
+    
+    float range_avg = ta.sma(high - low, len)
+    float price_work = math.abs(close - open) / (range_avg || 1)
+    float free_energy = price_work / (fractal_d + 0.1)
+    [free_energy, fractal_d]
+
+[v20_energy, v20_entropy] = f_v20_metrics(20)
+bool is_adiabatic = v20_energy > min_energy and v20_entropy < max_entropy
+
+// ── Confluence Matrix ───────────────────────────────────────────────────────
+float bcs_score = (vcp_score * 0.4 + ttm_score * 0.3 + vol_score * 0.3)
+bool breakout_ready = bcs_score >= min_score
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool long_entry = breakout_ready and (use_adiabatic ? is_adiabatic : v20_energy > 1.0) and barstate.isconfirmed
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_V20_BREAKOUT] Score={0} Energy={1,number,#.##} Entropy={2,number,#.##}. Suture.", bcs_score, v20_energy, v20_entropy)
+    strategy.entry("V20L", strategy.long, comment="E:" + str.tostring(v20_energy, "#.#"))
+    strategy.exit("ExitL", "V20L", stop=close - atr * sl_atr_mult, limit=close + atr * sl_atr_mult * tp_rr)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(sma50, "SMA 50", color.new(color.gray, 60))
+bgcolor(long_entry ? color.new(color.green, 85) : breakout_ready ? color.new(color.yellow, 95) : na)
+
+// Dashboard
+var table info = table.new(position.top_right, 2, 6, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Sovereign V20", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "Thermo Break", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "Free Energy", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(v20_energy, "#.##"), bgcolor=v20_energy > min_energy ? color.new(color.green, 50) : color.new(color.red, 50))
+    table.cell(info, 0, 2, "Fractal Entropy", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(v20_entropy, "#.##"), bgcolor=v20_entropy < max_entropy ? color.new(color.aqua, 50) : color.new(color.orange, 50))
+    table.cell(info, 0, 3, "BCS Score", text_color=color.white)
+    table.cell(info, 1, 3, str.tostring(bcs_score, "#"), bgcolor=breakout_ready ? color.new(color.green, 50) : color.new(color.gray, 50))
+    table.cell(info, 0, 4, "Adiabatic", text_color=color.white)
+    table.cell(info, 1, 4, is_adiabatic ? "LOCKED" : "VOID", text_color=is_adiabatic ? color.lime : color.gray)
+    table.cell(info, 0, 5, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 5, "18.3734", text_color=color.white)
