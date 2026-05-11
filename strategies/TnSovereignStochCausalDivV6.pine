@@ -1,0 +1,150 @@
+//@version=6
+// TeleNexus Sovereign: Stochastic Causal Divergence Strategy [v26.0512.0632]
+// Spirit Inheritance: Joel Pasapera Stochastic Divergence & Kronos Resonance Field
+// Goal: Detecting Causal Reversals via Harmonic Divergence & Thermodynamic Phase Gating
+//
+// Logic Matrix:
+// 1. Stochastic Engine: Smoothed K and D oscillator to track momentum momentum.
+// 2. Harmonic Divergence: Price vs Oscillator structural misalignment (Lower Low / Higher Low).
+// 3. Kronos Resonance Proxy: Multi-scale Phase Coherence (Coherence > 1.5).
+// 4. ATR Dynamic Gating: Risk-adjusted SL/TP based on local volatility.
+// 5. Causal Audit: Logging internal state transitions for sovereign verification.
+
+strategy("TnSovereignStochCausalDivV6", 
+     shorttitle         = "TnS_StochDiv_V6", 
+     overlay            = false, 
+     initial_capital    = 100000, 
+     default_qty_type   = strategy.percent_of_equity, 
+     default_qty_value  = 10, 
+     commission_type    = strategy.commission.percent, 
+     commission_value   = 0.04, 
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_stoch = "▼ Stochastic Engine"
+periodK     = input.int(14, "%K Length", minval=1, group=group_stoch)
+smoothK     = input.int(3,  "%K Smoothing", minval=1, group=group_stoch)
+periodD     = input.int(3,  "%D Smoothing", minval=1, group=group_stoch)
+obLevel     = input.int(80, "Overbought", minval=50, maxval=100, group=group_stoch)
+osLevel     = input.int(20, "Oversold", minval=0, maxval=50, group=group_stoch)
+
+group_div   = "▼ Divergence Gating"
+lbLeft      = input.int(5,  "Pivot Lookback Left", minval=1, group=group_div)
+lbRight     = input.int(5,  "Pivot Lookback Right", minval=1, group=group_div)
+maxBarsBack = input.int(60, "Max History Scan", minval=10, maxval=200, group=group_div)
+
+group_v18   = "▼ Kronos Resonance (Proxy)"
+min_coher   = input.float(1.5, "Min Phase Coherence", minval=0.5, maxval=5.0, group=group_v18)
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.5, "SL ATR Multiple", group=group_risk)
+tp_rr       = input.float(3.0, "Target R:R Ratio", group=group_risk)
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr = ta.atr(14)
+
+// 1. Stochastic Core
+float k = ta.sma(ta.stoch(close, high, low, periodK), smoothK)
+float d = ta.sma(k, periodD)
+
+// 2. Kronos Resonance Field (V18 Logic Replica)
+f_v18_coherence(int len) =>
+    float displacement = math.abs(close - close[len])
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    float fd = path_length / (displacement || 1)
+    float vol_z = (volume - ta.sma(volume, len)) / (ta_stdev(volume, len) || 1)
+    coherence = (1.0 / (fd + 0.1)) * (math.abs(vol_z) > 1.2 ? 1.4 : 0.6)
+    coherence
+
+float v18_coher = f_v18_coherence(20)
+bool resonance_locked = v18_coher > min_coher
+
+// 3. Divergence Sensing
+float priceLow  = ta.pivotlow(low, lbLeft, lbRight)
+float priceHigh = ta.pivothigh(high, lbLeft, lbRight)
+
+var int[]   lowBars     = array.new_int()
+var float[] lowPrices   = array.new_float()
+var float[] lowOsc      = array.new_float()
+var int[]   highBars    = array.new_int()
+var float[] highPrices  = array.new_float()
+var float[] highOsc     = array.new_float()
+
+if not na(priceLow)
+    array.push(lowBars, bar_index - lbRight)
+    array.push(lowPrices, low[lbRight])
+    array.push(lowOsc, d[lbRight])
+    if array.size(lowBars) > 5
+        array.shift(lowBars), array.shift(lowPrices), array.shift(lowOsc)
+
+if not na(priceHigh)
+    array.push(highBars, bar_index - lbRight)
+    array.push(highPrices, high[lbRight])
+    array.push(highOsc, d[lbRight])
+    if array.size(highBars) > 5
+        array.shift(highBars), array.shift(highPrices), array.shift(highOsc)
+
+bool bullDiv = false
+if not na(priceLow) and array.size(lowBars) >= 2
+    curP = array.get(lowPrices, array.size(lowPrices)-1)
+    curO = array.get(lowOsc, array.size(lowOsc)-1)
+    for i = array.size(lowBars)-2 to 0
+        if (bar_index - lbRight) - array.get(lowBars, i) <= maxBarsBack
+            if curP < array.get(lowPrices, i) and curO > array.get(lowOsc, i)
+                bullDiv := true
+                break
+
+bool bearDiv = false
+if not na(priceHigh) and array.size(highBars) >= 2
+    curP = array.get(highPrices, array.size(highPrices)-1)
+    curO = array.get(highOsc, array.size(highOsc)-1)
+    for i = array.size(highBars)-2 to 0
+        if (bar_index - lbRight) - array.get(highBars, i) <= maxBarsBack
+            if curP > array.get(highPrices, i) and curO < array.get(highOsc, i)
+                bearDiv := true
+                break
+
+// ── Execution Logic ─────────────────────────────────────────────────────────
+bool long_entry  = bullDiv and resonance_locked and barstate.isconfirmed
+bool short_entry = bearDiv and resonance_locked and barstate.isconfirmed
+
+if long_entry and strategy.position_size == 0
+    float sl = low[lbRight] - atr * sl_atr_mult
+    float risk = close - sl
+    if risk > 0
+        log.info("[SOVEREIGN_DIV_LONG] Coherence={0,number,#.##} Risk={1,number,#.##}. Suturing.", v18_coher, risk)
+        strategy.entry("Long", strategy.long, comment="STOCH_BULL_DIV")
+        strategy.exit("ExitL", "Long", stop=sl, limit=close + risk * tp_rr)
+
+if short_entry and strategy.position_size == 0
+    float sl = high[lbRight] + atr * sl_atr_mult
+    float risk = sl - close
+    if risk > 0
+        log.info("[SOVEREIGN_DIV_SHORT] Coherence={0,number,#.##} Risk={1,number,#.##}. Suturing.", v18_coher, risk)
+        strategy.entry("Short", strategy.short, comment="STOCH_BEAR_DIV")
+        strategy.exit("ExitS", "Short", stop=sl, limit=close - risk * tp_rr)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(d, "Stochastic %D", color.new(color.white, 20), 2)
+plot(k, "Stochastic %K", color.new(color.gray, 60), 1)
+h0 = hline(obLevel, "Overbought", color.new(color.red, 50))
+h1 = hline(osLevel, "Oversold", color.new(color.green, 50))
+fill(h0, h1, color.new(color.blue, 95))
+
+bgcolor(long_entry ? color.new(color.green, 85) : short_entry ? color.new(color.red, 85) : na)
+
+// Dashboard
+var table info = table.new(position.top_right, 2, 5, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Sovereign StochDiv", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0512", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "V18 Coherence", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(v18_coher, "#.##"), bgcolor=resonance_locked ? color.new(color.aqua, 50) : color.new(color.red, 50))
+    table.cell(info, 0, 2, "Stoch %D", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(d, "#.#"), text_color=d > obLevel ? color.red : d < osLevel ? color.lime : color.white)
+    table.cell(info, 0, 3, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 3, "06.3200", text_color=color.white)
+    table.cell(info, 0, 4, "SOVEREIGNTY", bgcolor=resonance_locked ? color.new(color.green, 50) : color.new(color.gray, 50))
+    table.cell(info, 1, 4, resonance_locked ? "LOCKED" : "VOID", text_color=color.white)
