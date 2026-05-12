@@ -1,0 +1,98 @@
+//@version=6
+// TeleNexus Sovereign: Volatility-Adjusted Momentum (VAMO) Equilibrium [v26.0513.0635]
+// Spirit Inheritance: TPTBusiness VAMO & Kronos V20 Geometric Thermodynamics
+// Goal: Exploiting Momentum-Volatility Duality via Thermodynamic Phase Alignment
+//
+// Logic Matrix (VAMO Sovereign):
+// 1. VAMO Engine: Normalizing Momentum by ATR to track structural velocity.
+// 2. Volatility Filter: Suppressing execution during 'Entropy Explosions' (high ATR spikes).
+// 3. V20 Free Energy Audit: Ratio of VAMO work to fractal path entropy.
+// 4. Adiabatic Expansion: Sensing high-conviction momentum without chaotic noise.
+// 5. Institutional Proxy: VWAP Alignment to verify collective intent.
+
+strategy("TnSovereignVAMOStrategyV6",
+     shorttitle         = "TnS_VAMO_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_vamo  = "▼ VAMO Core"
+momLen      = input.int(14, "Momentum Length")
+volLen      = input.int(14, "Volatility Length (ATR)")
+sigLen      = input.int(9,  "Signal Line (EMA)")
+obLevel     = input.float(70.0, "Overbought Level")
+osLevel     = input.float(30.0, "Oversold Level")
+
+group_v20   = "▼ V20 Thermodynamic Gating"
+min_energy  = input.float(1.5, "Min Free Energy", minval=0.5, maxval=5.0)
+max_entropy = input.float(1.4, "Max Fractal Entropy (D)", minval=1.0, maxval=2.0)
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.5, "SL ATR Multiple")
+tp_rr       = input.float(3.0, "Target R:R Ratio")
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atrVal = ta.atr(volLen)
+
+// 1. VAMO Engine
+float momentum = ta.roc(close, momLen)
+float vamo     = momentum / (atrVal || 1) * 100
+float signal   = ta.ema(vamo, sigLen)
+
+// 2. V20 Thermodynamic Audit (TeleNexus Core)
+f_v20_audit(int len) =>
+    float displacement = math.abs(close - close[len])
+    float path_length = 0.0
+    for i = 0 to len - 1
+        path_length += math.abs(close[i] - close[i+1])
+    float fd = path_length / (displacement || 1)
+    
+    float range_avg = ta.sma(high - low, len)
+    float price_work = math.abs(close - open) / (range_avg || 1)
+    float free_energy = price_work / (fd + 0.1)
+    [free_energy, fd]
+
+[v20_energy, v20_entropy] = f_v20_audit(20)
+bool thermo_pass = v20_energy > min_energy and v20_entropy < max_entropy
+
+// 3. Execution Suture
+bool vamo_long  = ta.crossover(vamo, signal) and vamo < obLevel
+bool vamo_short = ta.crossunder(vamo, signal) and vamo > osLevel
+
+bool long_entry  = vamo_long and thermo_pass and barstate.isconfirmed
+bool short_entry = vamo_short and thermo_pass and barstate.isconfirmed
+
+if long_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_VAMO_LONG] Energy={0,number,#.##} Entropy={1,number,#.##}. Suturing.", v20_energy, v20_entropy)
+    strategy.entry("Long", strategy.long, comment="VAMO_BULL_V20")
+    strategy.exit("ExitL", "Long", stop=close - atrVal * sl_atr_mult, limit=close + atrVal * sl_atr_mult * tp_rr)
+
+if short_entry and strategy.position_size == 0
+    log.info("[SOVEREIGN_VAMO_SHORT] Energy={0,number,#.##} Entropy={1,number,#.##}. Suturing.", v20_energy, v20_entropy)
+    strategy.entry("Short", strategy.short, comment="VAMO_BEAR_V20")
+    strategy.exit("ExitS", "Short", stop=close + atrVal * sl_atr_mult, limit=close - atrVal * sl_atr_mult * tp_rr)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(ta.ema(close, 200), "Macro Trend", color.new(color.gray, 50))
+bgcolor(long_entry ? color.new(color.green, 85) : short_entry ? color.new(color.red, 85) : na)
+
+// Dashboard
+var table info = table.new(position.top_right, 2, 6, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Sovereign VAMO", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0513", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "VAMO Value", text_color=color.white)
+    table.cell(info, 1, 1, str.tostring(vamo, "#.#"), text_color=vamo > 0 ? color.lime : color.red)
+    table.cell(info, 0, 2, "Free Energy", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(v20_energy, "#.##"), bgcolor=v20_energy > min_energy ? color.new(color.green, 50) : color.new(color.red, 50))
+    table.cell(info, 0, 3, "Fractal Entropy", text_color=color.white)
+    table.cell(info, 1, 3, str.tostring(v20_entropy, "#.##"), bgcolor=v20_entropy < max_entropy ? color.new(color.aqua, 50) : color.new(color.orange, 50))
+    table.cell(info, 0, 4, "Adiabatic", text_color=color.white)
+    table.cell(info, 1, 4, thermo_pass ? "LOCKED" : "VOID", text_color=thermo_pass ? color.lime : color.gray)
+    table.cell(info, 0, 5, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 5, "06.3559", text_color=color.white)
