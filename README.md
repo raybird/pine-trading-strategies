@@ -97,6 +97,7 @@
 - [TnSovereignLiquidityMatrixV6](./strategies/TnSovereignLiquidityMatrixV6.md): Adaptive Macro-Anchored Matrix strategy [v26.0502.0830]
 - [TnSovereignSignalForgeV6](./strategies/TnSovereignSignalForgeV6.md): ML-Powered Multi-Model Sovereign strategy [v26.0502.1830]
 - [TnSovereignSignalForgeV20](./strategies/TnSovereignSignalForgeV20.md): 7-Factor Adaptive Ensemble strategy [v26.0512.0637]
+- [TnSovereignThermodynamicSqueezeV20](./strategies/TnSovereignThermodynamicSqueezeV20.md): Thermodynamic Squeeze Expansion strategy [v26.0514.0634]
 - [TnSovereignVAMOStrategyV6](./strategies/TnSovereignVAMOStrategyV6.md): Volatility-Adjusted Momentum strategy [v26.0513.0635]
 - [TnSovereignFakeoutFilterV6](./strategies/TnSovereignFakeoutFilterV6.md): 4-Layer Causal Audit Sovereign strategy [v26.0503.0830]
 - [TnSovereignIctV6](./strategies/TnSovereignIctV6.md): ICT 2022 Mentorship Model Sovereign strategy [v26.0504.0633]
