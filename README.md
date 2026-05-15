@@ -115,6 +115,7 @@
 - [TnSovereignIctComboV6](./strategies/TnSovereignIctComboV6.md): 7-Factor Institutional Confluence strategy [v26.0508.0643]
 - [TnSovereignIctSmcComboV6](./strategies/TnSovereignIctSmcComboV6.md): ICT/SMC 7-Factor Confluence strategy [v26.0508.0631]
 - [TnSovereignReversalEngineV6](./strategies/TnSovereignReversalEngineV6.md): High-Signal Pivot Reversal strategy [v26.0508.0648]
+- [EMA_Bars_v6](./strategies/EMA_Bars_v6.md): EMA & Time Exit Strategy v6 [v26.0516.0632]
 
 
 

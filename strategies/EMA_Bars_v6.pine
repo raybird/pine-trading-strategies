@@ -1,0 +1,33 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TeleNexus AI Hunted & Rewritten
+//@version=6
+
+strategy("EMA & Time Exit Strategy v6", overlay = true, initial_capital = 10000, margin_long = 100, margin_short = 100)
+
+// --- Inputs ---
+float lot_size = input.float(1.0, "Lot Size", step=0.1, minval=0.1)
+int hold_bars  = input.int(50, "Hold Bars Before Close")
+int ema_fast_len = input.int(20, "Fast EMA Period")
+int ema_slow_len = input.int(50, "Slow EMA Period")
+
+// --- Calculations ---
+float ema_fast = ta.ema(close, ema_fast_len)
+float ema_slow = ta.ema(close, ema_slow_len)
+
+// --- Entry Logic ---
+bool long_signal = ta.crossover(ema_fast, ema_slow)
+
+if long_signal
+    strategy.entry("Long", strategy.long, qty=lot_size)
+
+// --- Exit Logic (Time-based) ---
+// Using ta.barssince to count bars accurately from the last entry signal
+// However, a more robust way in v6 is checking strategy.opentrades
+if strategy.opentrades > 0
+    // If the number of bars since the entry of the current trade reaches the limit
+    if (bar_index - strategy.opentrades.entry_bar_index(strategy.opentrades - 1)) >= hold_bars
+        strategy.close("Long", comment="Time Exit")
+
+// --- Visualization ---
+plot(ema_fast, "Fast EMA", color = color.orange)
+plot(ema_slow, "Slow EMA", color = color.blue)
