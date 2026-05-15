@@ -91,6 +91,11 @@
 - **核心**: 模擬足跡圖 POC 突破與機構意圖審計。
 - **技術**: Pine Script v6.0, UDT 狀態管理, 動態 ATR 風險對位。
 - **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0516.0634] Tn Sovereign Donchian Breakout v6
+- **核心**: 唐奇安通道時序突破策略，整合特定時段執行規訓。
+- **技術**: Pine Script v6.0 標準, Buy Stop 時序掛單, 自動撤單機制。
+- **狀態**: 已實體化至 `strategies/`。
 - [Liquidity Transfer Engine v6](./strategies/LiquidityTransferEngine_v6.md) - Institutional Liquidity Grabs & Draw on Liquidity (v26.0429.2000)
 - [TnSovereignOrbMultiV6](./strategies/TnSovereignOrbMultiV6.md): Sovereign Multi-Model ORB strategy [v26.0429.1833]
 - [TnSovereignFakeoutConfirmedV6](./strategies/TnSovereignFakeoutConfirmedV6.md): 4-Layer Filtered Sovereign strategy [v26.0430.0830]
@@ -115,6 +120,7 @@
 - [TnSovereignIctComboV6](./strategies/TnSovereignIctComboV6.md): 7-Factor Institutional Confluence strategy [v26.0508.0643]
 - [TnSovereignIctSmcComboV6](./strategies/TnSovereignIctSmcComboV6.md): ICT/SMC 7-Factor Confluence strategy [v26.0508.0631]
 - [TnSovereignReversalEngineV6](./strategies/TnSovereignReversalEngineV6.md): High-Signal Pivot Reversal strategy [v26.0508.0648]
+- [TnSovereignDonchianV6](./strategies/TnSovereignDonchianV6.md): Tn Sovereign Donchian Breakout v6 [v26.0516.0634]
 - [EMA_Bars_v6](./strategies/EMA_Bars_v6.md): EMA & Time Exit Strategy v6 [v26.0516.0632]
 
 

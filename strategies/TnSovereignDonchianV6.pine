@@ -1,0 +1,87 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TeleNexus Hunted & Sovereignly Rewritten
+// Optimized for Forex (EURUSD, GBPUSD) 30m/1h timeframes.
+//@version=6
+
+strategy("Tn Sovereign Donchian Breakout v6", overlay=true, initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1)
+
+// ==========================================
+// ⚙️ INPUTS & CONFIGURATION
+// ==========================================
+
+// --- Indicator Settings ---
+int donchian_len = input.int(25, "Donchian Channel Length", minval=1, group="Indicator")
+
+// --- Strategy Rules ---
+int target_hour  = input.int(17, "Order Placement Hour (Exchange Time)", minval=0, maxval=23, group="Execution")
+int valid_bars   = input.int(60, "Order Validity (Bars)", minval=1, group="Execution")
+
+// --- Risk Management ---
+float lot_size   = input.float(1000.0, "Position Volume", minval=0.1, group="Risk")
+
+// ==========================================
+// 📐 INDICATOR CALCULATIONS
+// ==========================================
+
+// Calculate Donchian Channel using the highest high and lowest low of closed bars [1]
+// This defines the breakout levels.
+float upper_band = ta.highest(high, donchian_len)[1]
+float lower_band = ta.lowest(low, donchian_len)[1]
+
+// Visualizing the channel
+plot(upper_band, "Donchian Upper", color=color.new(color.green, 0), linewidth=2)
+plot(lower_band, "Donchian Lower", color=color.new(color.red, 0), linewidth=1)
+
+// ==========================================
+// 🕒 TIME LOGIC
+// ==========================================
+
+// Check if current bar's hour matches the target hour
+bool is_target_time = (hour == target_hour) and (minute == 0)
+
+// Persistent state for order tracking
+var float pending_stop_price = na
+var int   entry_bar_index    = 0
+
+// ==========================================
+// 🚀 ORDER EXECUTION (BUY STOP)
+// ==========================================
+
+// 1. Placement phase at the specific hour
+if is_target_time
+    pending_stop_price := upper_band
+    entry_bar_index    := bar_index
+    
+    // Place a STOP entry: order fills only if price breaches the level upward.
+    strategy.entry("Sovereign Breakout", strategy.long, stop=pending_stop_price, comment="Breakout Limit", qty=lot_size)
+
+// 2. Cancellation phase if not filled within validity window
+int bars_passed = bar_index - entry_bar_index
+
+if (strategy.opentrades == 0) and (bars_passed >= valid_bars)
+    strategy.cancel("Sovereign Breakout")
+    pending_stop_price := na
+
+// ==========================================
+// 🚪 EXIT STRATEGY
+// ==========================================
+
+// Standard Donchian exit: Sell if price hits the lower band.
+if strategy.opentrades > 0
+    strategy.exit("Exit Sovereign", "Sovereign Breakout", stop=lower_band, comment="Lower Band Hit")
+
+// ==========================================
+// 🎨 VISUALIZATION & HUD
+// ==========================================
+
+// Background highlight at order placement hour
+bgcolor(is_target_time ? color.new(color.blue, 85) : na, title="Placement Window")
+
+// Visual marker for target hour
+plotshape(is_target_time ? high : na, 
+     title="Execution Hour Marker", 
+     location=location.abovebar, 
+     color=color.green, 
+     style=shape.triangleup, 
+     text="HUNT", 
+     size=size.small)
