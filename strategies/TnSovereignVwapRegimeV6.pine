@@ -1,0 +1,107 @@
+//@version=6
+// TeleNexus Sovereign: VWAP Regime Deviation Strategy [v26.0517.0630]
+// Spirit: Institutional VWAP Deviation + Dynamic StdDev Band Regime Detection
+// Goal: Capturing mean-reversion signals at statistically significant VWAP deviations
+//
+// Logic Matrix:
+// 1. VWAP Core: Anchored VWAP from session start for fair-value baseline.
+// 2. Deviation Engine: Measures price deviation from VWAP in standard deviation units.
+// 3. Regime Filter: Identifies trending vs ranging regimes via ADX threshold.
+// 4. Liquidity Sweep Detection: Detects when price sweeps VWAP deviation extremes.
+// 5. Causal Audit: State machine logs regime transitions for sovereign verification.
+
+strategy("TnSovereignVwapRegimeV6",
+     shorttitle        = "Tn_VWAP_Regime_V6",
+     overlay           = false,
+     initial_capital   = 100000,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 10,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.04,
+     slippage          = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_vwap  = "▼ VWAP Engine"
+vwapSrc     = input.source(close, "VWAP Source", group=group_vwap)
+stdLen      = input.int(20, "StdDev Lookback", minval=5, maxval=100, group=group_vwap)
+multUp      = input.float(2.0, "Upper Band Multiple", minval=0.5, maxval=5.0, group=group_vwap)
+multDn      = input.float(-2.0, "Lower Band Multiple", minval=-5.0, maxval=-0.5, group=group_vwap)
+
+group_regime = "▼ Regime Filter"
+adxThresh   = input.int(25, "ADX Trend Threshold", minval=10, maxval=50, group=group_regime)
+
+group_risk  = "▼ Risk Management"
+sl_atr_mult = input.float(1.5, "SL ATR Multiple", group=group_risk)
+tp_rr       = input.float(2.5, "Target R:R Ratio", group=group_risk)
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atr    = ta.atr(14)
+
+// 1. VWAP Core (session-anchored fair value)
+float vwap   = ta.vwap(vwapSrc)
+
+// 2. Standard Deviation Bands around VWAP
+float mean   = ta.sma(close, stdLen)
+float stddev  = ta.stdev(close, stdLen)
+float upper   = vwap + multUp * stddev
+float lower   = vwap + multDn * stddev
+
+// 3. ADX Regime Filter
+float adxVal = ta.adx(14)
+bool  isRanging = adxVal < adxThresh
+
+// 4. Deviation Strength (Z-score of VWAP deviation)
+float deviation = (close - vwap) / stddev
+
+// 5. Causal Audit State Machine
+var string state    = "NEUTRAL"
+var int    sweepCnt = 0
+
+bool  longSignal  = false
+bool  shortSignal = false
+
+if (deviation < multDn and isRanging and deviation[1] >= multDn[1])
+    longSignal  := true
+    state       := "LONG_SIGNAL"
+    sweepCnt    += 1
+
+if (deviation > multUp and isRanging and deviation[1] <= multUp[1])
+    shortSignal := true
+    state       := "SHORT_SIGNAL"
+    sweepCnt    += 1
+
+if (deviation > multDn and deviation < multUp)
+    state := "NEUTRAL"
+
+// ── Plotting ─────────────────────────────────────────────────────────────────
+plot(vwap,   "VWAP",         color.new(color.blue, 0), 2)
+plot(upper,  "Upper Band",   color.new(color.red, 30),  1)
+plot(lower,  "Lower Band",   color.new(color.green, 30), 1)
+plot(deviation, "Deviation",  color.new(color.orange, 0), 2)
+
+hline(adxThresh, "ADX Threshold", color.new(color.gray, 50), 2, line.style_dotted)
+
+// ── Strategy Execution ───────────────────────────────────────────────────────
+longCondition  = longSignal and strategy.position_size == 0
+shortCondition = shortSignal and strategy.position_size == 0
+
+if (longCondition)
+    sl   = close - sl_atr_mult * atr
+    tp   = close + tp_rr * sl_atr_mult * atr
+    strategy.entry("Long", strategy.long)
+    strategy.exit("LX", "Long", stop=sl, limit=tp)
+
+if (shortCondition)
+    sl   = close + sl_atr_mult * atr
+    tp   = close - tp_rr * sl_atr_mult * atr
+    strategy.entry("Short", strategy.short)
+    strategy.exit("SX", "Short", stop=sl, limit=tp)
+
+// ── Causal Audit Plot ────────────────────────────────────────────────────────
+plotchar(deviation, "Deviation", "", location.absolute,
+     color = deviation > multUp ? color.red :
+             deviation < multDn ? color.green : color.gray,
+     size  = size.tiny)
+
+bgcolor(longSignal  ? color.new(color.green, 80) :
+        shortSignal ? color.new(color.red, 80) : na, title="Signal Background")

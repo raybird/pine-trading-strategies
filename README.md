@@ -122,6 +122,7 @@
 - [TnSovereignReversalEngineV6](./strategies/TnSovereignReversalEngineV6.md): High-Signal Pivot Reversal strategy [v26.0508.0648]
 - [TnSovereignDonchianV6](./strategies/TnSovereignDonchianV6.md): Tn Sovereign Donchian Breakout v6 [v26.0516.0634]
 - [EMA_Bars_v6](./strategies/EMA_Bars_v6.md): EMA & Time Exit Strategy v6 [v26.0516.0632]
+- [TnSovereignVwapRegimeV6](./strategies/TnSovereignVwapRegimeV6.md): VWAP Regime Deviation Strategy v6 [v26.0517.0630]
 
 
 
