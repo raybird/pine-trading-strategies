@@ -1,0 +1,115 @@
+//@version=6
+// TN Compression Expansion V6 — ATR Range Contraction → Volatility Breakout
+// Author: TeleNexus (Raybird)
+// Timezone: Asia/Taipei (CST)
+// Version: 1.0.0 (2026-05-18 06:30)
+//
+// 核心規訓 (Core Mandate):
+// 1. 使用 ATR 比值偵測波動壓縮區 (volatility contraction ratio).
+// 2. 壓縮後向上/向下突破近期區間高/低時進場.
+// 3. ATR 通道追蹤停損, 2:1 RR 目標.
+
+strategy("TN Compression Expansion V6 [TeleNexus]",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=15,
+     commission_type=strategy.commission.percent,
+     commission_value=0.075,
+     margin_long=1, margin_short=1)
+
+// ── Enum 規訓 ─────────────────────────────────────────────────────────────
+enum RegimeState
+    COMPRESSION
+    EXPANSION
+    NEUTRAL
+
+enum SignalGrade
+    SOVEREIGN
+    STRONG
+    WEAK
+    VOID
+
+// ── Inputs ───────────────────────────────────────────────────────────────
+int    atrLen         = input.int(14, "ATR Length", minval=5)
+int    lookback       = input.int(20, "ATR SMA Lookback", minval=5)
+float  compressionPct = input.float(0.7, "Compression Threshold (%)", step=0.05, minval=0.1, maxval=1.0)
+int    rangeBars      = input.int(10, "Range Lookback (bars)", minval=3)
+float  atrStopMult    = input.float(1.5, "ATR Stop Multiplier", step=0.1)
+float  rrTarget       = input.float(2.0, "Risk/Reward Ratio", step=0.25)
+int    minScore       = input.int(2, "Min Sovereign Score", minval=1, maxval=3)
+
+// ── ATR 壓縮偵測 ──────────────────────────────────────────────────────────
+float atrVal    = ta.atr(atrLen)
+float atrSma    = ta.sma(atrVal, lookback)
+float atrRatio  = atrVal / atrSma
+
+bool isCompressed   = atrRatio < compressionPct and atrVal > 0
+bool wasCompressed  = ta.barssince(isCompressed) < rangeBars // 近期發生過壓縮
+
+// ── 區間突破偵測 ──────────────────────────────────────────────────────────
+float rangeHigh = ta.highest(high, rangeBars)
+float rangeLow  = ta.lowest(low, rangeBars)
+
+bool  breakoutUp   = ta.crossover(close, rangeHigh[1])
+bool  breakoutDown = ta.crossunder(close, rangeLow[1])
+
+// ── 評分系統 ─────────────────────────────────────────────────────────────
+int score = (isCompressed ? 1 : 0) + (wasCompressed ? 1 : 0) + (breakoutUp or breakoutDown ? 1 : 0)
+
+SignalGrade grade = switch score
+    3 => SignalGrade.SOVEREIGN
+    2 => SignalGrade.STRONG
+    1 => SignalGrade.WEAK
+    => SignalGrade.VOID
+
+bool isValid = score >= minScore
+
+// ── 進場邏輯 ────────────────────────────────────────────────────────────
+bool longCondition  = breakoutUp and isValid and (isCompressed or wasCompressed)
+bool shortCondition = breakoutDown and isValid and (isCompressed or wasCompressed)
+
+float entryPrice   = close
+float atrStopDist  = atrVal * atrStopMult
+
+if longCondition
+    strategy.entry("Long", strategy.long, comment="COMPRESS_BUY")
+    strategy.exit("LX", "Long",
+         stop=entryPrice - atrStopDist,
+         limit=entryPrice + atrStopDist * rrTarget,
+         comment_loss="AVG_SL", comment_profit="TP1")
+
+if shortCondition
+    strategy.entry("Short", strategy.short, comment="COMPRESS_SELL")
+    strategy.exit("SX", "Short",
+         stop=entryPrice + atrStopDist,
+         limit=entryPrice - atrStopDist * rrTarget,
+         comment_loss="AVG_SL", comment_profit="TP1")
+
+// ── 視覺化 ───────────────────────────────────────────────────────────────
+hline(rangeHigh, "Range High", color.new(color.gray, 50), hline.style_dashed)
+hline(rangeLow, "Range Low", color.new(color.gray, 50), hline.style_dashed)
+
+// ATR 通道
+float atrUp  = ta.sma(close, 10) + atrVal
+float atrDn  = ta.sma(close, 10) - atrVal
+plot(atrUp, "ATR Upper", color.new(color.purple, 40))
+plot(atrDn, "ATR Lower", color.new(color.purple, 40))
+fill(plot(atrUp), plot(atrDn), color.new(color.purple, 10), title="ATR Channel")
+
+// 壓縮區背景
+bgcolor(isCompressed ? color.new(color.yellow, 85) : na, title="Compression Zone")
+
+plotshape(longCondition, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.normal)
+plotshape(shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.normal)
+
+// ── 儀表板 (Status Dashboard) ───────────────────────────────────────────
+var table board = table.new(position.top_right, 2, 3, border_width=1)
+if barstate.islast
+    table.cell(board, 0, 0, "ATR Ratio", bgcolor=color.gray, text_color=color.white)
+    table.cell(board, 1, 0, str.tostring(atrRatio, "#.##"), bgcolor=isCompressed ? color.yellow : color.green)
+    table.cell(board, 0, 1, "Regime", bgcolor=color.gray, text_color=color.white)
+    string regimeTxt = isCompressed ? "COMPRESS" : "NEUTRAL"
+    table.cell(board, 1, 1, regimeTxt, bgcolor=isCompressed ? color.orange : color.blue)
+    table.cell(board, 0, 2, "Grade", bgcolor=color.gray, text_color=color.white)
+    table.cell(board, 1, 2, str.tostring(score) + "/3", bgcolor=isValid ? color.green : color.red)

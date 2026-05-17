@@ -123,6 +123,12 @@
 - [TnSovereignDonchianV6](./strategies/TnSovereignDonchianV6.md): Tn Sovereign Donchian Breakout v6 [v26.0516.0634]
 - [EMA_Bars_v6](./strategies/EMA_Bars_v6.md): EMA & Time Exit Strategy v6 [v26.0516.0632]
 - [TnSovereignVwapRegimeV6](./strategies/TnSovereignVwapRegimeV6.md): VWAP Regime Deviation Strategy v6 [v26.0517.0630]
+- [TnCompressionExpansionV6](./strategies/tn_compression_expansion_v6.md): ATR Compression → Expansion Breakout v6 [v260518.0630]
+
+### [v260518.0630] Tn Compression Expansion v6
+- **核心**: 純 ATR 比值壓縮偵測 (非 Bollinger/Keltner)，壓縮後區間突破進場，1.5x ATR 停損，2:1 RR。
+- **技術**: Pine Script v6.0, ATR ratio regression, breakout detection, enum state management。
+- **狀態**: 已實體化至 `strategies/`。
 
 
 
