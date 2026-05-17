@@ -1,0 +1,57 @@
+//@version=6
+strategy("TnSovereign Supertrend Volume V6", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty=10)
+
+// === Inputs ===
+atrLen   = input.int(10, "ATR Length")
+stMult   = input.float(3.0, "Supertrend Multiplier")
+volLen   = input.int(20, "Volume MA Length")
+volThresh = input.float(1.5, "Volume Threshold Multiplier")
+useConf  = input.bool(true, "Require Volume Confirmation")
+
+// === ATR & Supertrend ===
+atr = ta.atr(atrLen)
+upper = ta.high - stMult * atr
+lower = ta.low + stMult * atr
+
+var float trend = 1
+var float supertrend = na
+
+if bar_index == 0
+    supertrend := lower
+    trend := 1
+else
+    prev = supertrend[1]
+    if trend[1] == 1
+        if close < prev
+            trend := -1
+            supertrend := upper
+        else
+            trend := 1
+            supertrend := math.max(lower, prev)
+    else
+        if close > prev
+            trend := 1
+            supertrend := lower
+        else
+            trend := -1
+            supertrend := math.min(upper, prev)
+
+// === Volume Confirmation ===
+volMA   = ta.sma(volume, volLen)
+volCond = volume > volMA * volThresh
+tradeSignal = trend == 1 and (not useConf or volCond)
+
+// === Plotting ===
+plot(supertrend, color=trend == 1 ? color.green : color.red, linewidth=2)
+plotshape(tradeSignal and trend == 1, "Long", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(tradeSignal and trend == -1, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// === Entries ===
+if tradeSignal and trend == 1
+    strategy.entry("Long", strategy.long)
+if tradeSignal and trend == -1
+    strategy.entry("Short", strategy.short)
+
+// === Exits ===
+strategy.close("Long", when=trend == -1)
+strategy.close("Short", when=trend == 1)

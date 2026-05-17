@@ -93,3 +93,5 @@
 - [`TnSovereignSTCV6.pine`](./TnSovereignSTCV6.md): 整合謝夫趨勢週期 (STC) 與 200 EMA 過濾的主權週期策略。
 
 - [`TnSovereignVWAPV6.pine`](./TnSovereignVWAPV6.md): 整合動態錨定 VWAP 與標準差通道的主權均值回歸策略。
+
+- [`TnSovereignSupertrendVolV6.pine`](./TnSovereignSupertrendVolV6.md): 整合 Supertrend ATR 趨勢與成交量放大確認的主權混合策略。
