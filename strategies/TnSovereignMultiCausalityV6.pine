@@ -1,0 +1,140 @@
+//@version=6
+strategy("TnSovereignMultiCausalityV6", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty=10, commission_type=strategy.commission.percent, commission_value=0.05, process_orders_on_close=true)
+
+versionMsg = "TnSovereignMultiCausalityV6 | v26.0523.0630 | TeleNexus Sovereign"
+src = input(close, "Source")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━────────
+// REGIME LAYER — 200 EMA causal floor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━────────
+ema200 = ta.ema(src, 200)
+ema50  = ta.ema(src, 50)
+ema20  = ta.ema(src, 20)
+
+emaBull = src > ema200
+emaBear = src < ema200
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MOMENTUM LAYER — ADX trend quality gate
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+adxLen = input.int(14, "ADX Length")
+adxThresh = input.int(25, "ADX Threshold")
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+
+bullMomentum = diPlus > diMinus
+bearMomentum = diMinus > diPlus
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY LAYER — Supertrend causal direction
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atrLen  = input.int(10, "ATR Length")
+atrMult = input.float(3.0, "ATR Multiplier", minval=0.1, step=0.1)
+
+atrVal = ta.atr(atrLen)
+upperBand = src + atrMult * atrVal
+lowerBand = src - atrMult * atrVal
+
+var float supertrend = na
+var int   stDir      = na
+
+float prevUpper = na
+float prevLower = na
+
+upperBand := ta.valuewhen(ta.change(src) != 0, upperBand, 1)
+lowerBand := ta.valuewhen(ta.change(src) != 0, lowerBand, 1)
+
+float prevClose = src[1]
+
+if na(supertrend)
+    supertrend := src
+    stDir      := 1
+else
+    prevUpper := upperBand[1]
+    prevLower := lowerBand[1]
+
+    if supertrend[1] < prevUpper and src >= prevUpper
+        supertrend := math.max(supertrend, prevUpper)
+        stDir      := 1
+    else if supertrend[1] > prevLower and src <= prevLower
+        supertrend := math.min(supertrend, prevLower)
+        stDir      := -1
+    else
+        supertrend := stDir == 1 ? math.max(supertrend, src - atrMult * atrVal) : math.min(supertrend, src + atrMult * atrVal)
+
+stBull = stDir == 1
+stBear = stDir == -1
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY CONDITIONS — Multi-causality confluence
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+longCondition = emaBull and adxVal >= adxThresh and bullMomentum and stBull
+shortCondition = emaBear and adxVal >= adxThresh and bearMomentum and stBear
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RISK MANAGEMENT — ATR-based SL/TP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+slMult = input.float(2.0, "SL ATR Multiplier", minval=0.5, step=0.1)
+tpMult = input.float(3.5, "TP ATR Multiplier", minval=0.5, step=0.1)
+
+float longSL  = na
+float longTP  = na
+float shortSL = na
+float shortTP = na
+
+if longCondition and strategy.position_size == 0
+    longSL := src - slMult * atrVal
+    longTP := src + tpMult * atrVal
+
+if shortCondition and strategy.position_size == 0
+    shortSL := src + slMult * atrVal
+    shortTP := src - tpMult * atrVal
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXECUTION — Sovereign entry only when flat
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL — Trend plots
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+plot(supertrend, "Supertrend", color=stDir == 1 ? color.new(#26A69A, 0) : color.new(#EF5350, 0), linewidth=2)
+plot(ema200, "EMA200", color=color.new(#2196F3, 30), linewidth=1)
+plot(ema50, "EMA50", color=color.new(#9C27B0, 30), linewidth=1)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HUD — Sovereign Audit Dashboard
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table hud = table.new(position.top_right, 2, 9, bgcolor=color.new(#1E1E1E, 70), border_width=1, frame_color=color.new(#00BCD4, 0), frame_width=1)
+if barstate.islast
+    table.cell(hud, 0, 0, "AUDIT", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 0, versionMsg, text_color=#B0BEC5, text_size=size.small)
+    table.cell(hud, 0, 1, "REGIME", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 1, emaBull ? "BULLISH ▲" : "BEARISH ▼", text_color=emaBull ? #26A69A : #EF5350, text_size=size.normal)
+    table.cell(hud, 0, 2, "ADX", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 2, str.format("{0,number,#.##}", adxVal), text_color=adxVal >= adxThresh ? #26A69A : #EF5350, text_size=size.normal)
+    table.cell(hud, 0, 3, "MOMENTUM", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 3, bullMomentum ? "D+ > D-" : "D- > D+", text_color=bullMomentum ? #26A69A : #EF5350, text_size=size.normal)
+    table.cell(hud, 0, 4, "ST DIR", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 4, stDir == 1 ? "LONG ↗" : "SHORT ↘", text_color=stDir == 1 ? #26A69A : #EF5350, text_size=size.normal)
+    table.cell(hud, 0, 5, "ATR", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 5, str.format("{0,number,#.####}", atrVal), text_color=#B0BEC5, text_size=size.normal)
+    table.cell(hud, 0, 6, "SL", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 6, str.format("{0,number,#.##}", slMult * atrVal), text_color=#EF5350, text_size=size.normal)
+    table.cell(hud, 0, 7, "TP", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 7, str.format("{0,number,#.##}", tpMult * atrVal), text_color=#26A69A, text_size=size.normal)
+    table.cell(hud, 0, 8, "STATUS", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 8, longCondition or shortCondition ? "▲ SIGNAL ACTIVE" : "○ SCANNING", text_color=longCondition ? #26A69A : shortCondition ? #EF5350 : #78909C, text_size=size.normal)
+
+// Labels
+if longCondition
+    label.new(bar_index, src, "▲ LONG", style=label.style_label_up, color=#26A69A, textcolor=color.white, size=size.small)
+if shortCondition
+    label.new(bar_index, src, "▼ SHORT", style=label.style_label_down, color=#EF5350, textcolor=color.white, size=size.small)
+
+console.log(str.format("▶ {0} | EMA:{1} ADX:{2,number,#.##} ST:{3} | ATR:{4,number,#.####}", versionMsg, emaBull ? "BULL" : "BEAR", adxVal, stDir == 1 ? "LONG" : "SHORT", atrVal))
