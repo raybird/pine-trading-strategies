@@ -131,5 +131,20 @@
 - **技術**: Pine Script v6.0, ATR ratio regression, breakout detection, enum state management。
 - **狀態**: 已實體化至 `strategies/`。
 
+### [v26.0523.1830] Tn Sovereign VAMO v6
+- **核心**: 波動調整動量振盪器（VAMO），ROC/ATR 標準化動量值，波動百分位過濾。
+- **技術**: Pine Script v6.0, 百分位波動過濾, UDT 狀態管理, 實時審計 HUD。
+- **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0523.1830] Tn Sovereign MTF Swing v6
+- **核心**: 多時框擺動結構分析，1H MTF 共識 + CHoCH 反轉偵測 + 流動性獵殺標記。
+- **技術**: Pine Script v6.0, `request.security` 非重繪 MTF, UDT 遞迴狀態。
+- **狀態**: 已實體化至 `strategies/`。
+
+### [v26.0523.1830] Tn Sovereign Katana Flow v6
+- **核心**: Twin Range Filter（雙平滑範圍濾波），二次 EMA 平滑 + 標準差通道過濾。
+- **技術**: Pine Script v6.0, 陣列百分位, 波動率區間過濾, 實時審計 HUD。
+- **狀態**: 已實體化至 `strategies/`。
+
 
 

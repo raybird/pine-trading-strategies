@@ -1,109 +1,96 @@
 //@version=6
-// 🛡️ TeleNexus Sovereign VAMO Strategy (v26.0417.1204)
-// Base: TPTBusiness/VAMOStrategy
-// Optimized for: Volatility-Adjusted Momentum Causal Audit
+strategy(
+  title           = "Tn Sovereign VAMO v6",
+  shorttitle      = "TnVAMO",
+  overlay         = true,
+  format          = format.price,
+  initial_capital = 10000,
+  default_qty_type = strategy.percent_of_equity,
+  default_qty_value = 100,
+  commission_type  = strategy.commission.percent,
+  commission_value = 0.03,
+  slippage         = 2
+)
 
-strategy("TN Sovereign VAMO v6", overlay=true, pyramiding=0, initial_capital=100000, commission_type=strategy.commission.percent, commission_value=0.05)
+enum VamoState
+    FLAT
+    LONG
+    SHORT
 
-// ------------------------------------------------------------
-// MODULE 0. UDT & CONTRACTS
-// ------------------------------------------------------------
-type SignalContext
-    bool isLong
-    bool isShort
-    float vamoVal
-    float signalVal
-    string auditMsg
+// --- Inputs ---
+vamoLen     = input.int(14,  "VAMO Length")
+signalLen   = input.int(9,   "Signal EMA Length")
+atrMult     = input.float(1.5, "ATR Multiplier", step = 0.1)
+tpMult      = input.float(2.0, "TP Multiplier",  step = 0.1)
+regimeLen   = input.int(50,  "Volatility Regime Lookback")
+stopVolPct  = input.float(0.8, "Stop Volatility Percentile", step = 0.05)
 
-type RiskSettings
-    float riskPct
-    float tpMult
-    float volFilter
+// --- VAMO Calculation ---
+rocVal    = ta.roc(close, vamoLen)
+atrVal    = ta.atr(vamoLen)
+vamoLine  = rocVal / atrVal
+signalLine = ta.ema(vamoLine, signalLen)
+hist      = vamoLine - signalLine
 
-// ------------------------------------------------------------
-// MODULE 1. VAMO CORE ENGINE
-// ------------------------------------------------------------
-groupVamo = "VAMO Settings"
-momLen = input.int(14, "Momentum Length", minval=1, group=groupVamo)
-volLen = input.int(14, "Volatility Length (ATR)", minval=1, group=groupVamo)
-sigLen = input.int(9, "Signal Line Length (EMA)", minval=1, group=groupVamo)
+// --- Volatility Regime Filter ---
+atrRegime = ta.atr(regimeLen)
+atrHist   = array.new<float>()
+if barstate.isconfirmed and not na(atrRegime)
+    array.push(atrHist, atrRegime)
+    if array.size(atrHist) > regimeLen
+        array.shift(atrHist)
 
-groupSov = "Sovereign Enhancements"
-riskPctInput = input.float(1.0, "Risk % per Trade", minval=0.1, group=groupSov)
-tpMultInput = input.float(2.0, "TP Multiplier (x ATR)", minval=1.0, group=groupSov)
-volMultInput = input.float(1.5, "Volatility Filter Multiplier", minval=1.0, group=groupSov)
+volThreshold = array.percentile_nearest_rank(atrHist, stopVolPct)
+volFilter    = atrRegime < volThreshold or array.size(atrHist) < regimeLen
 
-calcVamo() =>
-    float mom = ta.roc(close, momLen)
-    float vol = ta.atr(volLen)
-    float vamo = vol > 0 ? (mom / vol) * 100 : 0
-    float sig = ta.ema(vamo, sigLen)
-    [vamo, sig]
+// --- Entry Conditions ---
+longEntry  = ta.crossover(vamoLine, signalLine) and vamoLine > 0 and volFilter
+shortEntry = ta.crossunder(vamoLine, signalLine) and vamoLine < 0 and volFilter
 
-[vamoVal, sigVal] = calcVamo()
+// --- Risk Management ---
+entryPrice = close
+slDistance = atrVal * atrMult
+tpDistance = slDistance * tpMult
 
-// ------------------------------------------------------------
-// MODULE 2. CAUSAL AUDIT LOGIC
-// ------------------------------------------------------------
-checkConditions() =>
-    SignalContext ctx = SignalContext.new(false, false, vamoVal, sigVal, "WAITING")
-    
-    float longTermVol = ta.atr(volLen * 2)
-    bool lowVol = ta.atr(volLen) < longTermVol * volMultInput
-    bool xup = ta.crossover(vamoVal, sigVal)
-    bool xdn = ta.crossunder(vamoVal, sigVal)
-    
-    if xup
-        if lowVol
-            ctx.isLong := true
-            ctx.auditMsg := "ALIGNED: VAMO X-UP + Low Vol"
-        else
-            ctx.auditMsg := "FILTERED: Volatility Overload"
-    else if xdn
-        if lowVol
-            ctx.isShort := true
-            ctx.auditMsg := "ALIGNED: VAMO X-DOWN + Low Vol"
-        else
-            ctx.auditMsg := "FILTERED: Volatility Overload"
-            
-    ctx
+longSl  = entryPrice - slDistance
+longTp  = entryPrice + tpDistance
+shortSl = entryPrice + slDistance
+shortTp = entryPrice - tpDistance
 
-SignalContext currentCtx = checkConditions()
+// --- Causal Audit State ---
+var auditTable = table.new(position.top_right, 4, 2, bgcolor = color.new(color.black, 80), border_width = 0)
+var line vamoPlot = na
 
-// ------------------------------------------------------------
-// MODULE 3. EXECUTION & RISK
-// ------------------------------------------------------------
-atrVal = ta.atr(volLen)
-
-if currentCtx.isLong
-    float stop = close - atrVal
-    float riskAmt = strategy.equity * riskPctInput / 100
-    float qty = riskAmt / (close - stop)
-    strategy.entry("Long", strategy.long, qty=qty, comment=currentCtx.auditMsg)
-    strategy.exit("Exit Long", "Long", stop=stop, limit=close + atrVal * tpMultInput)
-
-if currentCtx.isShort
-    float stop = close + atrVal
-    float riskAmt = strategy.equity * riskPctInput / 100
-    float qty = riskAmt / (stop - close)
-    strategy.entry("Short", strategy.short, qty=qty, comment=currentCtx.auditMsg)
-    strategy.exit("Exit Short", "Short", stop=stop, limit=close - atrVal * tpMultInput)
-
-// ------------------------------------------------------------
-// MODULE 4. VISUALS (Micro-Audit)
-// ------------------------------------------------------------
-plotshape(currentCtx.isLong, "Long", shape.triangleup, location.belowbar, color.lime, size=size.small)
-plotshape(currentCtx.isShort, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
-
-var table auditTable = table.new(position.top_right, 2, 5, border_width=1)
 if barstate.islast
-    table.cell(auditTable, 0, 0, "VAMO Audit", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 0, currentCtx.auditMsg, bgcolor=color.gray, text_color=color.white)
-    table.cell(auditTable, 0, 1, "VAMO Value", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 1, str.tostring(vamoVal, "#.##"), bgcolor=color.gray, text_color=color.white)
-    table.cell(auditTable, 0, 2, "Signal Line", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 2, str.tostring(sigVal, "#.##"), bgcolor=color.gray, text_color=color.white)
-    table.cell(auditTable, 0, 3, "ATR (14)", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 3, str.tostring(atrVal, format.mintick), bgcolor=color.gray, text_color=color.white)
-    table.cell(auditTable, 0, 4, "Version", bgcolor=color.black, text_color=color.white)
-    table.cell(auditTable, 1, 4, "v26.0417.1204", bgcolor=color.gray, text_color=color.white)
+    table.cell(auditTable, 0, 0, "VAMO", text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 0, 1, str.tostring(vamoLine, "#.##"), text_color = color.lime, text_size = size.small)
+    table.cell(auditTable, 1, 0, "Signal", text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 1, 1, str.tostring(signalLine, "#.##"), text_color = color.orange, text_size = size.small)
+    table.cell(auditTable, 2, 0, "VolFilter", text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 2, 1, volFilter ? "ON" : "OFF", text_color = volFilter ? color.lime : color.red, text_size = size.small)
+    table.cell(auditTable, 3, 0, "State", text_color = color.white, text_size = size.small)
+
+if longEntry
+    strategy.entry("VAMO_L", strategy.long)
+    strategy.exit("VAMO_L_X", "VAMO_L", stop = longSl, limit = longTp)
+
+if shortEntry
+    strategy.entry("VAMO_S", strategy.short)
+    strategy.exit("VAMO_S_X", "VAMO_S", stop = shortSl, limit = shortTp)
+
+// --- Visuals ---
+plot(vamoLine,   "VAMO", color = color.fuchsia, linewidth = 2)
+plot(signalLine, "Signal", color = color.orange, linewidth = 1)
+hline(0, "Zero", color = color.gray, linestyle = hline.style_dotted)
+plot(hist, "Histogram", color = hist > 0 ? color.lime : color.red, style = plot.style_histogram, linewidth = 2)
+
+bgcolor(longEntry ? color.new(color.lime, 85) : na)
+bgcolor(shortEntry ? color.new(color.red, 85) : na)
+
+// --- Causal Audit State Labels ---
+if longEntry
+    label.new(bar_index, low, "VAMO LONG\nSL=" + str.tostring(slDistance, "#.##") + "\nTP=" + str.tostring(tpDistance, "#.##"),
+              style = label.style_label_up, color = color.lime, textcolor = color.black, size = size.tiny)
+if shortEntry
+    label.new(bar_index, high, "VAMO SHORT\nSL=" + str.tostring(slDistance, "#.##") + "\nTP=" + str.tostring(tpDistance, "#.##"),
+              style = label.style_label_down, color = color.red, textcolor = color.white, size = size.tiny)

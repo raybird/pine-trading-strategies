@@ -1,0 +1,129 @@
+//@version=6
+strategy(
+  title            = "Tn Sovereign Katana Flow v6",
+  shorttitle       = "TnKATANA",
+  overlay          = true,
+  format           = format.price,
+  initial_capital  = 10000,
+  default_qty_type = strategy.percent_of_equity,
+  default_qty_value = 100,
+  commission_type  = strategy.commission.percent,
+  commission_value = 0.03,
+  slippage         = 2
+)
+
+// --- UDTs ---
+enum Direction
+    NEUTRAL
+    BULLISH
+    BEARISH
+
+type KatanaState
+    float  trfValue
+    float  trfSignal
+    float  upperBand
+    float  lowerBand
+    Direction trend
+
+// --- Inputs ---
+fastPeriod  = input.int(8,    "Fast Period")
+slowPeriod  = input.int(21,   "Slow Period")
+multiplier  = input.float(2.5, "Multiplier", step = 0.1)
+regimePeriod = input.int(65,  "Regime Period")
+atrStopMult = input.float(1.5, "ATR Stop Mult", step = 0.1)
+tpRatio     = input.float(2.0, "TP Ratio", step = 0.1)
+
+// --- Twin Range Filter ---
+trfFast  = ta.sma(ta.range, fastPeriod)
+trfSlow  = ta.sma(ta.range, slowPeriod)
+trfValue = trfFast / trfSlow
+
+var KatanaState state = KatanaState.new()
+state.trfValue := trfValue
+
+// Smooth TRF via double EMA
+trfSmoothed    = ta.ema(ta.ema(trfValue, fastPeriod), slowPeriod)
+trfSignal      = ta.sma(trfSmoothed, fastPeriod)
+state.trfSignal := trfSignal
+
+// Bands
+avgTRF  = ta.sma(trfSmoothed, slowPeriod)
+stdTRF  = ta.stdev(trfSmoothed, slowPeriod)
+upper   = avgTRF + multiplier * stdTRF
+lower   = avgTRF - multiplier * stdTRF
+state.upperBand := upper
+state.lowerBand := lower
+
+// Trend determination via TRF
+state.trend := trfSmoothed > trfSignal ? Direction.BULLISH :
+               trfSmoothed < trfSignal ? Direction.BEARISH : Direction.NEUTRAL
+
+bullishState = state.trend == Direction.BULLISH and ta.crossover(trfSmoothed, trfSignal)
+bearishState = state.trend == Direction.BEARISH and ta.crossunder(trfSmoothed, trfSignal)
+
+// --- Regime Filter: ATR Percentile ---
+atrRegime = ta.atr(regimePeriod)
+atrHist   = array.new<float>()
+if barstate.isconfirmed and not na(atrRegime)
+    array.push(atrHist, atrRegime)
+    if array.size(atrHist) > regimePeriod
+        array.shift(atrHist)
+
+volThreshold80  = array.percentile_nearest_rank(atrHist, 0.8)
+volThreshold20  = array.percentile_nearest_rank(atrHist, 0.2)
+normalVolFilter = atrRegime <= volThreshold80 and atrRegime >= volThreshold20
+normalVolFilter := normalVolFilter or array.size(atrHist) < regimePeriod
+
+// --- Entry ---
+atrStop = ta.atr(fastPeriod * 2)
+
+longEntry  = bullishState and normalVolFilter
+shortEntry = bearishState and normalVolFilter
+
+entryPrice = close
+slLong  = entryPrice - atrStop * atrStopMult
+tpLong  = entryPrice + atrStop * atrStopMult * tpRatio
+slShort = entryPrice + atrStop * atrStopMult
+tpShort = entryPrice - atrStop * atrStopMult * tpRatio
+
+if longEntry
+    strategy.entry("KATANA_L", strategy.long)
+    strategy.exit("KATANA_L_X", "KATANA_L", stop = slLong, limit = tpLong)
+
+if shortEntry
+    strategy.entry("KATANA_S", strategy.short)
+    strategy.exit("KATANA_S_X", "KATANA_S", stop = slShort, limit = tpShort)
+
+// --- Audit Dashboard ---
+var auditTable = table.new(position.top_right, 4, 3, bgcolor = color.new(color.black, 80), border_width = 0)
+
+if barstate.islast
+    table.cell(auditTable, 0, 0, "TRF Val",  text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 0, 1, str.tostring(trfSmoothed, "#.##"), text_color = color.fuchsia, text_size = size.small)
+    table.cell(auditTable, 1, 0, "TRF Sig",  text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 1, 1, str.tostring(trfSignal, "#.##"), text_color = color.orange, text_size = size.small)
+    table.cell(auditTable, 2, 0, "Trend",    text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 2, 1, state.trend == Direction.BULLISH ? "▲ BULL" : state.trend == Direction.BEARISH ? "▼ BEAR" : "— FLAT",
+              text_color = state.trend == Direction.BULLISH ? color.lime : state.trend == Direction.BEARISH ? color.red : color.gray, text_size = size.small)
+    table.cell(auditTable, 3, 0, "VolRegime",text_color = color.white, text_size = size.small)
+    table.cell(auditTable, 3, 1, normalVolFilter ? "NORMAL" : "EXTREME",
+              text_color = normalVolFilter ? color.lime : color.red, text_size = size.small)
+
+// --- Visuals ---
+hline(0, "Zero", color = color.gray, linestyle = hline.style_dotted)
+plot(trfSmoothed, "TRF Smoothed", color = color.fuchsia, linewidth = 2)
+plot(trfSignal, "TRF Signal", color = color.orange, linewidth = 1)
+plot(upper, "Upper Band", color = color.new(color.gray, 50), linewidth = 1)
+plot(lower, "Lower Band", color = color.new(color.gray, 50), linewidth = 1)
+fill(plot(upper), plot(lower), color = color.new(color.gray, 90))
+
+bgcolor(longEntry ? color.new(color.lime, 90) : na)
+bgcolor(shortEntry ? color.new(color.red, 90) : na)
+
+if longEntry
+    label.new(bar_index, low, "KATANA LONG\nSL=" + str.tostring(slLong, "#.##") + "\nTP=" + str.tostring(tpLong, "#.##"),
+              style = label.style_label_up, color = color.new(color.lime, 20), textcolor = color.black, size = size.tiny)
+
+if shortEntry
+    label.new(bar_index, high, "KATANA SHORT\nSL=" + str.tostring(slShort, "#.##") + "\nTP=" + str.tostring(tpShort, "#.##"),
+              style = label.style_label_down, color = color.new(color.red, 20), textcolor = color.white, size = size.tiny)

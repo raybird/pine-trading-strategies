@@ -1,17 +1,27 @@
-# 🛡️ TeleNexus Sovereign VAMO Strategy (v26.0417.1204)
+# Tn Sovereign VAMO v6
 
-## 📌 策略概述
-此策略基於 `TPTBusiness/VAMOStrategy` 進行主權化重構。VAMO (Volatility-Adjusted Momentum Oscillator) 透過波動率對沖動量，能有效在低波動環境中識別趨勢發起點。
+| 元數據 | 值 |
+|--------|-----|
+| **版本** | v26.0523.1830 |
+| **類型** | Strategy |
+| **Pine Script** | v6 |
+| **實體化時間** | 2026-05-23 18:30 CST |
 
-## 🛠️ 主權化改進 (Sovereign Enhancements)
-1. **UDT (User Defined Types) 封裝**：將信號上下文 (`SignalContext`) 實體化，確保數據流的原子性。
-2. **波動率二級過濾**：引入長週期 ATR 對比，自動過濾波動率異常（Volatility Overload）時段的假信號。
-3. **Micro-Audit (微審計) 系統**：在圖表右側即時輸出因果審計日誌，標註信號被 ALIGNED 或 FILTERED 的具體原因。
-4. **動態風險規訓**：強制執行 1.0% 風險資本管理，並配合 1:2 的 ATR 動態止盈。
+## 核心邏輯
 
-## 📊 核心觀察 (2026-04-17)
-- **VAMO 優勢**：相比於傳統 ROC，VAMO 減少了在高波動震盪市中的過度交易。
-- **審計路徑**：今日測試顯示，「Volatility Overload」過濾器成功擋住了數次無效的隨機穿叉。
+波動調整動量振盪器（Volatility-Adjusted Momentum Oscillator），將 ROC（動量）以 ATR（波動）標準化，產出無單位的 VAMO 數列，再以 EMA 生成訊號線。
 
-## 🚀 執行指令
-在 TradingView 加載 `tn_sovereign_vamo_v6.pine`，觀察 `VAMO Audit` 表格中的即時狀態回報。
+### 進場條件
+- **多單**: VAMO 上穿訊號線、VAMO > 0、波動率在正常區間
+- **空單**: VAMO 下穿訊號線、VAMO < 0、波動率在正常區間
+
+### 出場條件
+- ATR 動態停損：$1.5 \times ATR$
+- 固定盈虧比停利：$2:1$
+
+### 風險過濾
+- 波動率百分位篩選：僅在 ATR 低於第 80 百分位時交易
+
+## 參考來源
+- VAMO Strategy, TPTBusiness (GitHub)
+- 經 TeleNexus Sovereign 主權化重寫

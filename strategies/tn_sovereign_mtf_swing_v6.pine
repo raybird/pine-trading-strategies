@@ -1,0 +1,133 @@
+//@version=6
+indicator(
+  title      = "Tn Sovereign MTF Swing v6",
+  shorttitle = "TnMTFSwing",
+  overlay    = true,
+  format     = format.price
+)
+
+// --- UDTs ---
+enum SwingDirection
+    UNDEFINED
+    UP
+    DOWN
+
+type SwingState
+    float swingHigh
+    float swingLow
+    int   swingHighIndex
+    int   swingLowIndex
+    SwingDirection direction
+    float chouchLevel
+    bool  chouchTriggered
+
+type TfContext
+    string tf
+    float  swingHigh
+    float  swingLow
+    bool   isUpTrend
+    bool   isDownTrend
+
+// --- Inputs ---
+pivotLeft  = input.int(3,  "Pivot Left Bars")
+pivotRight = input.int(3,  "Pivot Right Bars")
+showLabels = input.bool(true, "Show Labels")
+
+// --- 1H Context via request.security ---
+swingState1H = request.security(
+  ticker.heikenashi(syminfo.tickerid),
+  "60",
+  (() =>
+      var _state = SwingState.new()
+      float _high = ta.pivothigh(pivotLeft, pivotRight)
+      float _low  = ta.pivotlow(pivotLeft, pivotRight)
+      if not na(_high)
+          _state.swingHigh       := _high
+          _state.swingHighIndex  := bar_index
+          _state.direction       := SwingDirection.DOWN
+      if not na(_low)
+          _state.swingLow        := _low
+          _state.swingLowIndex   := bar_index
+          _state.direction       := SwingDirection.UP
+      // CHoCH detection
+      if _state.direction == SwingDirection.DOWN and not na(_state.swingLow) and _state.swingLow > 0
+          if low < _state.swingLow
+              _state.chouchTriggered := true
+              _state.chouchLevel     := _state.swingLow
+      if _state.direction == SwingDirection.UP and not na(_state.swingHigh) and _state.swingHigh > 0
+          if high > _state.swingHigh
+              _state.chouchTriggered := true
+              _state.chouchLevel     := _state.swingHigh
+      _state
+  )()
+)
+
+// --- Current TF Swing Detection ---
+float currSwingHigh = ta.pivothigh(pivotLeft, pivotRight)
+float currSwingLow  = ta.pivotlow(pivotLeft, pivotRight)
+
+var SwingState currentState = SwingState.new()
+
+if not na(currSwingHigh)
+    currentState.swingHigh      := currSwingHigh
+    currentState.swingHighIndex := bar_index
+if not na(currSwingLow)
+    currentState.swingLow       := currSwingLow
+    currentState.swingLowIndex  := bar_index
+
+// --- Trend Determination ---
+trendUp   = currentState.swingHigh > 0 and (na(currentState.swingLow) or currentState.swingHigh > currentState.swingLow)
+trendDown = currentState.swingLow > 0 and (na(currentState.swingHigh) or currentState.swingLow > currentState.swingHigh)
+
+// --- MTF Confluence ---
+mtfUpTrend   = swingState1H.swingHigh > 0 and (swingState1H.swingLow == 0 or swingState1H.swingHigh > swingState1H.swingLow)
+mtfDownTrend = swingState1H.swingLow > 0 and (swingState1H.swingHigh == 0 or swingState1H.swingLow > swingState1H.swingHigh)
+
+confluenceLong  = trendUp and mtfUpTrend
+confluenceShort = trendDown and mtfDownTrend
+
+// --- Liquidity Sweep Detection ---
+float lsqHigh = na
+float lsqLow  = na
+if not na(currSwingHigh) and high > currSwingHigh
+    lsqHigh := high
+if not na(currSwingLow) and low < currSwingLow
+    lsqLow := low
+
+// --- Dashboard ---
+var dashTable     = table.new(position.bottom_right, 3, 4, bgcolor = color.new(color.black, 80), border_width = 0)
+string trendLabel = trendUp ? "▲ UP" : trendDown ? "▼ DOWN" : "— FLAT"
+string mtfLabel   = mtfUpTrend ? "▲ UP" : mtfDownTrend ? "▼ DOWN" : "— FLAT"
+string conLabel   = confluenceLong ? "▲▲ BULL" : confluenceShort ? "▼▼ BEAR" : "— DIV"
+
+if barstate.islast
+    table.cell(dashTable, 0, 0, "Layer",    text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 0, 1, "Trend",    text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 0, 2, "Direction",text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 0, 3, "Confluence",text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 0, "Current",  text_color = color.orange, text_size = size.small)
+    table.cell(dashTable, 1, 1, trendLabel, text_color = trendUp ? color.lime : trendDown ? color.red : color.gray, text_size = size.small)
+    table.cell(dashTable, 1, 2, currentState.direction == SwingDirection.UP ? "UP" : currentState.direction == SwingDirection.DOWN ? "DOWN" : "—", text_color = color.white, text_size = size.small)
+    table.cell(dashTable, 1, 3, conLabel,   text_color = confluenceLong ? color.lime : confluenceShort ? color.red : color.gray, text_size = size.small)
+    table.cell(dashTable, 2, 0, "1H MTF",   text_color = color.orange, text_size = size.small)
+    table.cell(dashTable, 2, 1, mtfLabel,   text_color = mtfUpTrend ? color.lime : mtfDownTrend ? color.red : color.gray, text_size = size.small)
+    table.cell(dashTable, 2, 2, swingState1H.direction == SwingDirection.UP ? "UP" : swingState1H.direction == SwingDirection.DOWN ? "DOWN" : "—", text_color = color.white, text_size = size.small)
+
+// --- Visuals ---
+plotshape(currSwingHigh, "Swing High", style = shape.triangledown, location = location.abovebar, color = color.red, size = size.tiny)
+plotshape(currSwingLow,  "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = color.lime, size = size.tiny)
+
+plotshape(confluenceLong  and barstate.isconfirmed, "Confluence Long",  style = shape.labelup,   location = location.belowbar, color = color.lime,  size = size.small, text = "CONF LONG")
+plotshape(confluenceShort and barstate.isconfirmed, "Confluence Short", style = shape.labeldown, location = location.abovebar, color = color.red,   size = size.small, text = "CONF SHORT")
+
+plotshape(lsqHigh, "LSQ High", style = shape.xcross, location = location.abovebar, color = color.yellow, size = size.tiny)
+plotshape(lsqLow,  "LSQ Low",  style = shape.xcross, location = location.belowbar, color = color.yellow, size = size.tiny)
+
+// --- Causal Audit ---
+if showLabels and confluenceLong and barstate.isconfirmed
+    label.new(bar_index, low, "MTF SWING LONG\nCurr:" + trendLabel + "\n1H: " + mtfLabel,
+              style = label.style_label_up, color = color.new(color.lime, 30), textcolor = color.black, size = size.tiny)
+
+if showLabels and confluenceShort and barstate.isconfirmed
+    label.new(bar_index, high, "MTF SWING SHORT\nCurr:" + trendLabel + "\n1H: " + mtfLabel,
+              style = label.style_label_down, color = color.new(color.red, 30), textcolor = color.white, size = size.tiny)
