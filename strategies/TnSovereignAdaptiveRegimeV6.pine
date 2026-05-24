@@ -1,0 +1,132 @@
+//@version=6
+strategy("TnSovereignAdaptiveRegimeV6", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty=10, commission_type=strategy.commission.percent, commission_value=0.05, process_orders_on_close=true)
+
+versionMsg = "TnSovereignAdaptiveRegimeV6 | v26.0525.0630 | TeleNexus Sovereign"
+src = input(close, "Source")
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// REGIME LAYER — 200 EMA causal floor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ema200 = ta.ema(src, 200)
+ema50  = ta.ema(src, 50)
+
+emaBull = src > ema200
+emaBear = src < ema200
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VOLATILITY REGIME — ATR switching
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atrLen   = input.int(14, "ATR Length")
+regLook  = input.int(50, "Volatility Lookback")
+compTh   = input.float(0.7, "Compression Threshold (ATR Ratio)")
+expMult  = input.float(1.3, "Expansion Multiplier")
+
+atrVal = ta.atr(atrLen)
+atrAvg = ta.sma(atrVal, regLook)
+
+lowVol  = atrVal < atrAvg
+highVol = atrVal > atrAvg * expMult
+compressed = atrVal < atrAvg * compTh
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RANGE STRUCTURE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+rangeLen = input.int(20, "Range Length")
+rangeHigh = ta.highest(high, rangeLen)
+rangeLow  = ta.lowest(low, rangeLen)
+
+crossUp   = ta.crossover(close, rangeHigh[1])
+crossDown = ta.crossunder(close, rangeLow[1])
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FAKE BREAKOUT FILTER — candle strength
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+strongBull = close > open and close > high[1]
+strongBear = close < open and close < low[1]
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENTRY CONDITIONS — Sovereign confluence
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Low volatility → mean reversion (range bounce)
+longRange  = lowVol and close < rangeLow[1]
+shortRange = lowVol and close > rangeHigh[1]
+
+// High volatility → expansion breakout (with fakeout filter)
+longBreak  = highVol and crossUp and strongBull
+shortBreak = highVol and crossDown and strongBear
+
+// Compression → pre-breakout accumulation
+longCompress = compressed and crossUp and strongBull
+shortCompress = compressed and crossDown and strongBear
+
+// Sovereign: 200 EMA causal gate
+longCondition  = emaBull and (longRange or longBreak or longCompress)
+shortCondition = emaBear and (shortRange or shortBreak or shortCompress)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RISK MANAGEMENT — ATR-based SL/TP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+slMult = input.float(1.5, "SL ATR Multiplier", minval=0.5, step=0.1)
+tpMult = input.float(3.0, "TP ATR Multiplier", minval=0.5, step=0.1)
+
+float longSL  = na
+float longTP  = na
+float shortSL = na
+float shortTP = na
+
+if longCondition and strategy.position_size == 0
+    longSL := strategy.position_avg_price - atrVal * slMult
+    longTP := strategy.position_avg_price + atrVal * tpMult
+
+if shortCondition and strategy.position_size == 0
+    shortSL := strategy.position_avg_price + atrVal * slMult
+    shortTP := strategy.position_avg_price - atrVal * tpMult
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXECUTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=longSL, limit=longTP)
+
+if shortCondition and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=shortSL, limit=shortTP)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VISUAL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+plot(ema200, "EMA200", color=color.new(#2196F3, 30), linewidth=1)
+plot(ema50, "EMA50", color=color.new(#9C27B0, 30), linewidth=1)
+
+plotshape(longCondition, "Long Signal", style=shape.triangleup, location=location.belowbar, color=#26A69A, size=size.small)
+plotshape(shortCondition, "Short Signal", style=shape.triangledown, location=location.abovebar, color=#EF5350, size=size.small)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HUD — Sovereign Audit Dashboard
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table hud = table.new(position.top_right, 2, 9, bgcolor=color.new(#1E1E1E, 70), border_width=1, frame_color=color.new(#00BCD4, 0), frame_width=1)
+if barstate.islast
+    table.cell(hud, 0, 0, "AUDIT", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 0, versionMsg, text_color=#B0BEC5, text_size=size.small)
+    table.cell(hud, 0, 1, "REGIME", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 1, emaBull ? "BULLISH ▲" : "BEARISH ▼", text_color=emaBull ? #26A69A : #EF5350, text_size=size.normal)
+    table.cell(hud, 0, 2, "VOL REGIME", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 2, highVol ? "HIGH ⚡" : compressed ? "COMPRESSED 🔒" : "NORMAL ○", text_color=highVol ? #FF9800 : compressed ? #FFEB3B : #B0BEC5, text_size=size.normal)
+    table.cell(hud, 0, 3, "ATR RATIO", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 3, str.format("{0,number,#.##}x", atrVal / atrAvg), text_color=#B0BEC5, text_size=size.normal)
+    table.cell(hud, 0, 4, "RANGE", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 4, str.format("{0,number,#.##}", rangeHigh - rangeLow), text_color=#B0BEC5, text_size=size.normal)
+    table.cell(hud, 0, 5, "MODE", text_color=#00BCD4, text_size=size.normal)
+    string mode = lowVol ? "MEAN REVERSION" : highVol ? "EXPANSION BREAKOUT" : compressed ? "COMPRESSION ACCUM" : "NEUTRAL"
+    table.cell(hud, 1, 5, mode, text_color=#26A69A, text_size=size.normal)
+    table.cell(hud, 0, 6, "SL", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 6, str.format("{0,number,#.##}", slMult * atrVal), text_color=#EF5350, text_size=size.normal)
+    table.cell(hud, 0, 7, "TP", text_color=#00BCD4, text_size=size.normal)
+    table.cell(hud, 1, 7, str.format("{0,number,#.##}", tpMult * atrVal), text_color=#26A69A, text_size=size.normal)
+    table.cell(hud, 0, 8, "STATUS", text_color=#00BCD4, text_size=size.normal)
+    bool activeSig = longCondition or shortCondition
+    table.cell(hud, 1, 8, activeSig ? "▲ SIGNAL ACTIVE" : "○ SCANNING", text_color=longCondition ? #26A69A : shortCondition ? #EF5350 : #78909C, text_size=size.normal)
+
+console.log(str.format("▶ {0} | REGIME:{1} VOL:{2,number,#.##}x MODE:{3} ATR:{4,number,#.####}", 
+     versionMsg, emaBull ? "BULL" : "BEAR", atrVal / atrAvg, mode, atrVal))
