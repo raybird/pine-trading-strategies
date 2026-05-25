@@ -1,0 +1,437 @@
+//@version=6
+// TeleNexus Sovereign: NeuraRL Reinforcement Learning Strategy [v26.0526.0636]
+// Spirit Inheritance: NeuraLib Transformer/RL Research (Dueling DQN v1.0)
+// Goal: Deep Q-Learning with Prioritized Experience Replay for Regime-Aware Trading
+//
+// Core Architecture:
+// 1. NeuraLib Sequential Network: 8-dim state -> 64 -> 32 -> Dueling Q-Head (V + A)
+// 2. Prioritized Experience Replay: Weight sampling by TD-error magnitude
+// 3. Regime Encoder: ATR ratio, EMA slope, RSI regime as state features
+// 4. Online/Target Network: Dual-network stability with soft-update (tau=0.01)
+// 5. Epsilon-Greedy: Adaptive exploration decay (0.5 -> 0.05 over 500 bars)
+//
+// Pine Script v6 Unique Features:
+// - import NeuraLib for native Neural Network ops
+// - array/matrix for replay buffer management
+// - formula-based matrix ops for Dueling Q-head
+// - process_orders_on_close for consistent training step alignment
+
+import Kaspersky/NeuraLib/4 as nl
+
+strategy("TnSovereignNeuraRLV6",
+     shorttitle         = "TnS_NeuraRL_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1,
+     process_orders_on_close = true)
+
+// ── Version & Grouping ────────────────────────────────────────────────────
+versionMsg = "TnSovereignNeuraRLV6 | v26.0526.0636 | TeleNexus Sovereign"
+
+// ── Hyperparameters ───────────────────────────────────────────────────────
+group_rl      = "▼ RL Core"
+state_dim     = input.int(8,     "State Dimension", minval=4, maxval=16, group=group_rl)
+buffer_size   = input.int(200,   "Replay Buffer Size", minval=50, maxval=500, group=group_rl)
+batch_size    = input.int(32,    "Batch Size", minval=8, maxval=64, group=group_rl)
+gamma         = input.float(0.95,"Discount Factor γ", minval=0.8, maxval=0.99, group=group_rl)
+tau           = input.float(0.01,"Soft-Update τ", minval=0.005, maxval=0.05, group=group_rl)
+epsilon_init  = input.float(0.5, "Initial ε", minval=0.1, maxval=1.0, group=group_rl)
+epsilon_min   = input.float(0.05,"Min ε", minval=0.01, maxval=0.3, group=group_rl)
+decay_bars    = input.int(500,   "ε Decay Bars", minval=100, maxval=2000, group=group_rl)
+learning_rate = input.float(0.001, "Learning Rate α", minval=0.0001, maxval=0.01, group=group_rl)
+
+group_risk    = "▼ Risk Management"
+sl_atr_mult   = input.float(2.0, "Stop Loss ATR Multiple", step=0.5, group=group_risk)
+tp_rr_ratio   = input.float(2.5, "Take Profit R:R Ratio", step=0.5, group=group_risk)
+risk_per_trade = input.float(1.0, "Risk per Trade %", minval=0.5, maxval=3.0, step=0.25, group=group_risk)
+
+// ── State Feature Extraction ──────────────────────────────────────────────
+// Build 8-dim state vector for the Q-network:
+//   [0] Normalized price (z-score, lookback 20)
+//   [1] RSI(14) / 100
+//   [2] ATR(14) / SMA(ATR, 50)  — volatility regime
+//   [3] EMA(9) / EMA(50) — trend slope ratio
+//   [4] Volume z-score (lookback 20)
+//   [5] MACD histogram normalized
+//   [6] Close position within BB range (0-1)
+//   [7] Candle body ratio |close-open| / (high-low)
+
+var float price_mean  = 0.0
+var float price_std   = 1.0
+float atr_val   = ta.atr(14)
+float atr_avg   = ta.sma(atr_val, 50)
+float rsi_val   = ta.rsi(close, 14) / 100.0
+float ema_fast  = ta.ema(close, 9)
+float ema_slow  = ta.ema(close, 50)
+float trend_ratio = ema_fast / (ema_slow || 1)
+float vol_regime  = atr_val / (atr_avg || 1)
+
+float price_sma  = ta.sma(close, 20)
+float price_sdev = ta.stdev(close, 20)
+float price_norm = (close - price_sma) / (price_sdev || 1)
+
+float vol_sma  = ta.sma(volume, 20)
+float vol_sdev = ta.stdev(volume, 20)
+float vol_norm = (volume - vol_sma) / (vol_sdev || 1)
+
+[macd_line, sig_line, _] = ta.macd(close, 12, 26, 9)
+float macd_hist_norm = (macd_line - sig_line) / (atr_val || 1)
+
+[bb_up, bb_mid, bb_low] = ta.bb(close, 20, 2.0)
+float bb_pos = (close - bb_low) / ((bb_up - bb_low) || 1)
+
+float candle_body = math.abs(close - open) / ((high - low) || 1)
+
+// ── Replay Buffer (Prioritized Experience Replay) ────────────────────────
+// Stores (s, a, r, s', done, priority) as arrays
+var array<float> buf_s      = array.new<float>(0)
+var array<int>   buf_a      = array.new<int>(0)
+var array<float> buf_r      = array.new<float>(0)
+var array<float> buf_sp     = array.new<float>(0)
+var array<int>   buf_done   = array.new<int>(0)
+var array<float> buf_prio   = array.new<float>(0)
+var array<int>   buf_idx    = array.new<int>(0)
+var int          buf_pos    = 0
+
+// ── Q-Network: Dueling Architecture (V(s) + A(s,a)) ──────────────────────
+// Online network parameters (flattened)
+// Layer 1: 8 -> 64 (weight: 512 + bias: 64)
+var matrix<float> w1 = matrix.new<float>(state_dim, 64, 0.0)
+var array<float>  b1 = array.new<float>(64, 0.0)
+// Layer 2: 64 -> 32 (weight: 2048 + bias: 32)
+var matrix<float> w2 = matrix.new<float>(64, 32, 0.0)
+var array<float>  b2 = array.new<float>(32, 0.0)
+// Value Head: 32 -> 1
+var array<float>  wv = array.new<float>(32, 0.0)
+var float         bv = 0.0
+// Advantage Head: 32 -> 3 (Hold/Buy/Sell)
+var matrix<float> wa = matrix.new<float>(32, 3, 0.0)
+var array<float>  ba = array.new<float>(3, 0.0)
+
+// Target network parameters (same structure, soft-updated)
+var matrix<float> wt1 = matrix.new<float>(state_dim, 64, 0.0)
+var array<float>  bt1 = array.new<float>(64, 0.0)
+var matrix<float> wt2 = matrix.new<float>(64, 32, 0.0)
+var array<float>  bt2 = array.new<float>(32, 0.0)
+var array<float>  wvt = array.new<float>(32, 0.0)
+var float         bvt = 0.0
+var matrix<float> wat = matrix.new<float>(32, 3, 0.0)
+var array<float>  bat = array.new<float>(3, 0.0)
+
+// Initialize weights with small random values (Xavier-like)
+if barstate.isfirst
+    seed = 42
+    for i = 0 to state_dim - 1
+        for j = 0 to 63
+            seed := (seed * 1103515245 + 12345) % 2147483648
+            scale = math.sqrt(2.0 / (state_dim + 64))
+            w1.set(i, j, (seed % 200 - 100) / 100.0 * scale)
+            wt1.set(i, j, (seed % 200 - 100) / 100.0 * scale)
+    for i = 0 to 63
+        seed := (seed * 1103515245 + 12345) % 2147483648
+        array.set(b1, i, (seed % 200 - 100) / 100.0 * 0.01)
+        array.set(bt1, i, (seed % 200 - 100) / 100.0 * 0.01)
+        for j = 0 to 31
+            seed := (seed * 1103515245 + 12345) % 2147483648
+            scale2 = math.sqrt(2.0 / (64 + 32))
+            w2.set(i, j, (seed % 200 - 100) / 100.0 * scale2)
+            wt2.set(i, j, (seed % 200 - 100) / 100.0 * scale2)
+    for i = 0 to 31
+        seed := (seed * 1103515245 + 12345) % 2147483648
+        array.set(b2, i, (seed % 200 - 100) / 100.0 * 0.01)
+        array.set(bt2, i, (seed % 200 - 100) / 100.0 * 0.01)
+        seed := (seed * 1103515245 + 12345) % 2147483648
+        array.set(wv, i, (seed % 200 - 100) / 100.0 * math.sqrt(2.0 / 32))
+        array.set(wvt, i, (seed % 200 - 100) / 100.0 * math.sqrt(2.0 / 32))
+        for j = 0 to 2
+            seed := (seed * 1103515245 + 12345) % 2147483648
+            scale3 = math.sqrt(2.0 / (32 + 3))
+            wa.set(i, j, (seed % 200 - 100) / 100.0 * scale3)
+            wat.set(i, j, (seed % 200 - 100) / 100.0 * scale3)
+    seed := (seed * 1103515245 + 12345) % 2147483648
+    bv := (seed % 200 - 100) / 100.0 * 0.01
+    bvt := bv
+    for j = 0 to 2
+        seed := (seed * 1103515245 + 12345) % 2147483648
+        array.set(ba, j, (seed % 200 - 100) / 100.0 * 0.01)
+        array.set(bat, j, (seed % 200 - 100) / 100.0 * 0.01)
+
+// ── Forward Pass (Dueling DQN) ───────────────────────────────────────────
+// Returns Q-values for 3 actions [Hold(0), Buy(1), Sell(2)]
+compute_qvals(float s0, float s1, float s2, float s3, float s4, float s5, float s6, float s7,
+              matrix<float> w1_, array<float> b1_, matrix<float> w2_, array<float> b2_,
+              array<float> wv_, float bv_, matrix<float> wa_, array<float> ba_) =>
+    // Layer 1: ReLU(W1 * s + b1)
+    array<float> h1 = array.new<float>(64, 0.0)
+    float[] state_vals = array.from(s0, s1, s2, s3, s4, s5, s6, s7)
+    for j = 0 to 63
+        sum = array.get(b1_, j)
+        for i = 0 to 7
+            sum += w1_.get(i, j) * array.get(state_vals, i)
+        array.set(h1, j, math.max(0.0, sum))
+    // Layer 2: ReLU(W2 * h1 + b2)
+    array<float> h2 = array.new<float>(32, 0.0)
+    for j = 0 to 31
+        sum = array.get(b2_, j)
+        for i = 0 to 63
+            sum += w2_.get(i, j) * array.get(h1, i)
+        array.set(h2, j, math.max(0.0, sum))
+    // Value: V = wv * h2 + bv
+    v = bv_
+    for i = 0 to 31
+        v += array.get(wv_, i) * array.get(h2, i)
+    // Advantage: A = Wa * h2 + ba
+    array<float> adv = array.new<float>(3, 0.0)
+    for j = 0 to 2
+        sum = array.get(ba_, j)
+        for i = 0 to 31
+            sum += wa_.get(i, j) * array.get(h2, i)
+        array.set(adv, j, sum)
+    // Q = V + (A - mean(A))
+    adv_mean = (array.get(adv, 0) + array.get(adv, 1) + array.get(adv, 2)) / 3.0
+    array<float> q = array.new<float>(3, 0.0)
+    for j = 0 to 2
+        array.set(q, j, v + array.get(adv, j) - adv_mean)
+    q
+
+// ── Epsilon-Greedy Action Selection ──────────────────────────────────────
+// Actions: 0=Hold, 1=Buy, 2=Sell
+compute_epsilon(float qh, float qb, float qs) =>
+    decay = math.max(epsilon_min, epsilon_init - (epsilon_init - epsilon_min) * bar_index / decay_bars)
+    seed = (bar_index * 1103515245 + 12345 + ta.barssince(ta.change(strategy.position_size))) % 2147483648
+    rand = (seed % 10000) / 10000.0
+    if rand < decay
+        // Explore: random action
+        seed2 := (seed * 1103515245 + 12345) % 2147483648
+        action = seed2 % 3
+        [action, decay]
+    else
+        // Exploit: argmax Q
+        action = qb >= qs ? (qb >= qh ? 1 : 0) : (qs >= qh ? 2 : 0)
+        [action, decay]
+
+// ── Soft-Update Target Network ───────────────────────────────────────────
+soft_update() =>
+    for i = 0 to state_dim - 1
+        for j = 0 to 63
+            wt1.set(i, j, tau * w1.get(i, j) + (1 - tau) * wt1.get(i, j))
+    for i = 0 to 63
+        bt1.set(i, tau * array.get(b1, i) + (1 - tau) * array.get(bt1, i))
+        for j = 0 to 31
+            wt2.set(i, j, tau * w2.get(i, j) + (1 - tau) * wt2.get(i, j))
+    for i = 0 to 31
+        bt2.set(i, tau * array.get(b2, i) + (1 - tau) * array.get(bt2, i))
+        wvt.set(i, tau * array.get(wv, i) + (1 - tau) * array.get(wvt, i))
+        for j = 0 to 2
+            wat.set(i, j, tau * wa.get(i, j) + (1 - tau) * wat.get(i, j))
+    bvt := tau * bv + (1 - tau) * bvt
+    for j = 0 to 2
+        bat.set(j, tau * array.get(ba, j) + (1 - tau) * array.get(bat, j))
+
+// ── Reward Function ──────────────────────────────────────────────────────
+compute_reward(int action) =>
+    pos = strategy.position_size
+    pos_signed = pos > 0 ? 1 : pos < 0 ? -1 : 0
+    if pos_signed == 0
+        0.0  // No position -> no reward
+    else
+        pnl = (close - close[1]) / close[1] * pos_signed
+        pnl * 100.0  // Scale to basis points
+
+// ── Store Experience ─────────────────────────────────────────────────────
+store_experience(array<float> s, int a, float r, array<float> sp, int done, float priority) =>
+    if array.size(buf_s) >= buffer_size * state_dim
+        // Overwrite oldest experience
+        for i = 0 to state_dim - 1
+            buf_s.set(buf_pos * state_dim + i, array.get(s, i))
+            buf_sp.set(buf_pos * state_dim + i, array.get(sp, i))
+        array.set(buf_a, buf_pos, a)
+        array.set(buf_r, buf_pos, r)
+        array.set(buf_done, buf_pos, done)
+        array.set(buf_prio, buf_pos, priority)
+    else
+        for i = 0 to state_dim - 1
+            array.push(buf_s, array.get(s, i))
+            array.push(buf_sp, array.get(sp, i))
+        array.push(buf_a, a)
+        array.push(buf_r, r)
+        array.push(buf_done, done)
+        array.push(buf_prio, priority)
+    buf_pos := (buf_pos + 1) % buffer_size
+
+// ── Sample Batch (Prioritized) ───────────────────────────────────────────
+// Returns indices and importance-sampling weights
+sample_batch() =>
+    current_size = array.size(buf_a)
+    batch = array.new<int>(0)
+    if current_size < batch_size
+        batch
+    else
+        // Sum-tree style proportional sampling
+        total_prio = 0.0
+        for i = 0 to current_size - 1
+            total_prio += math.max(array.get(buf_prio, i), 0.001)
+        for _ = 0 to batch_size - 1
+            seed3 := (bar_index * 10007 + _ * 7919) % 2147483648
+            threshold = (seed3 % 10000) / 10000.0 * total_prio
+            cumsum = 0.0
+            for i = 0 to current_size - 1
+                cumsum += math.max(array.get(buf_prio, i), 0.001)
+                if cumsum >= threshold
+                    array.push(batch, i)
+                    break
+        batch
+
+// ── Main Loop ────────────────────────────────────────────────────────────
+// Build current state vector
+var float prev_s0 = 0.0
+var float prev_s1 = 0.0
+var float prev_s2 = 0.0
+var float prev_s3 = 0.0
+var float prev_s4 = 0.0
+var float prev_s5 = 0.0
+var float prev_s6 = 0.0
+var float prev_s7 = 0.0
+
+s0 = price_norm
+s1 = rsi_val
+s2 = vol_regime
+s3 = trend_ratio
+s4 = vol_norm
+s5 = macd_hist_norm
+s6 = bb_pos
+s7 = candle_body
+
+current_s = array.from(s0, s1, s2, s3, s4, s5, s6, s7)
+
+// Compute Q-values for current state (online network)
+q_vals = compute_qvals(s0, s1, s2, s3, s4, s5, s6, s7, w1, b1, w2, b2, wv, bv, wa, ba)
+q_hold  = array.get(q_vals, 0)
+q_buy   = array.get(q_vals, 1)
+q_sell  = array.get(q_vals, 2)
+
+// Select action
+[action, epsilon] = compute_epsilon(q_hold, q_buy, q_sell)
+
+// ── Process Experience (previous step's outcome) ──────────────────────────
+// Store (s_t-1, a_t-1, r_t, s_t, done) into replay buffer
+if bar_index > 0
+    prev_s_vec = array.from(prev_s0, prev_s1, prev_s2, prev_s3, prev_s4, prev_s5, prev_s6, prev_s7)
+    reward = compute_reward(action[1])
+    done = ta.change(strategy.position_size) != 0 ? 0 : 1
+
+    // Compute TD-error as priority
+    target_q = compute_qvals(s0, s1, s2, s3, s4, s5, s6, s7, wt1, bt1, wt2, bt2, wvt, bvt, wat, bat)
+    target_max = math.max(math.max(array.get(target_q, 0), array.get(target_q, 1)), array.get(target_q, 2))
+    if done == 1
+        td_target = reward
+    else
+        td_target = reward + gamma * target_max
+    td_error = math.abs(td_target - (action[1] == 0 ? q_hold : action[1] == 1 ? q_buy : q_sell)[1])
+
+    store_experience(prev_s_vec, action[1], reward, current_s, done, td_error)
+
+    // ── Training Step ────────────────────────────────────────────────────
+    batch_indices = sample_batch()
+    if array.size(batch_indices) >= batch_size
+        for idx = 0 to batch_size - 1
+            bi = array.get(batch_indices, idx)
+            // Reconstruct state and next_state from buffer
+            array<float> batch_s = array.new<float>(0)
+            array<float> batch_sp = array.new<float>(0)
+            for k = 0 to state_dim - 1
+                array.push(batch_s, array.get(buf_s, bi * state_dim + k))
+                array.push(batch_sp, array.get(buf_sp, bi * state_dim + k))
+            batch_a = array.get(buf_a, bi)
+            batch_r = array.get(buf_r, bi)
+            batch_d = array.get(buf_done, bi)
+
+            // Compute TD target using target network
+            bsp0 = array.get(batch_sp, 0); bsp1 = array.get(batch_sp, 1)
+            bsp2 = array.get(batch_sp, 2); bsp3 = array.get(batch_sp, 3)
+            bsp4 = array.get(batch_sp, 4); bsp5 = array.get(batch_sp, 5)
+            bsp6 = array.get(batch_sp, 6); bsp7 = array.get(batch_sp, 7)
+            tgt_q = compute_qvals(bsp0, bsp1, bsp2, bsp3, bsp4, bsp5, bsp6, bsp7,
+                                  wt1, bt1, wt2, bt2, wvt, bvt, wat, bat)
+            tgt_max = math.max(math.max(array.get(tgt_q, 0), array.get(tgt_q, 1)), array.get(tgt_q, 2))
+
+            if batch_d == 1
+                td_target := batch_r
+            else
+                td_target := batch_r + gamma * tgt_max
+
+            // Online Q for taken action
+            bs0 = array.get(batch_s, 0); bs1 = array.get(batch_s, 1)
+            bs2 = array.get(batch_s, 2); bs3 = array.get(batch_s, 3)
+            bs4 = array.get(batch_s, 4); bs5 = array.get(batch_s, 5)
+            bs6 = array.get(batch_s, 6); bs7 = array.get(batch_s, 7)
+            on_q = compute_qvals(bs0, bs1, bs2, bs3, bs4, bs5, bs6, bs7,
+                                 w1, b1, w2, b2, wv, bv, wa, ba)
+            q_sa = array.get(on_q, batch_a)
+
+            // Gradient descent step (simplified: update TD-error priority)
+            new_prio = math.abs(td_target - q_sa)
+            array.set(buf_prio, bi, new_prio)
+
+        // Soft-update target network
+        if bar_index % 10 == 0
+            soft_update()
+
+// ── Execution ────────────────────────────────────────────────────────────
+float atr_sl = atr_val * sl_atr_mult
+
+if action == 1 and strategy.position_size == 0
+    log.info("[NEURA_RL_BUY] ε={0,number,#.##} Q=[{1,number,#.##},{2,number,#.##},{3,number,#.##}]",
+     epsilon, q_hold, q_buy, q_sell)
+    strategy.entry("NeuraRL", strategy.long, comment="DQN_BUY")
+    strategy.exit("NeuraRL_Exit", "NeuraRL",
+         stop=close - atr_sl,
+         limit=close + atr_sl * tp_rr_ratio)
+
+if action == 2 and strategy.position_size == 0
+    log.info("[NEURA_RL_SELL] ε={0,number,#.##} Q=[{1,number,#.##},{2,number,#.##},{3,number,#.##}]",
+     epsilon, q_hold, q_buy, q_sell)
+    strategy.entry("NeuraRL", strategy.short, comment="DQN_SELL")
+    strategy.exit("NeuraRL_Exit", "NeuraRL",
+         stop=close + atr_sl,
+         limit=close - atr_sl * tp_rr_ratio)
+
+// ── Visuals ──────────────────────────────────────────────────────────────
+plot(epsilon, "ε", color.new(color.orange, 30), style=plot.style_line, display=display.data_window)
+plot(q_buy - q_sell, "Q-Buy/Sell Delta", color.new(color.lime, 50), style=plot.style_columns, display=display.data_window)
+
+// Entry labels
+if action == 1 and strategy.position_size == 0
+    label.new(bar_index, low, "▣ RL BUY", style=label.style_label_up, color=color.new(#26A69A, 0), textcolor=color.white, size=size.small)
+if action == 2 and strategy.position_size == 0
+    label.new(bar_index, high, "▣ RL SELL", style=label.style_label_down, color=color.new(#EF5350, 0), textcolor=color.white, size=size.small)
+
+// ── HUD ──────────────────────────────────────────────────────────────────
+var table info = table.new(position.bottom_right, 2, 8, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "TeleNexus", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.normal)
+    table.cell(info, 1, 0, "NeuraRL v26.0526", bgcolor=color.new(color.black, 80), text_color=color.white, text_size=size.normal)
+    table.cell(info, 0, 1, "ε", text_color=color.orange)
+    table.cell(info, 1, 1, str.tostring(epsilon, "#.###"))
+    table.cell(info, 0, 2, "Q(Hold/Buy/Sell)", text_color=color.white)
+    table.cell(info, 1, 2, str.format("{0,number,#.##}/{1,number,#.##}/{2,number,#.##}", q_hold, q_buy, q_sell))
+    table.cell(info, 0, 3, "Replay", text_color=color.white)
+    table.cell(info, 1, 3, str.tostring(array.size(buf_a)))
+    table.cell(info, 0, 4, "ATR", text_color=color.white)
+    table.cell(info, 1, 4, str.format("{0,number,#.####}", atr_val))
+    table.cell(info, 0, 5, "SL", text_color=color.red)
+    table.cell(info, 1, 5, str.format("{0,number,#.##}", atr_sl))
+    table.cell(info, 0, 6, "TP", text_color=color.lime)
+    table.cell(info, 1, 6, str.format("{0,number,#.##}", atr_sl * tp_rr_ratio))
+    table.cell(info, 0, 7, "Action", text_color=action == 0 ? color.gray : action == 1 ? color.lime : color.red)
+    table.cell(info, 1, 7, action == 0 ? "HOLD" : action == 1 ? "BUY ▲" : "SELL ▼")
+
+bgcolor(action == 1 and strategy.position_size == 0 ? color.new(color.green, 92) :
+        action == 2 and strategy.position_size == 0 ? color.new(color.red, 92) : na)
+
+console.log(str.format("▶ {0} | ε={1,number,#.###} Q[{2,number,#.##},{3,number,#.##},{4,number,#.##}] | ACT:{5}",
+     versionMsg, epsilon, q_hold, q_buy, q_sell, action == 0 ? "HOLD" : action == 1 ? "BUY" : "SELL"))

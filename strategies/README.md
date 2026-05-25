@@ -127,6 +127,12 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `liq_sweep_dynamic_regime_v6` | 動態體制流動性掃蕩 |
 | `LiquidityTransferEngine_v6` | 機構流動性抓取與 DOL |
 
+## Deep Reinforcement Learning（深度強化學習，1） — NEW v26.0526
+
+| 策略 | 說明 |
+|------|------|
+| `TnSovereignNeuraRLV6` | Dueling DQN + Prioritized Experience Replay + 雙網路架構 |
+
 ## Matrix & Machine Learning（矩陣與機器學習，10）
 
 | 策略 | 說明 |

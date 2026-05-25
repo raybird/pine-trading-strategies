@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 120 個已實體化主權策略，分 8 大類
+- **[`/strategies`](./strategies/README.md)** — 121 個已實體化主權策略，分 9 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -49,6 +49,7 @@
 | **Market Structure & Price Action** | 15 | SMC/ICT、波段結構、FVG、訂單塊 |
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
 | **Matrix & ML** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
+| **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Multi-Agent & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
 | **Core Library** | 1 | 主權邏輯庫 lib_sovereign_logic_v6 |
 | **Other / Utility** | 4 | 模板、特殊市場策略 |
