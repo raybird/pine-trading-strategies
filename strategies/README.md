@@ -1,6 +1,6 @@
 # Strategies Catalog
 
-TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分類（共 120 個策略 + 1 核心庫）。
+TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分類（共 121 個策略 + 1 核心庫）。
 
 ---
 
@@ -184,6 +184,12 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignAliceV6` | Alice 5 法台股策略 |
 | `EMA_Bars_v6` | EMA + 時間出場策略 |
 | `triple_confirmation_sovereign_v6` | 三重確認主權策略 |
+
+## DCA & Webhook（DCA 網格與 Webhook 橋接，1）
+
+| 策略 | 說明 |
+|------|------|
+| `TnSovereignDcaWebhookV6` | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 輸出（獵取自 ggamer5555） |
 
 ---
 

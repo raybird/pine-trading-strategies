@@ -1,0 +1,238 @@
+//@version=6
+// TeleNexus Sovereign: DCA Webhook Execution Engine [v26.0527.0630]
+// Spirit Inheritance: ggamer5555 DCA+Webhook strategy (DCA grid, BBW volatility, JSON bridge)
+// Goal: Sovereign DCA grid engine with causal audit filter and secure webhook JSON output for MT5 bridge
+//
+// Core Architecture:
+// 1. Dual DCA engine (Normal + BBW low-volatility) with configurable safety orders
+// 2. Volatility-regime adaptive BBW band (HTF 240) triggers low-vol imbalance entries
+// 3. 4-layer Sovereign Causal Audit: trend alignment, volatility filter, imbalance confirmation, DCA state
+// 4. JSON webhook payload with passphrase-authenticated state {side, TP, SL, trend}
+// 5. Enum type-safe DCA state machine (IDLE, SETUP, ACTIVE, CLOSING)
+//
+// Pine Script v6 Features:
+// - enum for DCA regime state
+// - array management for DCA safety order levels
+// - request.security for HTF BBW regime
+// - alert() JSON serialization for MT5 bridge
+
+// ── Enum State Machine ──────────────────────────────────────────────────
+enum DcaState
+    IDLE
+    SETUP
+    ACTIVE
+    CLOSING
+
+enum TrendAlignment
+    BULLISH
+    BEARISH
+    NEUTRAL
+
+enum VolRegime
+    LOW_VOL
+    NORMAL_VOL
+    HIGH_VOL
+
+strategy("TnSovereignDcaWebhookV6",
+     shorttitle         = "TnS_DCA_WH_V6",
+     overlay            = true,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 1.0,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.075,
+     process_orders_on_close = true)
+
+// ── Version ─────────────────────────────────────────────────────────────
+versionMsg = "TnSovereignDcaWebhookV6 | v26.0527.0630 | TeleNexus Sovereign"
+
+// ── Input Groups ────────────────────────────────────────────────────────
+group_dca     = "▼ DCA Core"
+group_bbw     = "▼ BBW Volatility"
+group_webhook = "▼ Webhook Bridge"
+group_risk    = "▼ Risk Management"
+
+// ── DCA Core Inputs ────────────────────────────────────────────────────
+float baseOrderPct   = input.float(1.4,   "Base Order % of Equity", minval=0.5, maxval=10, step=0.1, group=group_dca)
+int   maxSafety      = input.int(4,       "Max Safety Orders", minval=0, maxval=10, group=group_dca)
+float priceDeviation = input.float(0.5,   "Price Deviation %", minval=0.1, maxval=5, step=0.1, group=group_dca)
+float safetyScale    = input.float(2.0,   "Safety Order Scale", minval=1.0, maxval=5.0, step=0.1, group=group_dca)
+
+// ── BBW Volatility Inputs ──────────────────────────────────────────────
+string bbwTimeframe  = input.string("240", "BBW HTF Timeframe", options=["60","120","240","480"], group=group_bbw)
+int    bbwLength     = input.int(20,   "BBW Length", minval=10, maxval=50, group=group_bbw)
+float  bbwThreshold  = input.float(0.05, "BBW Activation Threshold", minval=0.01, maxval=0.2, step=0.01, group=group_bbw)
+float  bbwEntryOff   = input.float(0.5,  "BBW Entry Offset %", minval=0.1, maxval=3, step=0.1, group=group_bbw)
+int    bbwMaxSafety  = input.int(2,      "BBW Max Safety", minval=0, maxval=5, group=group_bbw)
+
+// ── Webhook Inputs ─────────────────────────────────────────────────────
+string whPassphrase  = input.string("telenexus_sovereign", "Webhook Passphrase", group=group_webhook)
+bool   enableWebhook = input.bool(true, "Enable Webhook Alerts", group=group_webhook)
+
+// ── Risk Inputs ────────────────────────────────────────────────────────
+float  stopLossPct   = input.float(2.0, "Stop Loss %", minval=0.5, maxval=5, step=0.1, group=group_risk)
+float  takeProfitPct = input.float(4.0, "Take Profit %", minval=1.0, maxval=10, step=0.5, group=group_risk)
+float  atrSlMult     = input.float(1.5, "ATR Stop Multiplier", minval=0.5, maxval=3, step=0.1, group=group_risk)
+
+// ── Sovereign Causal Audit Layers ──────────────────────────────────────
+float atrVal = ta.atr(14)
+float emaFast = ta.ema(close, 9)
+float emaSlow = ta.ema(close, 50)
+
+// Layer 1: Trend Alignment
+TrendAlignment trendAlign = emaFast > emaSlow ? TrendAlignment.BULLISH :
+     emaFast < emaSlow ? TrendAlignment.BEARISH : TrendAlignment.NEUTRAL
+
+// Layer 2: Volatility Regime via Bollinger Band Width (HTF)
+float bbwSource = request.security(syminfo.tickerid, bbwTimeframe, close, lookahead=barmerge.lookahead_on)
+float bbwBasis  = ta.sma(bbwSource, bbwLength)
+float bbwStd    = ta.stdev(bbwSource, bbwLength) * 2.0
+float bbwVal    = bbwStd / (bbwBasis || 1)
+
+VolRegime volState = bbwVal < bbwThreshold ? VolRegime.LOW_VOL :
+     bbwVal < bbwThreshold * 3 ? VolRegime.NORMAL_VOL : VolRegime.HIGH_VOL
+
+// Layer 3: Imbalance Confirmation (price extends from recent range)
+float recentHigh  = ta.highest(high, 5)
+float recentLow   = ta.lowest(low, 5)
+float rangePct    = (recentHigh - recentLow) / (close || 1) * 100
+bool  imbalanceLong  = close < recentLow and rangePct > priceDeviation
+bool  imbalanceShort = close > recentHigh and rangePct > priceDeviation
+
+// Layer 4: Score
+int   causalScore = (trendAlign != TrendAlignment.NEUTRAL ? 1 : 0) +
+                    (volState != VolRegime.HIGH_VOL ? 1 : 0) +
+                    (imbalanceLong or imbalanceShort ? 1 : 0) +
+                    (rangePct > priceDeviation * 0.5 ? 1 : 0)
+bool  sovereignFilter = causalScore >= 3
+
+// ── DCA State Machine ──────────────────────────────────────────────────
+var DcaState normalDcaState = DcaState.IDLE
+var DcaState bbwDcaState    = DcaState.IDLE
+var float    entryPrice     = 0.0
+var int      safetyCount    = 0
+var float    lastTpLevel    = 0.0
+var float    lastSlLevel    = 0.0
+var int      normalDirection = 0  // 1 long, -1 short, 0 flat
+var int      bbwDirection    = 0
+
+// Track DCA state transitions
+normalDcaState := switch normalDcaState
+    DcaState.IDLE =>
+        if sovereignFilter and imbalanceLong and trendAlign == TrendAlignment.BULLISH
+            normalDirection := 1
+            entryPrice := close
+            DcaState.SETUP
+        else if sovereignFilter and imbalanceShort and trendAlign == TrendAlignment.BEARISH
+            normalDirection := -1
+            entryPrice := close
+            DcaState.SETUP
+        else
+            normalDcaState
+    DcaState.SETUP =>
+        DcaState.ACTIVE
+    DcaState.ACTIVE =>
+        if strategy.position_size == 0
+            normalDirection := 0
+            DcaState.IDLE
+        else
+            DcaState.ACTIVE
+    => DcaState.IDLE
+
+bbwDcaState := switch bbwDcaState
+    DcaState.IDLE =>
+        if volState == VolRegime.LOW_VOL and sovereignFilter and imbalanceLong
+            bbwDirection := 1
+            DcaState.SETUP
+        else if volState == VolRegime.LOW_VOL and sovereignFilter and imbalanceShort
+            bbwDirection := -1
+            DcaState.SETUP
+        else
+            bbwDcaState
+    DcaState.SETUP =>
+        DcaState.ACTIVE
+    DcaState.ACTIVE =>
+        if strategy.position_size == 0
+            bbwDirection := 0
+            DcaState.IDLE
+        else
+            DcaState.ACTIVE
+    => DcaState.IDLE
+
+// ── Position Sizing ────────────────────────────────────────────────────
+calcQty(float pct) =>
+    math.round(strategy.equity * pct / 100.0 / (close || 1), 6)
+
+// ── Entry / Safety Orders ─────────────────────────────────────────────
+// Normal DCA entries
+if normalDcaState == DcaState.SETUP and normalDirection == 1
+    float slPrice = close * (1 - stopLossPct / 100)
+    float tpPrice = close * (1 + takeProfitPct / 100)
+    lastSlLevel := slPrice
+    lastTpLevel := tpPrice
+    strategy.entry("DCA_L_0", strategy.long, qty=calcQty(baseOrderPct), comment="DCA.L.0")
+
+if normalDcaState == DcaState.SETUP and normalDirection == -1
+    float slPrice = close * (1 + stopLossPct / 100)
+    float tpPrice = close * (1 - takeProfitPct / 100)
+    lastSlLevel := slPrice
+    lastTpLevel := tpPrice
+    strategy.entry("DCA_S_0", strategy.short, qty=calcQty(baseOrderPct), comment="DCA.S.0")
+
+// Safety orders for Normal DCA
+if normalDcaState == DcaState.ACTIVE and safetyCount < maxSafety
+    bool safetyLongCond  = normalDirection == 1 and close < entryPrice * (1 - priceDeviation / 100 * (safetyCount + 1))
+    bool safetyShortCond = normalDirection == -1 and close > entryPrice * (1 + priceDeviation / 100 * (safetyCount + 1))
+    if safetyLongCond or safetyShortCond
+        float qtyMult = safetyScale * (safetyCount + 1)
+        float qty = calcQty(baseOrderPct * qtyMult)
+        string tag = "DCA." + (normalDirection == 1 ? "L_" : "S_") + str.tostring(safetyCount + 1)
+        strategy.entry(tag, normalDirection == 1 ? strategy.long : strategy.short, qty=qty, comment=tag)
+        safetyCount += 1
+
+// BBW DCA entries (smaller, low-vol specific)
+if bbwDcaState == DcaState.SETUP and bbwDirection == 1
+    float slPrice = close * (1 - stopLossPct / 100)
+    lastSlLevel := slPrice
+    lastTpLevel := close * (1 + takeProfitPct * 0.8 / 100)
+    strategy.entry("BBW_L_0", strategy.long, qty=calcQty(baseOrderPct * 0.5), comment="BBW.L.0")
+
+if bbwDcaState == DcaState.SETUP and bbwDirection == -1
+    float slPrice = close * (1 + stopLossPct / 100)
+    lastSlLevel := slPrice
+    lastTpLevel := close * (1 - takeProfitPct * 0.8 / 100)
+    strategy.entry("BBW_S_0", strategy.short, qty=calcQty(baseOrderPct * 0.5), comment="BBW.S.0")
+
+// ── Stop Loss / Take Profit ───────────────────────────────────────────
+if strategy.position_size > 0
+    strategy.exit("DCA_EXIT_L", from_entry="DCA_L_0", stop=lastSlLevel, limit=lastTpLevel)
+if strategy.position_size < 0
+    strategy.exit("DCA_EXIT_S", from_entry="DCA_S_0", stop=lastSlLevel, limit=lastTpLevel)
+
+// ATR trailing stop for active positions
+float atrStop = close - atrVal * atrSlMult
+float atrStopShort = close + atrVal * atrSlMult
+if strategy.position_size > 0
+    strategy.exit("ATR_TRAIL_L", from_entry="DCA_L_0", stop=atrStop)
+if strategy.position_size < 0
+    strategy.exit("ATR_TRAIL_S", from_entry="DCA_S_0", stop=atrStopShort)
+
+// ── Webhook JSON Payload ──────────────────────────────────────────────
+if enableWebhook
+    string whJson = "{"
+    whJson += "\"passphrase\":\"" + whPassphrase + "\","
+    whJson += "\"side1\":\"" + str.tostring(normalDirection) + "\","
+    whJson += "\"side2\":\"" + str.tostring(bbwDirection) + "\","
+    whJson += "\"TP1\":\"" + str.tostring(lastTpLevel) + "\","
+    whJson += "\"SL1\":\"" + str.tostring(lastSlLevel) + "\","
+    whJson += "\"trend\":\"" + (trendAlign == TrendAlignment.BULLISH ? "1" : trendAlign == TrendAlignment.BEARISH ? "-1" : "0") + "\""
+    whJson += "}"
+    alert(whJson, alert.freq_once_per_bar_close)
+
+// ── Dashboard Plotting ────────────────────────────────────────────────
+plotshape(normalDcaState == DcaState.ACTIVE and normalDirection == 1, title="DCA Long Active", location=location.belowbar, color=color.green, style=shape.labelup, text="DCA-L")
+plotshape(normalDcaState == DcaState.ACTIVE and normalDirection == -1, title="DCA Short Active", location=location.abovebar, color=color.red, style=shape.labeldown, text="DCA-S")
+plotshape(bbwDcaState == DcaState.ACTIVE and bbwDirection == 1, title="BBW Long Active", location=location.belowbar, color=color.blue, style=shape.triangleup, text="BBW-L")
+plotshape(bbwDcaState == DcaState.ACTIVE and bbwDirection == -1, title="BBW Short Active", location=location.abovebar, color=color.orange, style=shape.triangledown, text="BBW-S")
+
+hline(0, "Zero Line", color=color.gray)

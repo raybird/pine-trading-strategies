@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 121 個已實體化主權策略，分 9 大類
+- **[`/strategies`](./strategies/README.md)** — 122 個已實體化主權策略，分 10 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -50,11 +50,14 @@
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
 | **Matrix & ML** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
+| **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
 | **Multi-Agent & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
 | **Core Library** | 1 | 主權邏輯庫 lib_sovereign_logic_v6 |
 | **Other / Utility** | 4 | 模板、特殊市場策略 |
 | **ICT / SMC 專項（跨類別強化）** | 16 | 跨分類的 ICT/SMC 實作（已計入上述分類） |
 
+> **最新加入（v26.0527.0630）**: `TnSovereignDcaWebhookV6` — DCA 網格 + BBW 波動率引擎 + JSON Webhook 輸出（獵取自 ggamer5555）
+>
 > 各策略詳細說明請見 [`/strategies/README.md`](./strategies/README.md)
 
 ---
