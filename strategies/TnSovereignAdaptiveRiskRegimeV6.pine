@@ -1,0 +1,125 @@
+//@version=6
+strategy('TeleNexus Sovereign Adaptive Risk Regime V6', 'Tn Sovereign AdapRisk',
+  overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=10, commission_type=strategy.commission.percent,
+  commission_value=0.03)
+
+// ───── VERSION CONTROL ────────────────────────────────────────────────
+// Version   : v25.0525.1830
+// Author    : TeleNexus Studio (forked from PineGen-AI Adaptive Risk Regime)
+// Timestamp : 2026-05-25 18:30 CST
+// Upgrade   : Added causal regime state machine, dynamic SL/TP band,
+//             sovereign audit tracking, multi-lookback volatility confirmation
+// ───────────────────────────────────────────────────────────────────────
+
+// ───── CORE: VOLATILITY REGIME DETECTION ─────
+atrLen1    = input.int(14,'ATR Fast Len',group='Regime')
+atrLen2    = input.int(28,'ATR Slow Len',group='Regime')
+volLookback= input.int(50,'Vol Lookback',group='Regime')
+rangeLen   = input.int(20,'Range Len',group='Regime')
+rr         = input.float(2.0,'Risk:Reward',group='Risk')
+atrStopMult= input.float(1.5,'ATR Stop Mult',group='Risk')
+
+atrFast = ta.atr(atrLen1)
+atrSlow = ta.atr(atrLen2)
+atrAvg  = ta.sma(atrFast,volLookback)
+
+// ───── SOVEREIGN REGIME STATE MACHINE ─────
+// State: 0=extremeLow, 1=low, 2=med, 3=high, 4=extremeHigh
+var int regimeState = 1
+float atrRatio  = atrFast/atrAvg
+float atrSlope  = atrFast - atrFast[5]
+
+regimeState := atrRatio<0.6?0: atrRatio<0.85?1: atrRatio<1.15?2: atrRatio<1.5?3: 4
+
+regimeLabel = regimeState==0?'Extreme Low':
+  regimeState==1?'Low': regimeState==2?'Medium':
+  regimeState==3?'High':'Extreme High'
+
+highVol = regimeState>=3
+lowVol  = regimeState<=1
+
+// ───── DYNAMIC MULTI-LOOKBACK RANGE ─────
+rangeHigh = ta.highest(high,rangeLen)
+rangeLow  = ta.lowest(low,rangeLen)
+
+// ───── SOVEREIGN CROSS DETECTION ─────
+crossUp   = ta.crossover(close,rangeHigh[1])
+crossDown = ta.crossunder(close,rangeLow[1])
+
+// ───── SOVEREIGN CAUSAL FILTERS ─────
+// Multi-timeframe volatility confirmation
+volTrend = atrSlope>0 and atrFast>atrSlow
+
+// ───── ENTRY LOGIC ─────
+// Low volatility → mean reversion (with sovereign confirmation)
+longMR  = lowVol and close<rangeLow[1] and rsi(close,14)<35
+shortMR = lowVol and close>rangeHigh[1] and rsi(close,14)>65
+
+// High volatility → breakout (with trend confirmation)
+longBO  = highVol and crossUp and volTrend
+shortBO = highVol and crossDown and not volTrend
+
+// Medium volatility → hybrid (either direction with ATR filter)
+medLong  = regimeState==2 and crossUp and atrRatio>1.0
+medShort = regimeState==2 and crossDown and atrRatio<1.0
+
+longCondition  = longMR or longBO or medLong
+shortCondition = shortMR or shortBO or medShort
+
+// ───── SOVEREIGN AUDIT TRAIL ─────
+var float auditEntry   = na
+var int   auditBar     = na
+var int   auditRegime  = -1
+var string auditReason = ''
+
+if longCondition and strategy.position_size==0
+  auditEntry:=close; auditBar:=bar_index; auditRegime:=regimeState
+  auditReason:=longMR?'MR Long': longBO?'BO Long':'Hybrid Long'
+  strategy.entry('Long',strategy.long)
+
+if shortCondition and strategy.position_size==0
+  auditEntry:=close; auditBar:=bar_index; auditRegime:=regimeState
+  auditReason:=shortMR?'MR Short': shortBO?'BO Short':'Hybrid Short'
+  strategy.entry('Short',strategy.short)
+
+// ───── DYNAMIC RISK MANAGEMENT ─────
+// State-dependent SL/TP bands
+slBand = regimeState==0?atrFast*0.8:
+  regimeState==1?atrFast*1.0:
+  regimeState==2?atrFast*1.2:
+  regimeState==3?atrFast*1.5: atrFast*2.0
+
+tpBand = slBand*rr
+
+if strategy.position_size>0
+  strategy.exit('Long X','Long',
+    stop=strategy.position_avg_price-slBand,
+    limit=strategy.position_avg_price+tpBand)
+
+if strategy.position_size<0
+  strategy.exit('Short X','Short',
+    stop=strategy.position_avg_price+slBand,
+    limit=strategy.position_avg_price-tpBand)
+
+// ───── VISUALIZATION ─────
+plot(rangeHigh,'Range High',color=color.green)
+plot(rangeLow,'Range Low',color=color.red)
+hline(atrAvg,'ATR Avg',color=color.gray,linestyle=hline.style_dashed)
+
+var table t = table.new(position.bottom_right,2,5,border_width=1)
+if barstate.islast
+  table.cell(t,0,0,'Regime: '+regimeLabel,text_color=color.white,
+    bgcolor=regimeState>=3?#F44336: regimeState<=1?#4CAF50:#FF9800,text_size=size.large)
+  table.merge_cells(t,0,0,1,0)
+  table.cell(t,0,1,'Net',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,1,str.tostring(strategy.netprofit,'#.##'),
+    text_color=strategy.netprofit>=0?#00ff88:#ff3366)
+  table.cell(t,0,2,'ATR Ratio',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,2,str.tostring(atrRatio,'#.##'),text_color=color.white)
+  table.cell(t,0,3,'Trades',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,3,str.tostring(strategy.closedtrades),text_color=color.white)
+  table.cell(t,0,4,'WR',text_color=color.white,bgcolor=color.new(color.gray,80))
+  wr=strategy.closedtrades>0?strategy.wintrades/strategy.closedtrades*100:0
+  table.cell(t,1,4,str.tostring(wr,'#.#')+'%',
+    text_color=wr>=50?#00ff88:#ff3366)

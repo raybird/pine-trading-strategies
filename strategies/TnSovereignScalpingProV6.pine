@@ -1,0 +1,218 @@
+//@version=6
+strategy('TeleNexus Sovereign Scalping Pro V6', 'Tn Sovereign Scalping Pro',
+  overlay=true, max_lines_count=500, max_labels_count=500, pyramiding=3,
+  calc_on_every_tick=true, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=15, initial_capital=100000,
+  commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ───── VERSION CONTROL ────────────────────────────────────────────────
+// Version   : v25.0525.1830
+// Author    : TeleNexus Studio (forked from KEBOSLABS Scalping Pro v3)
+// Timestamp : 2026-05-25 18:30 CST
+// Core      : Sovereign causal audit + 4-mode risk scaling
+// ───────────────────────────────────────────────────────────────────────
+
+// ───── MODE SELECTOR ─────
+mode = input.string('Balanced', 'Sovereign Mode',
+  options=['Conservative','Balanced','Aggressive','ULTRA','Custom'],
+  group='═══ SOVEREIGN MODE ═══')
+
+modePosSize   = mode=='Conservative'?10: mode=='Balanced'?15: mode=='Aggressive'?20: mode=='ULTRA'?30: 15
+modePyramid   = mode=='Conservative'?2: mode=='Balanced'?3: mode=='Aggressive'?4: mode=='ULTRA'?7: 3
+modeSL        = mode=='Conservative'?1.5: mode=='Balanced'?1.0: mode=='Aggressive'?0.8: mode=='ULTRA'?0.5: 1.0
+modeTP        = mode=='Conservative'?4.5: mode=='Balanced'?4.0: mode=='Aggressive'?3.5: mode=='ULTRA'?2.5: 4.0
+modeChochLen  = mode=='Conservative'?60: mode=='Balanced'?50: mode=='Aggressive'?40: mode=='ULTRA'?28: 50
+modeIdmLen    = mode=='Conservative'?12: mode=='Balanced'?10: mode=='Aggressive'?8: mode=='ULTRA'?4: 10
+modeRsiLow    = mode=='Conservative'?30: mode=='Balanced'?25: mode=='Aggressive'?22: mode=='ULTRA'?15: 25
+modeRsiHigh   = mode=='Conservative'?70: mode=='Balanced'?75: mode=='Aggressive'?78: mode=='ULTRA'?85: 75
+modeVolMult   = mode=='Conservative'?1.5: mode=='Balanced'?1.3: mode=='Aggressive'?1.1: mode=='ULTRA'?0.8: 1.3
+modeTrendEma  = mode=='Conservative'?50: mode=='Balanced'?40: mode=='Aggressive'?35: mode=='ULTRA'?25: 40
+modeAtrMin    = mode=='Conservative'?0.5: mode=='Balanced'?0.4: mode=='Aggressive'?0.3: mode=='ULTRA'?0.1: 0.4
+modeAtrMax    = mode=='Conservative'?4.0: mode=='Balanced'?5.0: mode=='Aggressive'?6.0: mode=='ULTRA'?10.0: 5.0
+modeTrail     = mode=='Conservative'?0.5: mode=='Balanced'?0.4: mode=='Aggressive'?0.35: mode=='ULTRA'?0.3: 0.4
+modeBE        = mode=='Conservative'?1.0: mode=='Balanced'?0.8: mode=='Aggressive'?0.7: mode=='ULTRA'?0.6: 0.8
+
+// ───── TIMEFRAME SCALING ─────
+tfMin     = timeframe.in_seconds()/60
+tfScale   = tfMin<=15?0.4: tfMin<=30?0.5: tfMin<=60?0.7: tfMin<=240?1.0: 1.5
+chochLen  = mode=='Custom'?input.int(50,'CHoCH Period',group='Structure'): modeChochLen
+idmLen    = mode=='Custom'?input.int(10,'IDM Period',group='Structure'): modeIdmLen
+adjChoch  = int(chochLen*tfScale)
+adjIdm    = int(idmLen*tfScale)
+
+// ───── SWING DETECTION ─────
+n=bar_index
+swings(len)=>
+  var os=0; var int tx=na; var int bx=na
+  u=ta.highest(len); l=ta.lowest(len)
+  os:=high[len]>u?0: low[len]<l?1: os[1]
+  top=os==0 and os[1]!=0?high[len]: na
+  tx:=os==0 and os[1]!=0?n[len]: tx
+  btm=os==1 and os[1]!=1?low[len]: na
+  bx:=os==1 and os[1]!=1?n[len]: bx
+  [top,tx,btm,bx]
+
+[top,topx,btm,btmx]=swings(adjChoch)
+[stop,stopx,sbtm,sbtmx]=swings(adjIdm)
+
+var os=0; var tc=false; var bc=false; var stc=false; var sbc=false
+var float max=na; var float min=na; var int mxx=na; var int mnx=na
+var float topy=na; var float btmy=na
+
+if not na(top); topy:=top; tc:=false
+if not na(btm); btmy:=btm; bc:=false
+if close>topy and not tc; os:=1; tc:=true
+if close<btmy and not bc; os:=0; bc:=true
+
+var bool bullChoch=false; var bool bearChoch=false
+var bool bosBull=false; var bool bosBear=false
+var bool idmBull=false; var bool idmBear=false
+
+if os!=os[1]
+  max:=high; min:=low; mxx:=n; mnx:=n; stc:=false; sbc:=false
+  if os==1; bullChoch:=true; bearChoch:=false
+  else; bearChoch:=true; bullChoch:=false
+else; bullChoch:=false; bearChoch:=false
+
+stopy=fixnan(stop); sbtmy=fixnan(sbtm)
+
+if low<sbtmy and not sbc and os==1 and sbtmy!=btmy; sbc:=true; idmBull:=true; else idmBull:=false
+if close>max and sbc and os==1; bosBull:=true; sbc:=false; else bosBull:=false
+if high>stopy and not stc and os==0 and stopy!=topy; stc:=true; idmBear:=true; else idmBear:=false
+if close<min and stc and os==0; bosBear:=true; stc:=false; else bosBear:=false
+
+max:=math.max(high,max); min:=math.min(low,min)
+if max>max[1]; mxx:=n
+if min<min[1]; mnx:=n
+
+// ───── SOVEREIGN FILTERS ─────
+rsiLen  = input.int(14,'RSI Length',group='Filters')
+rsiLow  = mode=='Custom'?input.int(25,'RSI Low',group='Filters'): modeRsiLow
+rsiHigh = mode=='Custom'?input.int(75,'RSI High',group='Filters'): modeRsiHigh
+rsi     = ta.rsi(close,rsiLen)
+rsiOk   = rsi>rsiLow and rsi<rsiHigh
+
+volLen = input.int(20,'Vol SMA',group='Filters')
+volMult= mode=='Custom'?input.float(1.3,'Vol Mult',group='Filters'): modeVolMult
+volSma = ta.sma(volume,volLen)
+volOk  = volume>volSma*volMult
+
+emaLen = mode=='Custom'?input.int(40,'Trend EMA',group='Filters'): modeTrendEma
+ema    = ta.ema(close,emaLen)
+emaOkL = close>ema; emaOkS = close<ema
+
+atrLen  = input.int(14,'ATR Length',group='Risk')
+atr     = ta.atr(atrLen)
+atrPct  = atr/close*100
+atrMinV = mode=='Custom'?input.float(0.4,'ATR Min %',group='Risk'): modeAtrMin
+atrMaxV = mode=='Custom'?input.float(5.0,'ATR Max %',group='Risk'): modeAtrMax
+atrOk   = atrPct>=atrMinV and atrPct<=atrMaxV
+
+momBars = input.int(3,'Mom Bars',group='Filters')
+momOkL  = true; momOkS = true
+for i=0 to momBars-1
+  momOkL := momOkL and close>close[i+1]
+  momOkS := momOkS and close<close[i+1]
+
+hr  = hour(time,'UTC')
+sHr = mode=='Custom'?input.int(1,'Session Start',group='Filters'): mode=='Conservative'?2:1
+eHr = input.int(23,'Session End',group='Filters')
+tmOk = hr>=sHr and hr<eHr
+
+// ───── SOVEREIGN AUDIT: CAUSAL STATE ─────
+var float auditEntryPrice = na
+var int   auditEntryBar    = na
+var string auditMode       = ''
+
+// ───── VOLATILITY REGIME ADAPTATION ─────
+volRegime = atrPct<1.0?'low': atrPct<2.5?'med':'high'
+slMult = volRegime=='low'?modeSL*0.75: volRegime=='med'?modeSL: modeSL*1.3
+tpMult = volRegime=='low'?modeTP*1.25: volRegime=='med'?modeTP: modeTP*0.8
+
+// ───── TREND STRENGTH ─────
+trendStr = math.abs(close-ema)/atr
+strOk    = trendStr>=1.5
+
+// ───── SIGNAL CONFLUENCE ─────
+useBos   = input.bool(true,'Trade BOS',group='Signals')
+useChoch = input.bool(true,'Trade CHoCH',group='Signals')
+useIdm   = input.bool(true,'Trade IDM',group='Signals')
+
+structBull = useBos and bosBull or useChoch and bullChoch or useIdm and idmBull
+structBear = useBos and bosBear or useChoch and bearChoch or useIdm and idmBear
+momBull    = close>open and momOkL
+momBear    = close<open and momOkS
+
+longOk  = (structBull or momBull) and os==1 and rsiOk and emaOkL and atrOk and tmOk and volOk and strOk
+shortOk = (structBear or momBear) and os==0 and rsiOk and emaOkS and atrOk and tmOk and volOk and strOk
+
+// ───── ENTRIES ─────
+pyramidDist = input.float(2.0,'Pyramid ATR Dist',group='Risk')
+
+if longOk and strategy.position_size==0
+  auditEntryPrice := close; auditEntryBar := bar_index; auditMode := 'Long'
+  strategy.entry('Long',strategy.long)
+
+if shortOk and strategy.position_size==0
+  auditEntryPrice := close; auditEntryBar := bar_index; auditMode := 'Short'
+  strategy.entry('Short',strategy.short)
+
+// ───── PYRAMIDING ─────
+usePyr = input.bool(true,'Enable Pyramiding',group='Risk')
+if usePyr and strategy.position_size>0 and close>strategy.position_avg_price+atr*pyramidDist and volOk and structBull
+  strategy.entry('Long+',strategy.long)
+if usePyr and strategy.position_size<0 and close<strategy.position_avg_price-atr*pyramidDist and volOk and structBear
+  strategy.entry('Short+',strategy.short)
+
+// ───── EXITS ─────
+useTrail = input.bool(true,'Trailing Stop',group='Risk')
+trailMult= mode=='Custom'?input.float(0.4,'Trail ATR',group='Risk'): modeTrail
+useBE    = input.bool(true,'Breakeven',group='Risk')
+beMult   = mode=='Custom'?input.float(0.8,'BE ATR',group='Risk'): modeBE
+
+if useBE and strategy.position_size>0 and close>=strategy.position_avg_price+atr*beMult
+  strategy.exit('Long BE','Long',stop=strategy.position_avg_price+0.01,
+    limit=strategy.position_avg_price+atr*tpMult)
+if useBE and strategy.position_size<0 and close<=strategy.position_avg_price-atr*beMult
+  strategy.exit('Short BE','Short',stop=strategy.position_avg_price-0.01,
+    limit=strategy.position_avg_price-atr*tpMult)
+
+if strategy.position_size>0
+  sl = close-atr*slMult; tp = close+atr*tpMult
+  if useTrail; strategy.exit('Long X','Long',stop=sl,limit=tp,trail_offset=atr*trailMult)
+  else; strategy.exit('Long X','Long',stop=sl,limit=tp)
+
+if strategy.position_size<0
+  sl = close+atr*slMult; tp = close-atr*tpMult
+  if useTrail; strategy.exit('Short X','Short',stop=sl,limit=tp,trail_offset=atr*trailMult)
+  else; strategy.exit('Short X','Short',stop=sl,limit=tp)
+
+// ───── MOMENTUM REVERSAL EXIT ─────
+momRevLong  = strategy.position_size>0 and close<close[1] and close[1]<close[2] and close<ema and volume>volSma*1.5
+momRevShort = strategy.position_size<0 and close>close[1] and close[1]>close[2] and close>ema and volume>volSma*1.5
+if momRevLong; strategy.close('Long','Rev Exit')
+if momRevShort; strategy.close('Short','Rev Exit')
+
+// ───── TARGET TABLE ─────
+var table t = table.new(position.bottom_right,2,7,border_width=1)
+if barstate.islast
+  mClr = mode=='Conservative'?#4CAF50: mode=='Balanced'?#2196F3: mode=='Aggressive'?#FF9800: mode=='ULTRA'?#F44336:#9C27B0
+  table.cell(t,0,0,mode+' MODE',text_color=color.white,bgcolor=mClr,text_size=size.large); table.merge_cells(t,0,0,1,0)
+  table.cell(t,0,1,'Net Profit',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,1,str.tostring(strategy.netprofit,'#.##'),text_color=strategy.netprofit>=0?#00ff88:#ff3366)
+  table.cell(t,0,2,'Trades',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,2,str.tostring(strategy.closedtrades))
+  wr = strategy.closedtrades>0?strategy.wintrades/strategy.closedtrades*100:0
+  table.cell(t,0,3,'Win Rate',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,3,str.tostring(wr,'#.#')+'%',text_color=wr>=50?#00ff88:#ff3366)
+  pf = strategy.grossprofit/math.max(strategy.grossloss,1)
+  table.cell(t,0,4,'PF',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,4,str.tostring(pf,'#.##'),text_color=pf>=2?#00ff88: color.yellow)
+  table.cell(t,0,5,'Max DD',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,5,str.tostring(strategy.max_drawdown,'#.##')+'%',text_color=#ff3366)
+  table.cell(t,0,6,'Regime',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,6,volRegime,text_color=color.white)
+
+// ───── VISUALS ─────
+plot(ema,'Trend EMA',color=color.new(color.orange,30),linewidth=2)
+bgcolor(os==1?color.new(#00ff88,97):color.new(#ff3366,97),title='Bias')

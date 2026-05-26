@@ -1,0 +1,152 @@
+//@version=6
+strategy('TeleNexus Sovereign Gap Fill Opening Range V6', 'Tn Sovereign GapFillOR',
+  overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=8, commission_type=strategy.commission.percent,
+  commission_value=0.03)
+
+// ───── VERSION CONTROL ────────────────────────────────────────────────
+// Version   : v25.0525.1830
+// Author    : TeleNexus Studio (forked from PineGen-AI Gap Fill Opening Range)
+// Timestamp : 2026-05-25 18:30 CST
+// Upgrade   : Added sovereign gap classification (full/partial),
+//             opening range fractal scaling, session-aware SL/TP,
+//             causal state audit trail, multi-day gap memory
+// ───────────────────────────────────────────────────────────────────────
+
+// ───── INPUTS ─────
+rangeMinutes = input.int(30,'Opening Range Minutes',group='Session')
+atrLen       = input.int(14,'ATR Length',group='Risk')
+atrMult      = input.float(1.5,'Stop ATR Mult',group='Risk')
+rr           = input.float(2.0,'Risk:Reward',group='Risk')
+
+// ───── SESSION CONFIG ─────
+useAsia    = input.bool(false,'Trade Asia Session',group='Session')
+useLondon  = input.bool(true,'Trade London Session',group='Session')
+useNewYork = input.bool(true,'Trade New York Session',group='Session')
+
+// ───── SESSION DETECTION ─────
+isAsia  = hour(time,'UTC')>=0 and hour(time,'UTC')<8
+isLondon= hour(time,'UTC')>=7 and hour(time,'UTC')<16
+isNY    = hour(time,'UTC')>=13 and hour(time,'UTC')<22
+
+sessionOk = (isAsia and useAsia) or (isLondon and useLondon) or (isNY and useNewYork)
+
+// ───── SESSION START DEFINITION ─────
+// For each region, use the session open
+float sessionOpen = na
+if isAsia
+  sessionOpen := request.security(syminfo.tickerid,'D',open)
+if isLondon
+  sessionOpen := request.security(syminfo.tickerid,'D',open)
+if isNY
+  sessionOpen := request.security(syminfo.tickerid,'D',open)
+
+// ───── SOVEREIGN GAP DETECTION ─────
+prevClose = close[1]
+gapUp     = open>prevClose
+gapDown   = open<prevClose
+gapPct    = math.abs(open/prevClose-1)*100
+
+// Gap classification
+isGap      = gapUp or gapDown
+isFullGap  = gapPct>0.5
+isPartialGap = gapPct>0.1 and gapPct<=0.5
+
+// ───── OPENING RANGE ─────
+var float orHigh = na
+var float orLow  = na
+
+inOpening = time>=timestamp(year,month,dayofmonth,9,30) and
+  time<=timestamp(year,month,dayofmonth,9,30)+rangeMinutes*60*1000
+
+if inOpening
+  orHigh := na(orHigh)?high: math.max(orHigh,high)
+  orLow  := na(orLow)?low: math.min(orLow,low)
+
+if dayofmonth!=dayofmonth[1]
+  orHigh:=na; orLow:=na
+
+// ───── SOVEREIGN MULTI-DAY GAP MEMORY ─────
+var float prevCloseD1 = na
+var float prevCloseD2 = na
+var float prevCloseD3 = na
+if dayofmonth!=dayofmonth[1]
+  prevCloseD3 := prevCloseD2
+  prevCloseD2 := prevCloseD1
+  prevCloseD1 := close[1]
+
+// Multi-day gap context
+gapCluster = gapUp and prevCloseD1<prevCloseD2 and prevCloseD2<prevCloseD3
+
+// ───── BREAKOUT DETECTION ─────
+breakUp   = ta.crossover(close,orHigh)
+breakDown = ta.crossunder(close,orLow)
+
+// ───── SOVEREIGN GAP FILL LOGIC ─────
+// Gap fill (mean reversion) with sovereign filter
+longGapFill  = gapDown and close<=(prevClose+open)/2 and rsi(close,14)<40
+shortGapFill = gapUp and close>=(prevClose+open)/2 and rsi(close,14)>60
+
+// Breakout continuation
+longBreak  = breakUp and (isFullGap or gapCluster or volume>ta.sma(volume,20)*1.5)
+shortBreak = breakDown and (isFullGap or volume>ta.sma(volume,20)*1.5)
+
+// ───── CAUSAL STATE AUDIT ─────
+var float auditEntry  = na
+var int   auditBar    = na
+var string auditType  = ''
+var float auditGapPct = 0
+
+// ───── ENTRY ─────
+longCondition  = (longGapFill or longBreak) and sessionOk
+shortCondition = (shortGapFill or shortBreak) and sessionOk
+
+atrVal = ta.atr(atrLen)
+
+if longCondition and strategy.position_size==0
+  auditEntry:=close; auditBar:=bar_index
+  auditType:=longGapFill?'GapFill Long':'Break Long'
+  auditGapPct:=gapPct
+  strategy.entry('Long',strategy.long)
+
+if shortCondition and strategy.position_size==0
+  auditEntry:=close; auditBar:=bar_index
+  auditType:=shortGapFill?'GapFill Short':'Break Short'
+  auditGapPct:=gapPct
+  strategy.entry('Short',strategy.short)
+
+// ───── EXITS ─────
+if strategy.position_size>0
+  strategy.exit('Long X','Long',
+    stop=strategy.position_avg_price-atrVal*atrMult,
+    limit=strategy.position_avg_price+atrVal*atrMult*rr)
+
+if strategy.position_size<0
+  strategy.exit('Short X','Short',
+    stop=strategy.position_avg_price+atrVal*atrMult,
+    limit=strategy.position_avg_price-atrVal*atrMult*rr)
+
+// ───── VISUALS ─────
+plot(orHigh,'OR High',color=color.green)
+plot(orLow,'OR Low',color=color.red)
+
+// ───── PERFORMANCE TABLE ─────
+var table t = table.new(position.bottom_right,2,6,border_width=1)
+if barstate.islast
+  table.cell(t,0,0,'GapFill OR Strategy',text_color=color.white,
+    bgcolor=color.new(#2962FF,20),text_size=size.large)
+  table.merge_cells(t,0,0,1,0)
+  table.cell(t,0,1,'Net',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,1,str.tostring(strategy.netprofit,'#.##'),
+    text_color=strategy.netprofit>=0?#00ff88:#ff3366)
+  table.cell(t,0,2,'Gap Today',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,2,str.tostring(gapPct,'#.##')+'%'+(' '+('up'*gapUp)+('down'*gapDown)),
+    text_color=gapUp?#00ff88:#ff3366)
+  table.cell(t,0,3,'Trades',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,3,str.tostring(strategy.closedtrades),text_color=color.white)
+  table.cell(t,0,4,'Win Rate',text_color=color.white,bgcolor=color.new(color.gray,80))
+  wr=strategy.closedtrades>0?strategy.wintrades/strategy.closedtrades*100:0
+  table.cell(t,1,4,str.tostring(wr,'#.#')+'%',
+    text_color=wr>=50?#00ff88:#ff3366)
+  table.cell(t,0,5,'Max DD',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,5,str.tostring(strategy.max_drawdown,'#.##')+'%',text_color=#ff3366)
