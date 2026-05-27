@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 122 個已實體化主權策略，分 10 大類
+- **[`/strategies`](./strategies/README.md)** — 134 個已實體化主權策略，分 10 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,7 +56,9 @@
 | **Other / Utility** | 4 | 模板、特殊市場策略 |
 | **ICT / SMC 專項（跨類別強化）** | 16 | 跨分類的 ICT/SMC 實作（已計入上述分類） |
 
-> **最新加入（v26.0527.0630）**: `TnSovereignDcaWebhookV6` — DCA 網格 + BBW 波動率引擎 + JSON Webhook 輸出（獵取自 ggamer5555）
+> **最新加入（v26.0527.1830）**: `swarm_modular_executor_v6` — TeleNexus 蜂群聯邦共識引擎（4 元蜂群 + 民主投票 + 三級規訓）
+>
+> **上版（v26.0527.0630）**: `TnSovereignDcaWebhookV6` — DCA 網格 + BBW 波動率引擎 + JSON Webhook 輸出
 >
 > 各策略詳細說明請見 [`/strategies/README.md`](./strategies/README.md)
 

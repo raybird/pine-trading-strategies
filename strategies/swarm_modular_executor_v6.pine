@@ -1,34 +1,192 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TeleNexus Sovereign AI — 蜂群聯邦共識執行器 v6
 //@version=6
-// @description: TeleNexus 蜂群模組化執行器 - v6 核心實作
-// @author: TeleNexus AI
-// @strategy: 透過導入 TNSovereignLib 實現「邏輯與執行」的主權解耦，支援動態規訓切換。
 
-strategy("TN Swarm Modular Executor v6", overlay = true, initial_capital = 10000)
+// ──────────────────────────────────────────
+// TeleNexus Swarm Modular Executor v6
+//  聯邦蜂群共識引擎 + 主權多策略集成
+// ──────────────────────────────────────────
 
-// 1. 導入本地主權庫 (此處路徑為模擬實際發布後的調用)
-// 註：在 TradingView 中需先發布 Library 並獲取 ID
-import TeleNexus/TNSovereignLib/1 as core
+indicator("TN Swarm Modular Executor v6", overlay = true, format = format.price, precision = 2)
 
-// 2. 利用庫中導出的 Enum 建立 UI
-core.ExecutionRegime regime = input.enum(core.ExecutionRegime.Balanced, "蜂群規訓等級")
-int signalLen = input.int(14, "動能深度")
-float riskMult = input.float(2.0, "主權停損倍數")
+// ──── 列舉：蜂群成員策略 ────
+enum SwarmMember
+    MemberMomentum       = "動能突襲者"
+    MemberMeanReversion  = "均值狙擊手"
+    MemberBreakout       = "突破獵手"
+    MemberVolatility     = "波動收割者"
 
-// 3. 調用模組化邏輯
-core.SignalPayload alpha = core.get_momentum_signal(signalLen)
-float stopGap = core.calc_dynamic_stop(riskMult)
+// ──── 列舉：共識等級 ────
+enum ConsensusGrade
+    Unanimous     = "全體一致"
+    SuperMajority = "絕對多數"
+    SimpleMajority= "簡單多數"
+    Minority      = "少數異見"
+    NoConsensus   = "無共識"
 
-// 4. 執行規訓
-// v6 嚴格布林檢查
-if alpha.isValid
-    strategy.entry("SwarmTrade", strategy.long, comment = alpha.tag)
-    strategy.exit("SovereignExit", "SwarmTrade", stop = close - stopGap, limit = close + stopGap * 2.5)
+// ──── 列舉：執行規訓 ────
+enum ExecutionRegime
+    Sovereign   = "主權模式"
+    Balanced    = "平衡模式"
+    Aggressive  = "激進模式"
 
-// 5. 視覺化地板
-plot(ta.ema(close, signalLen), "Sovereign Floor", color = color.new(color.blue, 50))
-bgcolor(alpha.isValid ? color.new(color.green, 90) : na)
+// ──── 輸入參數 ────
+ExecutionRegime regime        = input.enum(ExecutionRegime.Balanced, "執行規訓")
+int momLen                     = input.int(14, "動能深度 (Mom)", group = "蜂群參數")
+int rsiLen                     = input.int(14, "RSI 深度 (MeanRev)", group = "蜂群參數")
+int bbLen                      = input.int(20, "布林帶長度 (Breakout)", group = "蜂群參數")
+float bbMult                   = input.float(2.0, "布林帶倍數", group = "蜂群參數")
+int atrLen                     = input.int(14, "ATR 長度 (Vol)", group = "蜂群參數")
+float atrMult                  = input.float(1.5, "ATR 乘數", group = "蜂群參數")
+float sovereignStopMult        = input.float(2.0, "主權停損倍數", group = "風險管理")
+float sovereignTakeMult        = input.float(3.0, "主權停利倍數", group = "風險管理")
+bool showConsensusPanel        = input.bool(true, "顯示共識面板", group = "視覺化")
 
-// 6. 物理狀態標籤
-if barstate.islast
-    var label status = label.new(bar_index, high, "", color = color.black, textcolor = color.white)
-    label.set_text(status, str.format("TN Swarm Status:\nRegime: {0}\nPayload Tag: {1}", regime, alpha.tag))
+// ──── 蜂群成員訊號計算 ────
+
+// 成員1：動能突襲者 (Momentum — CCI 動能)
+float cci = ta.cci(high, low, close, momLen)
+bool momLong  = cci > 100.0
+bool momShort = cci < -100.0
+float momStrength = math.abs(cci - 50.0) / 150.0  // 正規化 0~1
+
+// 成員2：均值狙擊手 (Mean Reversion — RSI 極端)
+float rsi = ta.rsi(close, rsiLen)
+bool mrLong  = rsi < 30.0
+bool mrShort = rsi > 70.0
+float mrStrength = math.abs(rsi - 50.0) / 50.0
+
+// 成員3：突破獵手 (Breakout — 布林帶突破)
+float bbBasis = ta.sma(close, bbLen)
+float bbDev   = ta.stdev(close, bbLen) * bbMult
+float bbUpper = bbBasis + bbDev
+float bbLower = bbBasis - bbDev
+bool boLong  = close > bbUpper and close > open
+bool boShort = close < bbLower and close < open
+float boStrength = math.abs(close - bbBasis) / bbDev
+
+// 成員4：波動收割者 (Volatility — ATR 通道突破)
+float atrVal = ta.atr(atrLen)
+float volUpper = close + atrVal * atrMult
+float volLower = close - atrVal * atrMult
+bool volLong  = high > volUpper
+bool volShort = low < volLower
+float volStrength = atrVal / ta.sma(atrVal, atrLen)
+
+// ──── 聯邦共識引擎 ────
+int totalMembers = 4
+int longVotes  = (momLong ? 1 : 0) + (mrLong ? 1 : 0) + (boLong ? 1 : 0) + (volLong ? 1 : 0)
+int shortVotes = (momShort ? 1 : 0) + (mrShort ? 1 : 0) + (boShort ? 1 : 0) + (volShort ? 1 : 0)
+
+bool hasConsensusLong  = longVotes >= 2
+bool hasConsensusShort = shortVotes >= 2
+
+ConsensusGrade gradeLong  = ConsensusGrade.NoConsensus
+ConsensusGrade gradeShort = ConsensusGrade.NoConsensus
+
+if longVotes == totalMembers
+    gradeLong := ConsensusGrade.Unanimous
+else if longVotes >= 3
+    gradeLong := ConsensusGrade.SuperMajority
+else if longVotes >= 2
+    gradeLong := ConsensusGrade.SimpleMajority
+else if longVotes >= 1
+    gradeLong := ConsensusGrade.Minority
+
+if shortVotes == totalMembers
+    gradeShort := ConsensusGrade.Unanimous
+else if shortVotes >= 3
+    gradeShort := ConsensusGrade.SuperMajority
+else if shortVotes >= 2
+    gradeShort := ConsensusGrade.SimpleMajority
+else if shortVotes >= 1
+    gradeShort := ConsensusGrade.Minority
+
+// ──── 權重動態閾值 (根據規訓調整) ────
+int requiredVotes = switch regime
+    ExecutionRegime.Sovereign   => 4   // 全體一致
+    ExecutionRegime.Balanced    => 3   // 絕對多數
+    ExecutionRegime.Aggressive  => 2   // 簡單多數
+
+bool finalLong  = longVotes >= requiredVotes
+bool finalShort = shortVotes >= requiredVotes
+
+// ──── 共識強度 (加權平均) ────
+float consensusStrengthLong = switch longVotes
+    4 => 1.0
+    3 => 0.85
+    2 => 0.65
+    1 => 0.35
+    => 0.0
+
+float consensusStrengthShort = switch shortVotes
+    4 => 1.0
+    3 => 0.85
+    2 => 0.65
+    1 => 0.35
+    => 0.0
+
+// ──── 動態停損停利 (ATR 基準) ────
+float atrBase = ta.atr(atrLen)
+float stopLossPts   = atrBase * sovereignStopMult
+float takeProfitPts = atrBase * sovereignTakeMult
+
+// ──── 主權過濾：避免重複進場 ────
+bool alreadyInLong  = strategy.opentrades > 0 and strategy.opentrades.size > 0 ? strategy.opentrades[0].tradeDirection == strategy.trade_direction.long : false
+bool alreadyInShort = strategy.opentrades > 0 and strategy.opentrades.size > 0 ? strategy.opentrades[0].tradeDirection == strategy.trade_direction.short : false
+
+// ──── 執行引擎 ────
+if finalLong and not alreadyInLong
+    strategy.entry("SwarmLong", strategy.long, comment = str.format("長 {0}/{1} | {2}", longVotes, totalMembers, gradeLong))
+    strategy.exit("SwarmLongExit", "SwarmLong", stop = close - stopLossPts, limit = close + takeProfitPts)
+
+if finalShort and not alreadyInShort
+    strategy.entry("SwarmShort", strategy.short, comment = str.format("短 {0}/{1} | {2}", shortVotes, totalMembers, gradeShort))
+    strategy.exit("SwarmShortExit", "SwarmShort", stop = close + stopLossPts, limit = close - takeProfitPts)
+
+// ──── 蜂群狀態視覺化 ────
+plot(bbBasis, "BB Basis", color = color.new(color.gray, 70))
+bbUpperPlot = plot(bbUpper, "BB Upper", color = color.new(color.blue, 50))
+bbLowerPlot = plot(bbLower, "BB Lower", color = color.new(color.blue, 50))
+fill(bbUpperPlot, bbLowerPlot, color = color.new(color.blue, 90))
+
+// 共識訊號標記
+int consensusBarIndex = last_bar_index - 1
+plotshape(hasConsensusLong and barstate.isconfirmed ? close * 0.998 : na, "🐝 長共識", shape.triangleup, location.belowbar, color.new(color.green, 30), size = size.tiny)
+plotshape(hasConsensusShort and barstate.isconfirmed ? close * 1.002 : na, "🐝 短共識", shape.triangledown, location.abovebar, color.new(color.red, 30), size = size.tiny)
+
+// ──── 共識面板 (最後一根) ────
+if barstate.islast and showConsensusPanel
+    string panelText = str.format(
+        "📊  TeleNexus 蜂群共識\n\n" +
+        "▸ 動能突襲者 (CCI {0}):   {1}\n" +
+        "▸ 均值狙擊手 (RSI {2}):    {3}\n" +
+        "▸ 突破獵手 (BB {4}):      {5}\n" +
+        "▸ 波動收割者 (ATR {6}):   {7}\n\n" +
+        "══════════════════════\n" +
+        "🐂 多做   → {8}/{9} ({10})\n" +
+        "🐻 短做   → {11}/{12} ({13})\n" +
+        "⚡ 強度(L): {14}  | (S): {15}\n" +
+        "🎯 規訓: {16}\n" +
+        "🛡  SL {17} pt | TP {18} pt\n" +
+        "📅 v26.0527.1830",
+        cci, momLong ? "✅" : "❌",
+        rsi, mrLong ? "✅" : "❌",
+        close > bbUpper ? "↑" : close < bbLower ? "↓" : "−",
+        boLong ? "✅" : "❌",
+        atrVal, volLong ? "✅" : "❌",
+        longVotes, totalMembers, gradeLong,
+        shortVotes, totalMembers, gradeShort,
+        consensusStrengthLong, consensusStrengthShort,
+        regime
+    )
+
+    var label consensusLabel = label.new(
+        bar_index + 50, high, panelText,
+        color = color.new(color.black, 10),
+        textcolor = color.white,
+        size = size.small,
+        style = label.style_label_left
+    )
+    label.set_text(consensusLabel, panelText)
+    label.delete(consensusLabel[1])
