@@ -1,0 +1,82 @@
+//@version=6
+indicator("TeleNexus Fakeout Signal Quality [trugurpala]", overlay=true)
+
+// ── License ──────────────────────────────────────────────────────────────────
+// This strategy is a TeleNexus Sovereign port of the 4-Layer Fakeout Filter
+// originally authored by Ugur Pala (github.com/trugurpala/pinescriptv6).
+// Ported under MIT License with causal audit extensions.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── Layer 1: Volume Confirmation ────────────────────────────────────────────
+int     volMaLen  = input.int(20, "Volume MA Length", group="Layer 1: Volume")
+float   volMult   = input.float(1.5, "Volume Multiplier", step=0.1, group="Layer 1: Volume")
+float   volAvg    = ta.sma(volume, volMaLen)
+bool    volOK     = volume > volAvg * volMult
+
+// ── Layer 2: Higher-Timeframe Trend Filter ─────────────────────────────────
+enum    HTFMode
+    H1         = "H1"
+    H4         = "H4"
+    D1         = "D1"
+string  htfRes    = input.string("H4", "HTF Resolution", options=["H1","H4","D1"], group="Layer 2: HTF Trend")
+int     htfEmaLen = input.int(50, "HTF EMA Length", group="Layer 2: HTF Trend")
+float   htfClose  = request.security(syminfo.tickerid, htfRes, close[1], lookahead=barmerge.lookahead_on)
+float   htfEma    = request.security(syminfo.tickerid, htfRes, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_on)
+bool    htfBull   = htfClose > htfEma
+
+// ── Layer 3: ATR Volatility Band ───────────────────────────────────────────
+int     atrLen    = input.int(14, "ATR Length", group="Layer 3: ATR Band")
+float   atrMult   = input.float(2.0, "ATR Multiplier", step=0.1, group="Layer 3: ATR Band")
+float   atrVal    = ta.atr(atrLen)
+float   bandHigh  = close + atrVal * atrMult
+float   bandLow   = close - atrVal * atrMult
+
+// ── Layer 4: Bar Structure (inside bar / outside bar filter) ───────────────
+bool    insideBar = high <= high[1] and low >= low[1]
+bool    outsideBar = high > high[1] and low < low[1]
+
+// ── Composite Signal Quality ───────────────────────────────────────────────
+int     signalQuality = 0
+signalQuality += volOK      ? 1 : 0
+signalQuality += htfBull    ? 1 : 0
+signalQuality += close > bandHigh or close < bandLow ? 1 : 0
+signalQuality += outsideBar ? 1 : 0
+
+enum    QualityLabel
+    VeryLow  = "Very Low"
+    Low      = "Low"
+    Medium   = "Medium"
+    High     = "High"
+    VeryHigh = "Very High"
+
+string  qualityText = switch signalQuality
+    0 => "Very Low"
+    1 => "Low"
+    2 => "Medium"
+    3 => "High"
+    => "Very High"
+
+color  qualityColor = switch signalQuality
+    0 => color.new(color.red, 60)
+    1 => color.new(color.orange, 60)
+    2 => color.new(color.yellow, 60)
+    3 => color.new(color.lime, 60)
+    => color.new(color.green, 60)
+
+// ── Visuals ─────────────────────────────────────────────────────────────────
+plotshape(ta.crossover(close, bandHigh) and volOK and htfBull, "Bull Signal",
+    style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(ta.crossunder(close, bandLow) and volOK and not htfBull, "Bear Signal",
+    style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+hline(0, "Zero", color.gray, hline.style_dotted)
+plot(signalQuality, "Signal Quality", qualityColor, 2)
+
+if barstate.islastconfirmedhistory
+    label.new(bar_index, high * 1.02,
+        "Signal Quality: " + qualityText + "\n" +
+        "Volume OK: " + str.tostring(volOK) + "\n" +
+        "HTF Bull: " + str.tostring(htfBull) + "\n" +
+        "ATR Band Touch: " + str.tostring(close > bandHigh or close < bandLow) + "\n" +
+        "Outside Bar: " + str.tostring(outsideBar),
+        style=label.style_label_left, size=size.small, textcolor=qualityColor)

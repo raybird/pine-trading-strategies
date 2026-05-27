@@ -185,6 +185,12 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `EMA_Bars_v6` | EMA + 時間出場策略 |
 | `triple_confirmation_sovereign_v6` | 三重確認主權策略 |
 
+## Signal Quality & Fakeout Prevention（信號品質與假突破預防，1） — NEW v26.0528
+
+| 策略 | 說明 |
+|------|------|
+| `tn_fakeout_signal_quality_v6` | 4 層信號品質過濾器（成交量 + HTF 趨勢 + ATR 波動帶 + 條形結構），移植自 trugurpala/pinescriptv6 |
+
 ## DCA & Webhook（DCA 網格與 Webhook 橋接，1）
 
 | 策略 | 說明 |
@@ -193,4 +199,6 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*註：所有策略具備完整因果說明文件（.md），一對一對應每個 .pine 檔案。*
+*註：所有策略具備完整因果說明文件（.md），一對一對應每個 .pine 檔案。
+*
+*策略總數：134 個（v26.0528.0630）**

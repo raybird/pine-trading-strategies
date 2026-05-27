@@ -56,9 +56,9 @@
 | **Other / Utility** | 4 | 模板、特殊市場策略 |
 | **ICT / SMC 專項（跨類別強化）** | 16 | 跨分類的 ICT/SMC 實作（已計入上述分類） |
 
-> **最新加入（v26.0527.1830）**: `swarm_modular_executor_v6` — TeleNexus 蜂群聯邦共識引擎（4 元蜂群 + 民主投票 + 三級規訓）
+> **最新加入（v26.0528.0630）**: `tn_fakeout_signal_quality_v6` — 4 層信號品質過濾（成交量 + HTF 趨勢 + ATR 波動帶 + 條形結構），移植自 trugurpala/pinescriptv6
 >
-> **上版（v26.0527.0630）**: `TnSovereignDcaWebhookV6` — DCA 網格 + BBW 波動率引擎 + JSON Webhook 輸出
+> **上版（v26.0527.1830）**: `swarm_modular_executor_v6` — TeleNexus 蜂群聯邦共識引擎（4 元蜂群 + 民主投票 + 三級規訓）
 >
 > 各策略詳細說明請見 [`/strategies/README.md`](./strategies/README.md)
 
