@@ -42,20 +42,21 @@
 
 | 分類 | 數量 | 說明 |
 |------|------|------|
-| **Sovereign Core** | 10 | 基礎主權框架與多時框日內系統 |
-| **Trend & Momentum** | 17 | 趨勢追蹤、動量振盪、均線系統 |
-| **Mean Reversion & Oscillator** | 10 | 均值回歸、超買超賣反轉 |
-| **Volatility & Breakout** | 14 | 波動率突破、壓縮釋放、通道策略 |
-| **Market Structure & Price Action** | 15 | SMC/ICT、波段結構、FVG、訂單塊 |
+| **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
+| **Trend & Momentum** | 14 | 趨勢追蹤、動量振盪、均線系統 |
+| **Mean Reversion & Oscillator** | 13 | 均值回歸、超買超賣反轉 |
+| **Volatility & Breakout** | 17 | 波動率突破、壓縮釋放、通道策略 |
+| **Market Structure & Price Action** | 18 | SMC/ICT、波段結構、FVG、訂單塊 |
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
-| **Matrix & ML** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
+| **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
+| **Multi-Agent, Swarm & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
+| **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
 | **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
-| **Multi-Agent & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
-| **Core Library** | 1 | 主權邏輯庫 lib_sovereign_logic_v6 |
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
-| **Other / Utility** | 4 | 模板、特殊市場策略 |
-| **ICT / SMC 專項（跨類別強化）** | 16 | 跨分類的 ICT/SMC 實作（已計入上述分類） |
+| **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
+| **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
+
 
 > **最新加入（v26.0528.1830）**: `TnSovereignPropFirmUltraV6` — TeleNexus PropFirm 主權超防禦策略（三層風控 + SMC 結構引擎 + 動態風險係數），移植自 thesenegalesehitch/Pine-Script (QuantAlgo propfirm-ultra-strategy)
 >
