@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 134 個已實體化主權策略，分 10 大類
+- **[`/strategies`](./strategies/README.md)** — 135 個已實體化主權策略，分 10 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -53,10 +53,13 @@
 | **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
 | **Multi-Agent & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
 | **Core Library** | 1 | 主權邏輯庫 lib_sovereign_logic_v6 |
+| **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Other / Utility** | 4 | 模板、特殊市場策略 |
 | **ICT / SMC 專項（跨類別強化）** | 16 | 跨分類的 ICT/SMC 實作（已計入上述分類） |
 
-> **最新加入（v26.0528.0630）**: `tn_fakeout_signal_quality_v6` — 4 層信號品質過濾（成交量 + HTF 趨勢 + ATR 波動帶 + 條形結構），移植自 trugurpala/pinescriptv6
+> **最新加入（v26.0528.1830）**: `TnSovereignPropFirmUltraV6` — TeleNexus PropFirm 主權超防禦策略（三層風控 + SMC 結構引擎 + 動態風險係數），移植自 thesenegalesehitch/Pine-Script (QuantAlgo propfirm-ultra-strategy)
+>
+> **上版（v26.0528.0630）**: `tn_fakeout_signal_quality_v6` — 4 層信號品質過濾（成交量 + HTF 趨勢 + ATR 波動帶 + 條形結構），移植自 trugurpala/pinescriptv6
 >
 > **上版（v26.0527.1830）**: `swarm_modular_executor_v6` — TeleNexus 蜂群聯邦共識引擎（4 元蜂群 + 民主投票 + 三級規訓）
 >
