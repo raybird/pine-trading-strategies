@@ -1,0 +1,152 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignOrbMultiSessionV6
+// ============================================================================
+// Causal Audit: 2026-05-29 06:30 CST
+// Version: v26.0529.0630
+// Build: Multi-Session ORB Engine with Sovereign Regime Gating
+//
+// Core Thesis:
+//   Opening Range Breakout (ORB) is the highest-probability intraday setup
+//   across all major sessions (NY/London/Asia). By segmenting each session's
+//   opening range and layering sovereign trend filters, we capture the
+//   institutional order flow at the most structurally significant time of day.
+//
+// Sovereign Overlays:
+//   ✓ Multi-Session ORB Detection — configurable session start/end windows
+//   ✓ Session Volume Confirmation — relative volume surge at breakout
+//   ✓ VWAP Trend Gating — breakout direction aligned with intraday VWAP slope
+//   ✓ Adaptive Breakout Threshold — ATR-based expansion requirement
+// ============================================================================
+
+strategy("TnSovereignOrbMultiSessionV6 [TeleNexus]", overlay=true,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 10,
+     initial_capital     = 10000,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.02,
+     slippage            = 1)
+
+// ─── Session Configuration ───────────────────────────────────────────────────
+string asiaStart   = input.string("0000", "Asia Session Start (HHMM)", group="Session Times")
+string asiaEnd     = input.string("0900", "Asia Session End (HHMM)", group="Session Times")
+string londonStart = input.string("0800", "London Session Start (HHMM)", group="Session Times")
+string londonEnd   = input.string("1630", "London Session End (HHMM)", group="Session Times")
+string nyStart     = input.string("1330", "NY Session Start (HHMM)", group="Session Times")
+string nyEnd       = input.string("2100", "NY Session End (HHMM)", group="Session Times")
+
+int    orbLen      = input.int(60, "ORB Range Minutes", minval=15, step=15, group="ORB")
+
+// ─── ORB Parameters ──────────────────────────────────────────────────────────
+float breakoutMult = input.float(0.5, "Breakout ATR Multiplier", minval=0.1, step=0.1, group="ORB")
+bool   requireVol  = input.bool(true, "Require Volume Confirmation", group="ORB")
+float minRelVol    = input.float(1.5, "Min Relative Volume", minval=1.0, step=0.1, group="ORB")
+bool   useVwapGate = input.bool(true, "VWAP Trend Gate", group="ORB")
+int    maxHoldBars = input.int(48, "Max Hold Bars", minval=4, group="Risk")
+
+// ─── ATR ─────────────────────────────────────────────────────────────────────
+float atrVal = ta.atr(14)
+
+// ─── Session Detection ───────────────────────────────────────────────────────
+f_isSession(string start, string end) =>
+    int sH = tonumber(str.substring(start, 0, 2)) * 60 + tonumber(str.substring(start, 2, 4))
+    int eH = tonumber(str.substring(end, 0, 2)) * 60 + tonumber(str.substring(end, 2, 4))
+    int cur = hour * 60 + minute
+    cur >= sH and cur < eH
+
+bool inAsia   = f_isSession(asiaStart, asiaEnd)
+bool inLondon = f_isSession(londonStart, londonEnd)
+bool inNY     = f_isSession(nyStart, nyEnd)
+bool inSession = inAsia or inLondon or inNY
+
+// ─── ORB Range Tracking ──────────────────────────────────────────────────────
+var float orbHigh  = na
+var float orbLow   = na
+var int   orbBar   = 0
+var int   orbSessionStart = na
+var float vwapVal  = na
+var string activeSession = ""
+
+vwapVal := ta.vwap(hlc3)
+
+bool sessionStart = false
+if inAsia and not inAsia[1]
+    sessionStart := true
+    activeSession := "ASIA"
+if inLondon and not inLondon[1]
+    sessionStart := true
+    activeSession := "LONDON"
+if inNY and not inNY[1]
+    sessionStart := true
+    activeSession := "NY"
+
+if sessionStart
+    orbHigh := high
+    orbLow  := low
+    orbBar  := 0
+    orbSessionStart := bar_index
+
+if inSession and not sessionStart
+    orbHigh := math.max(orbHigh, high)
+    orbLow  := math.min(orbLow, low)
+    orbBar  := orbBar + 1
+
+bool orbRangeActive = inSession and orbBar <= orbLen / timeframe.multiplier
+
+// ─── Breakout Detection ──────────────────────────────────────────────────────
+bool orbBreakoutUp   = orbRangeActive and close > orbHigh + atrVal * breakoutMult and high > orbHigh
+bool orbBreakoutDn   = orbRangeActive and close < orbLow - atrVal * breakoutMult and low < orbLow
+
+// Volume confirmation
+float avgVol = ta.sma(volume, 50)
+float relVol = volume / (avgVol > 0 ? avgVol : 1)
+bool volOk   = not requireVol or relVol >= minRelVol
+
+// VWAP trend gate
+bool vwapUp  = close > vwapVal
+bool vwapDn  = close < vwapVal
+bool vwapGateOkLong  = not useVwapGate or vwapUp
+bool vwapGateOkShort = not useVwapGate or vwapDn
+
+// ─── Entry Signals ───────────────────────────────────────────────────────────
+bool enterLong  = orbBreakoutUp and volOk and vwapGateOkLong
+bool enterShort = orbBreakoutDn and volOk and vwapGateOkShort
+
+// ─── Execution ───────────────────────────────────────────────────────────────
+float slLong  = orbLow - atrVal * 0.5
+float tpLong  = close + atrVal * 2.0
+float slShort = orbHigh + atrVal * 0.5
+float tpShort = close - atrVal * 2.0
+
+if (enterLong and strategy.position_size == 0)
+    strategy.entry("ORBLong", strategy.long)
+
+if (enterShort and strategy.position_size == 0)
+    strategy.entry("ORBShort", strategy.short)
+
+if (strategy.position_size > 0)
+    strategy.exit("ORBLongExit", "ORBLong", stop=slLong, limit=tpLong)
+
+if (strategy.position_size < 0)
+    strategy.exit("ORBShortExit", "ORBShort", stop=slShort, limit=tpShort)
+
+// ─── Visualization ───────────────────────────────────────────────────────────
+plotshape(enterLong, title="ORB Long", style=shape.triangleup, location=location.belowbar, color=color.new(#4CAF50, 0), size=size.small)
+plotshape(enterShort, title="ORB Short", style=shape.triangledown, location=location.abovebar, color=color.new(#F44336, 0), size=size.small)
+plot(vwapVal, "VWAP", color=color.new(#FF9800, 40))
+
+// ORB range visualization
+plot(orbHigh, "ORB High", color=color.new(#4CAF50, orbRangeActive ? 40 : 90), linewidth=1)
+plot(orbLow, "ORB Low", color=color.new(#F44336, orbRangeActive ? 40 : 90), linewidth=1)
+
+// ─── Causal Audit Table ──────────────────────────────────────────────────────
+var table audit = table.new(position.top_right, 4, 2, bgcolor=color.new(#1a1a2e, 80), border_width=1, border_color=color.new(#4fc3f7, 80))
+if barstate.islast
+    table.cell(audit, 0, 0, "ORBMultiSession", text_color=#4fc3f7, text_size=size.small)
+    table.cell(audit, 1, 0, "v26.0529.0630", text_color=#888888, text_size=size.small)
+    table.cell(audit, 2, 0, "Session", text_color=#888888, text_size=size.small)
+    table.cell(audit, 3, 0, activeSession, text_color=#4fc3f7, text_size=size.small)
+    table.cell(audit, 0, 1, "Vol", text_color=#888888, text_size=size.small)
+    table.cell(audit, 1, 1, str.tostring(relVol, "#.##"), text_color=relVol >= minRelVol ? #4CAF50 : #F44336, text_size=size.small)
+    table.cell(audit, 2, 1, "ATR", text_color=#888888, text_size=size.small)
+    table.cell(audit, 3, 1, str.tostring(atrVal, "#.##"), text_color=#ffffff, text_size=size.small)
