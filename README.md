@@ -44,7 +44,7 @@
 |------|------|------|
 | **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 14 | 趨勢追蹤、動量振盪、均線系統 |
-| **Mean Reversion & Oscillator** | 13 | 均值回歸、超買超賣反轉 |
+| **Mean Reversion & Oscillator** | 14 | 均值回歸、超買超賣反轉 |
 | **Volatility & Breakout** | 18 | 波動率突破、壓縮釋放、通道策略、多時段 ORB |
 | **Market Structure & Price Action** | 19 | SMC/ICT、波段結構、FVG、訂單塊、反轉品質分級 |
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **139** | 主權策略矩陣 |
+| **Total** | **140** | 主權策略矩陣 |
 
 
-> **最新加入（v26.0529.0630）**: `TnSovereignVeinReversalV6` — TeleNexus 主權反轉品質分級策略（4 級前視型分級 + VWAP 趨勢鎖定 + 因果審計），移植自 casoon/pine-scripts (WavesUnchained)
+> **最新加入（v26.0529.1830）**: `v6_stochastic_divergence` — Stochastic 背離偵測策略（5-bar pivot + %D 多空背離 + SL/TP 風控），移植自 JoelPasapera/Strategies-in-Pine-Script-v6
 > 
 > **上版（v26.0528.1830）**: `TnSovereignPropFirmUltraV6` — TeleNexus PropFirm 主權超防禦策略（三層風控 + SMC 結構引擎 + 動態風險係數），移植自 thesenegalesehitch/Pine-Script (QuantAlgo propfirm-ultra-strategy)
 >

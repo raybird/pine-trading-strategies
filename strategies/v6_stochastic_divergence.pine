@@ -1,0 +1,325 @@
+//@version=6
+// TeleNexus Sovereign Strategy
+// Version: v26.0529.1830 | CST: 2026-05-29 18:30
+// Source: JoelPasapera/Strategies-in-Pine-Script-v6 (GitHub)
+strategy(
+     title="Stochastic Divergence Strategy v6",
+     shorttitle="StochDiv v6",
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     currency=currency.USD,
+     format=format.price,
+     precision=2,
+     max_lines_count=500,
+     max_labels_count=500,
+     overlay=false
+)
+
+//
+// Strategy: Stochastic Divergence Strategy
+// Source: JoelPasapera/Strategies-in-Pine-Script-v6 (GitHub)
+// Rewritten in pure Pine Script v6 with enhanced risk management
+//
+// Core Logic:
+//   Detects classic bullish/bearish divergences between price and
+//   Stochastic %D oscillator. Buys on bullish divergence (price
+//   lower low, %D higher low). Sells on bearish divergence (price
+//   higher high, %D lower high). Uses %-based SL/TP for exits.
+//
+
+// ── Risk & Position Sizing ──────────────────────────────────
+grpRisk = "Risk Management"
+i_lotSize  = input.int(1, "Contracts per Trade", minval=1, group=grpRisk)
+i_useSL    = input.bool(true, "Use Stop Loss", group=grpRisk)
+i_slPerc   = input.float(2.0, "Stop Loss (%)", minval=0.1, step=0.1, group=grpRisk) / 100
+i_useTP    = input.bool(true, "Use Take Profit", group=grpRisk)
+i_tpPerc   = input.float(4.0, "Take Profit (%)", minval=0.1, step=0.1, group=grpRisk) / 100
+
+// ── Stochastic Parameters ───────────────────────────────────
+grpStoch = "Stochastic Settings"
+i_periodK = input.int(14, "%K Length", minval=1, group=grpStoch)
+i_smoothK = input.int(1,  "%K Smoothing", minval=1, group=grpStoch)
+i_periodD = input.int(3,  "%D Smoothing", minval=1, group=grpStoch)
+
+// ── Levels ──────────────────────────────────────────────────
+grpLevels = "Levels"
+i_obLevel  = input.int(80, "Overbought Level", minval=50, maxval=100, group=grpLevels)
+i_osLevel  = input.int(20, "Oversold Level",   minval=0,  maxval=50,  group=grpLevels)
+i_midLevel = input.int(50, "Middle Level",     minval=0,  maxval=100, group=grpLevels)
+
+// ── Line Visibility ─────────────────────────────────────────
+grpVis = "Line Visibility"
+i_showK = input.bool(true, "Show %K Line", group=grpVis)
+i_showD = input.bool(true, "Show %D Line", group=grpVis)
+
+// ── Colors ──────────────────────────────────────────────────
+grpColors = "Colors"
+i_colUp      = input.color(color.green, "Rising Color",    group=grpColors)
+i_colDown    = input.color(color.red,   "Falling Color",   group=grpColors)
+i_colSide    = input.color(color.white, "Sideways Color",  group=grpColors)
+i_colBullDiv = input.color(#4caf50,     "Bullish Div Color", group=grpColors)
+i_colBearDiv = input.color(#f23645,     "Bearish Div Color", group=grpColors)
+
+// ── Alert Visuals ───────────────────────────────────────────
+grpAlert = "Alert Visuals"
+i_showAlerts   = input.bool(true,  "Show OB/OS Alerts", group=grpAlert)
+i_alertOBstyle = input.string("Circle", "OB Style", options=["Circle", "Arrow Down", "Cross"], group=grpAlert)
+i_alertOSstyle = input.string("Circle", "OS Style", options=["Circle", "Arrow Up",  "Cross"], group=grpAlert)
+i_alertOBcol   = input.color(color.red,   "OB Alert Color", group=grpAlert)
+i_alertOScol   = input.color(color.green, "OS Alert Color", group=grpAlert)
+
+// ── Divergence Settings ─────────────────────────────────────
+grpDiv = "Divergence Settings"
+i_showDiv          = input.bool(true, "Show Divergences", group=grpDiv)
+i_pivotLookbackL   = input.int(5,   "Pivot Lookback Left",  minval=1, group=grpDiv)
+i_pivotLookbackR   = input.int(5,   "Pivot Lookback Right", minval=1, group=grpDiv)
+i_maxBarsBack      = input.int(100, "Max Bars to Look Back", minval=10, maxval=500, group=grpDiv)
+i_removeBrokenDiv  = input.bool(true, "Remove Broken Divergences", group=grpDiv)
+i_divLineWidth     = input.int(3,   "Divergence Line Width", minval=1, maxval=5, group=grpDiv)
+i_showDivLabels    = input.bool(true, "Show Divergence Labels", group=grpDiv)
+
+// ── Performance Report ──────────────────────────────────────
+grpReport = "Backtest Report"
+i_showReport = input.bool(true, "Show Performance Report", group=grpReport)
+
+// ═════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═════════════════════════════════════════════════════════════
+
+// Stochastic Oscillator
+k = ta.sma(ta.stoch(close, high, low, i_periodK), i_smoothK)
+d = ta.sma(k, i_periodD)
+
+// Directional coloring
+kDir = k > k[1] ? 1 : k < k[1] ? -1 : 0
+dDir = d > d[1] ? 1 : d < d[1] ? -1 : 0
+kColor = kDir == 1 ? i_colUp : kDir == -1 ? i_colDown : i_colSide
+dColor = dDir == 1 ? i_colUp : dDir == -1 ? i_colDown : i_colSide
+
+// OB/OS cross detection
+crossedOB = ta.crossover(d, i_obLevel)
+crossedOS = ta.crossunder(d, i_osLevel)
+
+// ═════════════════════════════════════════════════════════════
+// PIVOT DETECTION
+// ═════════════════════════════════════════════════════════════
+
+pricePivotLow  = ta.pivotlow(low, i_pivotLookbackL, i_pivotLookbackR)
+pricePivotHigh = ta.pivothigh(high, i_pivotLookbackL, i_pivotLookbackR)
+
+// ═════════════════════════════════════════════════════════════
+// ARRAYS FOR PIVOT STORAGE
+// ═════════════════════════════════════════════════════════════
+
+var int[]   swingLowBars   = array.new_int()
+var float[] swingLowPrices = array.new_float()
+var float[] swingLowStochD = array.new_float()
+
+var int[]   swingHighBars   = array.new_int()
+var float[] swingHighPrices = array.new_float()
+var float[] swingHighStochD = array.new_float()
+
+var line[]  bullLines     = array.new_line()
+var line[]  bearLines     = array.new_line()
+var label[] bullLabels    = array.new_label()
+var label[] bearLabels    = array.new_label()
+var float[] bullLineEndD  = array.new_float()
+var float[] bearLineEndD  = array.new_float()
+
+// ── Record swing lows ───────────────────────────────────────
+if not na(pricePivotLow)
+    pivotBar = bar_index - i_pivotLookbackR
+    array.push(swingLowBars,   pivotBar)
+    array.push(swingLowPrices, pricePivotLow)
+    array.push(swingLowStochD, d[i_pivotLookbackR])
+    if array.size(swingLowBars) > 50
+        array.shift(swingLowBars)
+        array.shift(swingLowPrices)
+        array.shift(swingLowStochD)
+
+// ── Record swing highs ──────────────────────────────────────
+if not na(pricePivotHigh)
+    pivotBar = bar_index - i_pivotLookbackR
+    array.push(swingHighBars,   pivotBar)
+    array.push(swingHighPrices, pricePivotHigh)
+    array.push(swingHighStochD, d[i_pivotLookbackR])
+    if array.size(swingHighBars) > 50
+        array.shift(swingHighBars)
+        array.shift(swingHighPrices)
+        array.shift(swingHighStochD)
+
+// ═════════════════════════════════════════════════════════════
+// BULLISH DIVERGENCE DETECTION
+//   Price: Lower Low  |  %D: Higher Low
+// ═════════════════════════════════════════════════════════════
+
+var bool bullDiv = false
+bullDiv := false
+
+if i_showDiv and not na(pricePivotLow) and array.size(swingLowBars) >= 2
+    curBar   = array.get(swingLowBars,   array.size(swingLowBars) - 1)
+    curPrice = array.get(swingLowPrices, array.size(swingLowPrices) - 1)
+    curD     = array.get(swingLowStochD, array.size(swingLowStochD) - 1)
+    for idx = array.size(swingLowBars) - 2 to 0
+        prevBar   = array.get(swingLowBars,   idx)
+        prevPrice = array.get(swingLowPrices, idx)
+        prevD     = array.get(swingLowStochD, idx)
+        if curBar - prevBar <= i_maxBarsBack
+            if curPrice < prevPrice and curD > prevD
+                dl = line.new(prevBar, prevD, curBar, curD,
+                     color=i_colBullDiv, width=i_divLineWidth, style=line.style_dotted)
+                array.push(bullLines, dl)
+                array.push(bullLineEndD, curD)
+                if i_showDivLabels
+                    lbl = label.new(curBar, curD, "Bull",
+                         color=i_colBullDiv, textcolor=color.white,
+                         style=label.style_label_up, size=size.small)
+                    array.push(bullLabels, lbl)
+                bullDiv := true
+                break
+
+// ═════════════════════════════════════════════════════════════
+// BEARISH DIVERGENCE DETECTION
+//   Price: Higher High  |  %D: Lower High
+// ═════════════════════════════════════════════════════════════
+
+var bool bearDiv = false
+bearDiv := false
+
+if i_showDiv and not na(pricePivotHigh) and array.size(swingHighBars) >= 2
+    curBar   = array.get(swingHighBars,   array.size(swingHighBars) - 1)
+    curPrice = array.get(swingHighPrices, array.size(swingHighPrices) - 1)
+    curD     = array.get(swingHighStochD, array.size(swingHighStochD) - 1)
+    for idx = array.size(swingHighBars) - 2 to 0
+        prevBar   = array.get(swingHighBars,   idx)
+        prevPrice = array.get(swingHighPrices, idx)
+        prevD     = array.get(swingHighStochD, idx)
+        if curBar - prevBar <= i_maxBarsBack
+            if curPrice > prevPrice and curD < prevD
+                dl = line.new(prevBar, prevD, curBar, curD,
+                     color=i_colBearDiv, width=i_divLineWidth, style=line.style_dotted)
+                array.push(bearLines, dl)
+                array.push(bearLineEndD, curD)
+                if i_showDivLabels
+                    lbl = label.new(curBar, curD, "Bear",
+                         color=i_colBearDiv, textcolor=color.white,
+                         style=label.style_label_down, size=size.small)
+                    array.push(bearLabels, lbl)
+                bearDiv := true
+                break
+
+// ═════════════════════════════════════════════════════════════
+// REMOVE BROKEN DIVERGENCES
+// ═════════════════════════════════════════════════════════════
+
+if i_removeBrokenDiv and i_showDiv
+    if array.size(bullLines) > 0
+        for idx = array.size(bullLines) - 1 to 0
+            if idx < array.size(bullLineEndD)
+                if d < array.get(bullLineEndD, idx) - 5
+                    line.delete(array.get(bullLines, idx))
+                    array.remove(bullLines, idx)
+                    array.remove(bullLineEndD, idx)
+                    if idx < array.size(bullLabels)
+                        label.delete(array.get(bullLabels, idx))
+                        array.remove(bullLabels, idx)
+    if array.size(bearLines) > 0
+        for idx = array.size(bearLines) - 1 to 0
+            if idx < array.size(bearLineEndD)
+                if d > array.get(bearLineEndD, idx) + 5
+                    line.delete(array.get(bearLines, idx))
+                    array.remove(bearLines, idx)
+                    array.remove(bearLineEndD, idx)
+                    if idx < array.size(bearLabels)
+                        label.delete(array.get(bearLabels, idx))
+                        array.remove(bearLabels, idx)
+
+// ═════════════════════════════════════════════════════════════
+// PLOTS
+// ═════════════════════════════════════════════════════════════
+
+plot(i_showK ? k : na, "%K", kColor, 2)
+plot(i_showD ? d : na, "%D", dColor, 1)
+
+hline(i_obLevel,  "OB",  color=#787B86)
+hline(i_midLevel, "Mid", color=color.new(#787B86, 50))
+hline(i_osLevel,  "OS",  color=#787B86)
+
+// ── OB Alert Shapes ─────────────────────────────────────────
+plotshape(i_showAlerts and crossedOB and i_alertOBstyle == "Circle"     ? d : na,
+     "OB Circle", shape.circle, location.absolute, i_alertOBcol)
+plotshape(i_showAlerts and crossedOB and i_alertOBstyle == "Arrow Down" ? d : na,
+     "OB Arrow",  shape.triangledown, location.absolute, i_alertOBcol)
+plotshape(i_showAlerts and crossedOB and i_alertOBstyle == "Cross"      ? d : na,
+     "OB Cross",  shape.xcross, location.absolute, i_alertOBcol)
+
+// ── OS Alert Shapes ─────────────────────────────────────────
+plotshape(i_showAlerts and crossedOS and i_alertOSstyle == "Circle"   ? d : na,
+     "OS Circle", shape.circle, location.absolute, i_alertOScol)
+plotshape(i_showAlerts and crossedOS and i_alertOSstyle == "Arrow Up" ? d : na,
+     "OS Arrow",  shape.triangleup, location.absolute, i_alertOScol)
+plotshape(i_showAlerts and crossedOS and i_alertOSstyle == "Cross"    ? d : na,
+     "OS Cross",  shape.xcross, location.absolute, i_alertOScol)
+
+// ═════════════════════════════════════════════════════════════
+// STRATEGY EXECUTION
+// ═════════════════════════════════════════════════════════════
+
+if bullDiv
+    strategy.entry("Long", strategy.long, qty=i_lotSize, comment="Bull Div")
+
+if bearDiv
+    strategy.entry("Short", strategy.short, qty=i_lotSize, comment="Bear Div")
+
+// Exit handling with SL/TP
+if strategy.position_size > 0
+    strategy.exit("Exit Long", "Long",
+         stop=strategy.position_avg_price * (1 - i_slPerc),
+         limit=strategy.position_avg_price * (1 + i_tpPerc),
+         comment="TP/SL")
+
+if strategy.position_size < 0
+    strategy.exit("Exit Short", "Short",
+         stop=strategy.position_avg_price * (1 + i_slPerc),
+         limit=strategy.position_avg_price * (1 - i_tpPerc),
+         comment="TP/SL")
+
+// ═════════════════════════════════════════════════════════════
+// BACKTEST PERFORMANCE REPORT
+// ═════════════════════════════════════════════════════════════
+
+if i_showReport and barstate.islast
+    netProfit   = strategy.netprofit
+    grossProfit = strategy.grossprofit
+    grossLoss   = strategy.grossloss
+    winRate     = strategy.winrate
+    totalTrades = strategy.trades
+    avgWin      = strategy.avgwin
+    avgLoss     = strategy.avgloss
+    profitFactor = grossLoss != 0 ? grossProfit / grossLoss : na
+    sharpeRatio  = strategy.sharpe
+
+    txt  = "=== Performance Report ===\n"
+    txt += "Total Trades: " + str.tostring(totalTrades) + "\n"
+    txt += "Net Profit: $" + str.tostring(netProfit, "#.##") + "\n"
+    txt += "Win Rate: " + str.tostring(winRate * 100, "#.#") + "%\n"
+    txt += "Profit Factor: " + str.tostring(profitFactor, "#.##") + "\n"
+    txt += "Avg Win: $" + str.tostring(avgWin, "#.##") + "\n"
+    txt += "Avg Loss: $" + str.tostring(avgLoss, "#.##") + "\n"
+    txt += "Sharpe Ratio: " + str.tostring(sharpeRatio, "#.##")
+
+    label.new(bar_index, d, txt,
+         style=label.style_label_center, size=size.normal,
+         color=color.new(color.black, 20), textcolor=color.white)
+
+// ═════════════════════════════════════════════════════════════
+// ALERTS
+// ═════════════════════════════════════════════════════════════
+
+alertcondition(crossedOB,  "Overbought",  "%D crossed above overbought")
+alertcondition(crossedOS,  "Oversold",    "%D crossed below oversold")
+alertcondition(ta.crossover(k, d), "%K > %D", "%K crossed above %D")
+alertcondition(ta.crossunder(k, d), "%K < %D", "%K crossed below %D")
+alertcondition(bullDiv, "Bullish Divergence", "Bullish divergence detected")
+alertcondition(bearDiv, "Bearish Divergence", "Bearish divergence detected")
