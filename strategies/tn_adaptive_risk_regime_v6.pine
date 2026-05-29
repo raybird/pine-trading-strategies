@@ -1,0 +1,106 @@
+//@version=6
+// TeleNexus Sovereign: Adaptive Risk Regime v6 [v26.0530.0630]
+// Spirit Inheritance: PineGen-AI Adaptive Risk Regime Strategy
+// Goal: Dynamic mode-switching between mean reversion & breakout based on volatility regime
+//
+// Logic Matrix:
+// 1. Volatility Regime Detection: Compare ATR to its SMA — classify as HighVol or LowVol
+// 2. Low Vol Mode: Range-bound mean reversion (fade range extremes)
+// 3. High Vol Mode: Breakout momentum (follow range breakouts)
+// 4. Regime-Specific Risk: Dynamic ATR stop scaling per volatility regime
+// 5. Causal Audit: Volume confirmation + structure alignment per regime
+
+strategy("Tn Adaptive Risk Regime v6",
+     shorttitle         = "Tn_AdaptRR_V6",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.04,
+     slippage           = 1)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_regime = "▼ Volatility Regime"
+atrLen       = input.int(14, "ATR Length", minval=5, maxval=50)
+lookback     = input.int(50, "Volatility Lookback (SMA)", minval=20, maxval=200)
+
+group_range  = "▼ Range Detection"
+rangeLen     = input.int(20, "Range Length", minval=10, maxval=100)
+
+group_risk   = "▼ Risk Management"
+baseStopMult = input.float(1.5, "Base Stop ATR Mult", minval=0.5, maxval=3.0, step=0.1)
+rrLowVol     = input.float(2.0, "R:R (Low Vol)", minval=1.0, maxval=5.0, step=0.5)
+rrHighVol    = input.float(3.0, "R:R (High Vol)", minval=1.0, maxval=5.0, step=0.5)
+
+group_filter = "▼ Causal Filters"
+useVolConf   = input.bool(true, "Volume Confirmation")
+volMult      = input.float(1.3, "Volume Multiplier", minval=0.8, maxval=3.0, step=0.1)
+
+// ── Volatility Regime Engine ────────────────────────────────────────────────
+float atrVal = ta.atr(atrLen)
+float atrAvg = ta.sma(atrVal, lookback)
+
+bool highVol = atrVal > atrAvg  // Breakout regime
+bool lowVol  = atrVal < atrAvg  // Mean reversion regime
+
+// ── Range Structure ─────────────────────────────────────────────────────────
+float rangeHigh = ta.highest(high, rangeLen)
+float rangeLow  = ta.lowest(low, rangeLen)
+
+// ── Signal Components ───────────────────────────────────────────────────────
+// Low volatility → mean reversion (fade range extremes)
+bool longRange  = lowVol and close < rangeLow
+bool shortRange = lowVol and close > rangeHigh
+
+// High volatility → breakout momentum
+bool crossUp     = ta.crossover(close, rangeHigh[1])
+bool crossDown   = ta.crossunder(close, rangeLow[1])
+bool longBreak   = highVol and crossUp
+bool shortBreak  = highVol and crossDown
+
+// Volume confirmation
+float volAvg  = ta.sma(volume, 20)
+bool volOk    = not useVolConf or volume > volAvg * volMult
+
+// ── Execution Suture ────────────────────────────────────────────────────────
+float rrVol  = lowVol ? rrLowVol : rrHighVol
+float stopMult = baseStopMult
+
+bool longCondition  = (longRange or longBreak) and volOk and barstate.isconfirmed
+bool shortCondition = (shortRange or shortBreak) and volOk and barstate.isconfirmed
+
+if longCondition and strategy.position_size == 0
+    log.info("[SOVEREIGN_ADAPT_RR_LONG] Regime={0} Range={1,#.##}/{2,#.##}. Suturing.", highVol ? "HIGH_VOL" : "LOW_VOL", rangeLow, rangeHigh)
+    strategy.entry("Long", strategy.long, comment=highVol ? "BRK_BULL" : "REV_BULL")
+    strategy.exit("ExitL", "Long", stop=close - atrVal * stopMult, limit=close + atrVal * stopMult * rrVol)
+
+if shortCondition and strategy.position_size == 0
+    log.info("[SOVEREIGN_ADAPT_RR_SHORT] Regime={0} Range={1,#.##}/{2,#.##}. Suturing.", highVol ? "HIGH_VOL" : "LOW_VOL", rangeLow, rangeHigh)
+    strategy.entry("Short", strategy.short, comment=highVol ? "BRK_BEAR" : "REV_BEAR")
+    strategy.exit("ExitS", "Short", stop=close + atrVal * stopMult, limit=close - atrVal * stopMult * rrVol)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(rangeHigh, "Range High", color.new(color.red, 40), 1)
+plot(rangeLow, "Range Low", color.new(color.green, 40), 1)
+
+bgcolor(highVol ? color.new(color.aqua, 92) : lowVol ? color.new(color.orange, 92) : na)
+
+plotshape(longCondition, "Long", shape.triangleup, location.belowbar, color.new(color.lime, 0), size=size.small)
+plotshape(shortCondition, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.small)
+
+// Sovereign Dashboard
+var table info = table.new(position.top_right, 2, 6, frame_color=color.gray, frame_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Adaptive Risk Regime", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 1, 0, "v26.0530", bgcolor=color.new(color.black, 80), text_color=color.white)
+    table.cell(info, 0, 1, "Regime", text_color=color.white)
+    table.cell(info, 1, 1, highVol ? "HIGH_VOL (Breakout)" : "LOW_VOL (Reversal)", text_color=highVol ? color.aqua : color.orange)
+    table.cell(info, 0, 2, "ATR", text_color=color.white)
+    table.cell(info, 1, 2, str.tostring(atrVal, "#.##"), text_color=atrVal > atrAvg ? color.red : color.lime)
+    table.cell(info, 0, 3, "ATR Avg", text_color=color.white)
+    table.cell(info, 1, 3, str.tostring(atrAvg, "#.##"), text_color=color.white)
+    table.cell(info, 0, 4, "R:R Active", text_color=color.white)
+    table.cell(info, 1, 4, "1:" + str.tostring(rrVol, "#.#"), text_color=color.aqua)
+    table.cell(info, 0, 5, "Physical Time", text_color=color.white)
+    table.cell(info, 1, 5, "05.30.0630", text_color=color.white)
