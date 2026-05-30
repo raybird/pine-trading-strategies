@@ -1,0 +1,176 @@
+//@version=6
+strategy('TeleNexus Sovereign Smooth Trend Radar V6', 'Tn Smooth Trend Radar',
+  overlay=true, max_labels_count=500,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+  commission_type=strategy.commission.percent, commission_value=0.02,
+  slippage=1, max_bars_back=500)
+
+// ───── VERSION CONTROL ────────────────────────────────────────────────
+// Version   : v26.0530.1831
+// Author    : TeleNexus Studio (forked from WavesUnchained Smooth Trend Radar v3.3)
+// Timestamp : 2026-05-30 18:31 CST
+// Core      : Double-smoothed Supertrend + pivot rejection + multi-TP modes
+// ───────────────────────────────────────────────────────────────────────
+
+// ───── INPUTS ─────
+g_trend = 'Trend'
+autoScale   = input.bool(true, 'Auto Timeframe Scaling', group=g_trend)
+stFactor    = input.float(12, 'Supertrend Factor', step=0.5, group=g_trend)
+stAtrPeriod = input.int(90, 'Supertrend ATR Period', group=g_trend)
+wmaLength   = input.int(40, 'WMA Length', group=g_trend)
+emaLength   = input.int(14, 'EMA Length', group=g_trend)
+
+g_rej = 'Rejection'
+contFactor    = input.int(2, 'Min Baseline Touches', minval=1, maxval=5, group=g_rej)
+slopeLookback = input.int(5, 'Slope Lookback', group=g_rej)
+polarityMethod = input.string('Off', 'Polarity Filter',
+  options=['Off','Body','Pressure'], group=g_rej)
+
+g_tp = 'Targets'
+tpMode    = input.string('R-Multiple', 'TP Method',
+  options=['Pivot','R-Multiple','Fibonacci','ATR'], group=g_tp)
+slMode    = input.string('Flip Candle', 'SL Method',
+  options=['Flip Candle','Baseline','Swing'], group=g_tp)
+atrPeriod = input.int(14, 'ATR Period', group=g_tp)
+slMult    = input.float(2.0, 'SL ATR Mult', step=0.1, group=g_tp)
+tpMult    = input.float(3.0, 'TP ATR Mult', step=0.1, group=g_tp)
+rejReentry = input.bool(true, 'Re-Entry After SL Hit', group=g_tp)
+trailBE    = input.bool(false, 'Trail SL to BE at TP1', group=g_tp)
+
+g_risk = 'Risk'
+riskSL     = input.float(1.5, 'Stop Loss (ATR)', step=0.1, group=g_risk)
+riskTP     = input.float(3.0, 'Take Profit (ATR)', step=0.1, group=g_risk)
+useTrail   = input.bool(true, 'Trailing Stop', group=g_risk)
+trailMult  = input.float(0.4, 'Trail ATR Mult', step=0.1, group=g_risk)
+useBE      = input.bool(true, 'Breakeven', group=g_risk)
+beAtrMult  = input.float(0.8, 'BE Trigger ATR', step=0.1, group=g_risk)
+
+g_col = 'Colors'
+bullCol = input.color(#26a69a, 'Bullish', group=g_col)
+bearCol = input.color(#ef5350, 'Bearish', group=g_col)
+
+// ───── TIMEFRAME SCALING ─────
+tf = timeframe.period
+efFactor    = autoScale?(tf=='1'?4.0: tf=='5'?5.0: tf=='15'?6.0: tf=='30'?7.0: tf=='60'?5.0: tf=='240'?10.0: timeframe.isdaily?12.0: timeframe.isweekly?14.0: stFactor): stFactor
+efAtrPeriod = autoScale?(tf=='1'?10: tf=='5'?14: tf=='15'?20: tf=='30'?25: tf=='60'?14: tf=='240'?50: timeframe.isdaily?90: timeframe.isweekly?120: stAtrPeriod): stAtrPeriod
+efWma       = autoScale?(tf=='1'?8: tf=='5'?10: tf=='15'?15: tf=='30'?18: tf=='60'?10: tf=='240'?30: timeframe.isdaily?40: timeframe.isweekly?50: wmaLength): wmaLength
+efEma       = autoScale?(tf=='1'?3: tf=='5'?4: tf=='15'?5: tf=='30'?6: tf=='60'?3: tf=='240'?10: timeframe.isdaily?14: timeframe.isweekly?18: emaLength): emaLength
+efPivBars   = autoScale?(tf=='1'?2: tf=='5'?2: tf=='15'?2: tf=='30'?2: tf=='60'?2: tf=='240'?3: timeframe.isdaily?5: timeframe.isweekly?4: 2): 2
+
+// ───── SUPERTREND MIDLINE ─────
+supertrend(factor, period)=>
+  atr=ta.atr(period)
+  up=hl2+factor*atr; dn=hl2-factor*atr
+  pdn=nz(dn[1]); pup=nz(up[1])
+  dn:=dn>pdn or close[1]<pdn?dn: pdn
+  up:=up<pup or close[1]>pup?up: pup
+  [dn, up]
+
+[lwr, upr] = supertrend(efFactor, efAtrPeriod)
+tL = ta.ema(ta.wma(math.avg(lwr, upr), efWma), efEma)
+
+// ───── TREND DIRECTION ─────
+var int trend = 0
+if ta.crossover(tL, tL[1]); trend := 1
+if ta.crossunder(tL, tL[1]); trend := -1
+
+longSignal  = trend == 1  and trend[1] != 1
+shortSignal = trend == -1 and trend[1] != -1
+
+// ───── REJECTION DETECTION ─────
+pivLow  = ta.pivotlow(low, efPivBars, efPivBars)
+pivHigh = ta.pivothigh(high, efPivBars, efPivBars)
+
+var int bullTouches = 0
+var int bearTouches = 0
+
+bullTouches := 0; bearTouches := 0
+for i = efPivBars to efPivBars + contFactor - 1
+  if trend[i] == 1  and low[i]  <= tL[i]; bullTouches += 1
+  if trend[i] == -1 and high[i] >= tL[i]; bearTouches += 1
+
+pivO = open[efPivBars]; pivH = high[efPivBars]; pivL = low[efPivBars]; pivC = close[efPivBars]
+polBull = polarityMethod=='Off' or (polarityMethod=='Body'?pivC>pivO:(pivC-pivL)>(pivH-pivC))
+polBear = polarityMethod=='Off' or (polarityMethod=='Body'?pivC<pivO:(pivC-pivL)<(pivH-pivC))
+
+rejSignalBull = not na(pivLow) and pivLow<=tL[efPivBars] and trend[efPivBars]==1 and tL[efPivBars]>tL[efPivBars+slopeLookback] and bullTouches>=contFactor and polBull
+rejSignalBear = not na(pivHigh) and pivHigh>=tL[efPivBars] and trend[efPivBars]==-1 and tL[efPivBars]<tL[efPivBars+slopeLookback] and bearTouches>=contFactor and polBear
+
+// ───── SOVEREIGN AUDIT ─────
+var float auditEntryPrice = na
+var int   auditEntryBar    = na
+var string auditMode       = ''
+
+// ───── ENTRY CONDITIONS ─────
+longCondition  = (longSignal or rejSignalBull) and strategy.position_size == 0
+shortCondition = (shortSignal or rejSignalBear) and strategy.position_size == 0
+
+// ───── RE-ENTRY AFTER SL ─────
+var bool slDone = false
+var int  tradeDir = 0
+
+bullRejRe = rejReentry and slDone and tradeDir == 1 and trend == 1 and rejSignalBull
+bearRejRe = rejReentry and slDone and tradeDir == -1 and trend == -1 and rejSignalBear
+
+if longCondition or bullRejRe
+  auditEntryPrice := close; auditEntryBar := bar_index; auditMode := 'Long'; tradeDir := 1; slDone := false
+  strategy.entry('Long', strategy.long)
+  label.new(bar_index, low - ta.atr(atrPeriod), '▲ TREND\nLONG', color=color.new(bullCol,70),
+    style=label.style_label_up, textcolor=bullCol, size=size.small)
+
+if shortCondition or bearRejRe
+  auditEntryPrice := close; auditEntryBar := bar_index; auditMode := 'Short'; tradeDir := -1; slDone := false
+  strategy.entry('Short', strategy.short)
+  label.new(bar_index, high + ta.atr(atrPeriod), '▼ TREND\nSHORT', color=color.new(bearCol,70),
+    style=label.style_label_down, textcolor=bearCol, size=size.small)
+
+// ───── EXIT MANAGEMENT ─────
+atr = ta.atr(atrPeriod)
+
+if useBE and strategy.position_size > 0 and close >= strategy.position_avg_price + atr * beAtrMult
+  strategy.exit('Long BE','Long',stop=strategy.position_avg_price+0.01,
+    limit=strategy.position_avg_price+atr*riskTP)
+if useBE and strategy.position_size < 0 and close <= strategy.position_avg_price - atr * beAtrMult
+  strategy.exit('Short BE','Short',stop=strategy.position_avg_price-0.01,
+    limit=strategy.position_avg_price-atr*riskTP)
+
+if strategy.position_size > 0
+  sl = close - atr * riskSL; tp = close + atr * riskTP
+  if useTrail; strategy.exit('Long X','Long',stop=sl,limit=tp,trail_offset=atr*trailMult)
+  else; strategy.exit('Long X','Long',stop=sl,limit=tp)
+
+if strategy.position_size < 0
+  sl = close + atr * riskSL; tp = close - atr * riskTP
+  if useTrail; strategy.exit('Short X','Short',stop=sl,limit=tp,trail_offset=atr*trailMult)
+  else; strategy.exit('Short X','Short',stop=sl,limit=tp)
+
+// ───── SL HIT DETECTION ─────
+var float prevPosSize = 0
+if prevPosSize != 0 and strategy.position_size == 0
+  slDone := true
+prevPosSize := strategy.position_size
+
+// ───── VISUALS ─────
+plot(tL, 'Trend Baseline', color=color.new(color.orange,30), linewidth=2)
+hline(0, 'Zero', color=color.new(color.gray,80), linestyle=hline.style_dotted)
+
+// ───── SOVEREIGN TABLE ─────
+var table t = table.new(position.bottom_right, 2, 7, border_width=1)
+if barstate.islast
+  table.cell(t,0,0,'Smooth Trend Radar',text_color=color.white,bgcolor=#1565C0,text_size=size.large)
+  table.merge_cells(t,0,0,1,0)
+  table.cell(t,0,1,'Net Profit',text_color=color.white,bgcolor=color.new(color.gray,80))
+  np = strategy.netprofit
+  table.cell(t,1,1,str.tostring(np,'#.##'),text_color=np>=0?bullCol:bearCol)
+  table.cell(t,0,2,'Trades',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,2,str.tostring(strategy.closedtrades))
+  wr = strategy.closedtrades>0?strategy.wintrades/strategy.closedtrades*100:0
+  table.cell(t,0,3,'Win Rate',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,3,str.tostring(wr,'#.#')+'%',text_color=wr>=50?bullCol:bearCol)
+  pf = strategy.grossprofit/math.max(strategy.grossloss,1)
+  table.cell(t,0,4,'PF',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,4,str.tostring(pf,'#.##'),text_color=pf>=2?bullCol:color.yellow)
+  table.cell(t,0,5,'Max DD',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,5,str.tostring(strategy.max_drawdown,'#.##')+'%',text_color=bearCol)
+  table.cell(t,0,6,'Trend',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,6,trend==1?'BULL':'BEAR',text_color=trend==1?bullCol:bearCol)

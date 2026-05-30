@@ -1,0 +1,160 @@
+//@version=6
+// TeleNexus Sovereign: WaveTrend v4 [v26.0531.0630]
+// Spirit Inheritance: WaveTrend v4 by WavesUnchained (casoon/pine-scripts)
+// Timestamp: 2026-05-31 06:30 (CST)
+// Goal: Momentum Reversal via WaveTrend v4 Oscillator with Multi-TF OS/OB Quality Gates
+//
+// Logic Chain:
+// 1. WaveTrend Oscillator: esa=ema(hlc3,chLen), d=ema(|hlc3-esa|,chLen), ci=(hlc3-esa)/(0.015*d), wt1=ema(ci,avgLen), wt2=sma(wt1,sigLen)
+// 2. Multi-TF OS/OB Levels: TF-specific thresholds for 15m, 1H, 4H, 1D
+// 3. Quality Gates: Gate A (ATR Rank band killer), Gate C (HTF exhaustion filter), Gate G (counter-trend range filter)
+// 4. ATR Risk Management: 1.5x SL, 3x TP per TF
+// 5. Cooldown, Session Filter, Direction Mode
+
+strategy("TnSovereignWaveTrendV4",
+     shorttitle         = "Tn_WT_V4",
+     overlay            = true,
+     initial_capital    = 100000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 10,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 1)
+
+// ── TeleNexus Branding & Version ─────────────────────────────────────────────
+// TeleNexus Sovereign Engine v26.0531.0630
+// Build Timestamp: 2026-05-31 06:30 (CST)
+// ============================================================================
+// Source Attribution: Port of WaveTrend v4 by WavesUnchained (casoon/pine-scripts)
+// Original: https://github.com/casoon/pine-scripts
+// ============================================================================
+
+// ── WaveTrend Engine ─────────────────────────────────────────────────────────
+tn_group_wt = "▼ WaveTrend Engine"
+tn_chLen    = input.int(10, "Channel Length (chLen)", minval=1, group=tn_group_wt)
+tn_avgLen   = input.int(21, "Average Length (avgLen)", minval=1, group=tn_group_wt)
+tn_sigLen   = input.int(4,  "Signal Length (sigLen)",  minval=1, group=tn_group_wt)
+
+// ── Multi-TF OS/OB Levels ────────────────────────────────────────────────────
+tn_group_levels = "▼ OS/OB Levels (per Timeframe)"
+tn_ob_15m  = input.int(60,  "OB 15m",  group=tn_group_levels)
+tn_os_15m  = input.int(-60, "OS 15m",  group=tn_group_levels)
+tn_ob_1h   = input.int(53,  "OB 1H",   group=tn_group_levels)
+tn_os_1h   = input.int(-53, "OS 1H",   group=tn_group_levels)
+tn_ob_4h   = input.int(50,  "OB 4H",   group=tn_group_levels)
+tn_os_4h   = input.int(-50, "OS 4H",   group=tn_group_levels)
+tn_ob_1d   = input.int(45,  "OB 1D",   group=tn_group_levels)
+tn_os_1d   = input.int(-45, "OS 1D",   group=tn_group_levels)
+
+// ── Quality Gates ────────────────────────────────────────────────────────────
+tn_group_gates = "▼ Quality Gates"
+tn_gate_a     = input.bool(true,  "Gate A: ATR Rank band killer",   group=tn_group_gates)
+tn_gate_c     = input.bool(true,  "Gate C: HTF exhaustion filter",  group=tn_group_gates)
+tn_gate_g     = input.bool(true,  "Gate G: Counter-trend range filter", group=tn_group_gates)
+tn_atr_rank_len = input.int(50,  "ATR Rank Length", minval=10, group=tn_group_gates)
+tn_htf_tf     = input.timeframe("240", "HTF (for exhaustion filter)", group=tn_group_gates)
+
+// ── Risk Management ──────────────────────────────────────────────────────────
+tn_group_risk = "▼ Risk Management"
+tn_atr_len   = input.int(14,  "ATR Length",  minval=1, group=tn_group_risk)
+tn_sl_mult   = input.float(1.5, "SL Multiplier",  minval=0.5, step=0.1, group=tn_group_risk)
+tn_tp_mult   = input.float(3.0, "TP Multiplier",  minval=1.0, step=0.1, group=tn_group_risk)
+
+// ── Entry Controls ───────────────────────────────────────────────────────────
+tn_group_entry = "▼ Entry Controls"
+tn_cooldown   = input.int(5,   "Cooldown (bars after exit)", minval=0, group=tn_group_entry)
+tn_session    = input.session("0000-0000", "Session Filter (empty=any)", group=tn_group_entry)
+tn_direction  = input.string("Both", "Direction Mode", options=["Both", "Long Only", "Short Only"], group=tn_group_entry)
+
+// ── TF Resolution ────────────────────────────────────────────────────────────
+float _tfSec = timeframe.in_seconds()
+tn_ob = _tfSec <= 900  ? tn_ob_15m : _tfSec <= 3600 ? tn_ob_1h : _tfSec <= 14400 ? tn_ob_4h : tn_ob_1d
+tn_os = _tfSec <= 900  ? tn_os_15m : _tfSec <= 3600 ? tn_os_1h : _tfSec <= 14400 ? tn_os_4h : tn_os_1d
+
+// ── WaveTrend Core ───────────────────────────────────────────────────────────
+float _ap = hlc3
+float _esa = ta.ema(_ap, tn_chLen)
+float _d   = ta.ema(math.abs(_ap - _esa), tn_chLen)
+float _ci  = (_ap - _esa) / (0.015 * _d)
+float wt1  = ta.ema(_ci, tn_avgLen)
+float wt2  = ta.sma(wt1, tn_sigLen)
+
+float _osc = wt1
+float _sig = wt2
+
+// ── Cross Detection ──────────────────────────────────────────────────────────
+bool _crossUp   = ta.crossover(_osc, _sig)
+bool _crossDn   = ta.crossunder(_osc, _sig)
+
+// ── Gate A: ATR Rank Band Killer ─────────────────────────────────────────────
+// Suppresses entries when ATR rank is elevated (high-volatility regimes)
+float _atrVal    = ta.atr(tn_atr_len)
+float _atrRank   = ta.percentrank(_atrVal, tn_atr_rank_len)
+bool  _gateAPass = not tn_gate_a or (not na(_atrRank) and _atrRank < 70)
+
+// ── Gate C: HTF Exhaustion Filter ────────────────────────────────────────────
+// Checks if HTF WaveTrend is in extreme zone (exhaustion context)
+f_get_wt(float _s, int _n1, int _n2, int _s1) =>
+    float _e = ta.ema(_s, _n1)
+    float _dd = ta.ema(math.abs(_s - _e), _n1)
+    float _cc = (_s - _e) / (0.015 * _dd)
+    float _w1 = ta.ema(_cc, _n2)
+    float _w2 = ta.sma(_w1, _s1)
+    [_w1, _w2]
+
+[_htfWt1, _htfWt2] = request.security(syminfo.tickerid, tn_htf_tf,
+     f_get_wt(hlc3, tn_chLen, tn_avgLen, tn_sigLen),
+     lookahead = barmerge.lookahead_off)
+
+bool _htfOS = not tn_gate_c or na(_htfWt1) or _htfWt1 < tn_os
+bool _htfOB = not tn_gate_c or na(_htfWt1) or _htfWt1 > tn_ob
+
+// ── Gate G: Counter-Trend Range Filter ───────────────────────────────────────
+// Blocks counter-trend entries when range is too wide for mean reversion
+float _rangePct = (high - low) / (close + 1e-10) * 100
+float _rangeAvg = ta.sma(_rangePct, 20)
+bool  _gateGPass = not tn_gate_g or (not na(_rangeAvg) and _rangePct <= _rangeAvg * 1.5)
+
+// ── Entry Logic ──────────────────────────────────────────────────────────────
+bool _longOK  = _crossUp  and _osc < tn_os and _gateAPass and _htfOS and _gateGPass
+bool _shortOK = _crossDn  and _osc > tn_ob and _gateAPass and _htfOB and _gateGPass
+
+// ── Direction Mode ───────────────────────────────────────────────────────────
+_longOK  := _longOK  and (tn_direction == "Both" or tn_direction == "Long Only")
+_shortOK := _shortOK and (tn_direction == "Both" or tn_direction == "Short Only")
+
+// ── Session Filter ───────────────────────────────────────────────────────────
+bool _inSession = tn_session == "0000-0000" or na(tn_session) or time(tn_session)
+_longOK  := _longOK  and _inSession
+_shortOK := _shortOK and _inSession
+
+// ── Cooldown ─────────────────────────────────────────────────────────────────
+var int _barsSinceExit = 999
+_barsSinceExit := strategy.position_size == 0 ? _barsSinceExit + 1 : 0
+bool _cooledDown = _barsSinceExit >= tn_cooldown
+
+_longOK  := _longOK  and _cooledDown
+_shortOK := _shortOK and _cooledDown
+
+// ── Execution ────────────────────────────────────────────────────────────────
+float _slPrice = na
+float _tpPrice = na
+
+if _longOK and strategy.position_size == 0
+    _slPrice := close - _atrVal * tn_sl_mult
+    _tpPrice := close + _atrVal * tn_tp_mult
+    strategy.entry("Tn_Long", strategy.long, comment="WT_V4_L")
+    strategy.exit("Tn_Long_X", "Tn_Long", stop=_slPrice, limit=_tpPrice)
+
+if _shortOK and strategy.position_size == 0
+    _slPrice := close + _atrVal * tn_sl_mult
+    _tpPrice := close - _atrVal * tn_tp_mult
+    strategy.entry("Tn_Short", strategy.short, comment="WT_V4_S")
+    strategy.exit("Tn_Short_X", "Tn_Short", stop=_slPrice, limit=_tpPrice)
+
+// ── Visuals ──────────────────────────────────────────────────────────────────
+plot(_osc,  "WT1 (Oscillator)", color=color.new(#0ea5e9, 0), linewidth=2)
+plot(_sig,  "WT2 (Signal)",    color=color.new(#f97316, 20), linewidth=1)
+hline(tn_ob, "OB", color=color.new(color.red, 50), linestyle=hline.style_dashed)
+hline(tn_os, "OS", color=color.new(color.green, 50), linestyle=hline.style_dashed)
+hline(0,     "Zero", color=color.new(color.gray, 40), linestyle=hline.style_solid)

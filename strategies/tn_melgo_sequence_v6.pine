@@ -1,0 +1,304 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — Melgo Sequence v6
+// Version: v26.0531.0630
+// Build: 2026-05-31 06:30 (CST)
+// Author: TeleNexus Research
+// Source: Port of Melgo Sequence by Jeff Rey Melgo (@JeffMelgo)
+//         ssrn.com/abstract=6658238
+// ============================================================================
+// Six-state public classifier based on multi-source price synthesis.
+// States: Bull Trend, Bear Trend, Bull Rejection, Bear Indecision,
+//         Distribution, Accumulation.
+// Multi-timeframe consensus engine with spread threshold for entry.
+// ============================================================================
+
+strategy("TeleNexus Sovereign — Melgo Sequence v6",
+     overlay             = true,
+     calc_on_order_fills = true,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 100,
+     initial_capital     = 10000,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.02,
+     slippage            = 1)
+
+// ─── TeleNexus Sovereign Inputs (tn_ prefix) ─────────────────────────────────
+group_melgo   = "Melgo Sequence"
+group_risk    = "Risk Management"
+group_strat   = "Strategy"
+group_tf      = "Timeframes"
+
+// Price synthesis mode selection
+tn_priceSource = input.string("HLC3", "Price Source (NA/SC/FOT)",
+     options=["HL2", "HLC3", "OHLC4"], group=group_melgo,
+     tooltip="NA=HL2 (Neutral Axis), SC=HLC3 (Session Close), FOT=OHLC4 (Full Open Thread)")
+
+// Classifier thresholds
+tn_trendStrength   = input.float(0.6,  "Trend Strength Threshold",  minval=0.1, maxval=1.0, step=0.05, group=group_melgo)
+tn_rejectionThresh = input.float(0.3,  "Rejection Threshold",       minval=0.1, maxval=1.0, step=0.05, group=group_melgo)
+tn_distribThresh   = input.float(0.4,  "Distribution Threshold",    minval=0.1, maxval=1.0, step=0.05, group=group_melgo)
+tn_accumThresh     = input.float(0.4,  "Accumulation Threshold",    minval=0.1, maxval=1.0, step=0.05, group=group_melgo)
+
+// Spread and consensus
+tn_spreadMin      = input.float(2.0, "Min Spread (ATR×) for Entry", minval=0.5, maxval=10.0, step=0.5, group=group_melgo)
+tn_consensusCount = input.int(2,     "Min TFs for Consensus",       minval=1, maxval=4, group=group_melgo)
+
+// ATR-based risk
+tn_atrLen     = input.int(14,   "ATR Length",       minval=1, group=group_risk)
+tn_slMult     = input.float(1.5, "Stop-Loss (ATR×)", minval=0.1, step=0.1, group=group_risk)
+tn_tpMult     = input.float(3.0, "Take-Profit (ATR×)", minval=0.1, step=0.5, group=group_risk)
+
+// Strategy controls
+tn_cooldown      = input.int(3,     "Cooldown Bars After Exit", minval=0, group=group_strat)
+tn_posPct        = input.float(100, "Position % of Equity",     minval=1, maxval=100, step=1, group=group_strat)
+tn_dirMode       = input.string("Both", "Trade Direction",
+     options=["Both", "Long Only", "Short Only"], group=group_strat)
+tn_showLabels    = input.bool(true, "Show Entry Labels", group=group_strat)
+
+// ─── Price Synthesis ─────────────────────────────────────────────────────────
+f_synthPrice(src) =>
+    switch src
+        "HL2"   => hl2
+        "HLC3"  => hlc3
+        "OHLC4" => ohlc4
+        => hlc3
+
+tn_price = f_synthPrice(tn_priceSource)
+
+// ─── Melgo Sequence Six-State Classifier ─────────────────────────────────────
+// Core logic: compare relationship between synthesized price, its momentum,
+// and volume-weighted deviation to classify into six discrete market states.
+
+// Momentum components
+tn_emaFast  = ta.ema(tn_price, 9)
+tn_emaSlow  = ta.ema(tn_price, 21)
+tn_emaTrend = ta.ema(tn_price, 50)
+tn_mom      = tn_price - tn_price[1]
+tn_momAvg   = ta.sma(tn_mom, 14)
+
+// Relative strength of trend
+tn_trendStrengthVal = math.abs(tn_emaFast - tn_emaSlow) / math.max(ta.atr(tn_atrLen), syminfo.mintick)
+tn_isStrongTrend    = tn_trendStrengthVal >= tn_trendStrength
+
+// Mean reversion / rejection detection
+tn_deviation = (tn_price - tn_emaTrend) / math.max(ta.stdev(tn_price, 50), syminfo.mintick)
+tn_isOverext = math.abs(tn_deviation) > 1.5
+
+// Volume-weighted classification factors
+tn_vwma = ta.vwma(tn_price, 14)
+tn_vwDev = (tn_price - tn_vwma) / math.max(ta.atr(tn_atrLen), syminfo.mintick)
+
+// State enum
+enum MelgoState
+    BULL_TREND
+    BEAR_TREND
+    BULL_REJECTION
+    BEAR_INDECISION
+    DISTRIBUTION
+    ACCUMULATION
+    NEUTRAL
+
+f_classifyState(price, fastEMA, slowEMA, trendEMA, mom, momAvg, trendStr, isStrong, deviation, isOverext, vwDev) =>
+    // Trend direction
+    bool uptrend  = fastEMA > slowEMA and price > trendEMA
+    bool downtrend = fastEMA < slowEMA and price < trendEMA
+
+    // Momentum confirmation
+    bool momUp   = mom > 0 and mom > momAvg
+    bool momDown = mom < 0 and mom < momAvg
+
+    // Classification logic: faithful to Melgo's six-state taxonomy
+    if uptrend and isStrong and momUp and not isOverext
+        MelgoState.BULL_TREND
+    else if downtrend and isStrong and momDown and not isOverext
+        MelgoState.BEAR_TREND
+    else if uptrend and isOverext and momDown
+        MelgoState.BULL_REJECTION
+    else if downtrend and isOverext and momUp
+        MelgoState.BEAR_INDECISION
+    else if uptrend and isOverext and vwDev < 0
+        MelgoState.DISTRIBUTION
+    else if downtrend and isOverext and vwDev > 0
+        MelgoState.ACCUMULATION
+    else
+        MelgoState.NEUTRAL
+
+tn_state = f_classifyState(tn_price, tn_emaFast, tn_emaSlow, tn_emaTrend,
+     tn_mom, tn_momAvg, tn_trendStrengthVal, tn_isStrongTrend,
+     tn_deviation, tn_isOverext, tn_vwDev)
+
+// ─── State Helpers ───────────────────────────────────────────────────────────
+tn_isBullTrend      = tn_state == MelgoState.BULL_TREND
+tn_isBearTrend      = tn_state == MelgoState.BEAR_TREND
+tn_isBullRejection  = tn_state == MelgoState.BULL_REJECTION
+tn_isBearIndecision = tn_state == MelgoState.BEAR_INDECISION
+tn_isDistribution   = tn_state == MelgoState.DISTRIBUTION
+tn_isAccumulation   = tn_state == MelgoState.ACCUMULATION
+
+tn_isLongFavorable  = tn_isBullTrend or tn_isAccumulation or tn_isBullRejection
+tn_isShortFavorable = tn_isBearTrend or tn_isDistribution or tn_isBearIndecision
+
+// ─── Multi-Timeframe Consensus ───────────────────────────────────────────────
+tn_htfPeriods = array.from("240", "60", "15", "D")
+
+f_tfContext(tf) =>
+    [state, emaF, emaS, priceSrc] = request.security(syminfo.tickerid, tf,
+         [tn_state, tn_emaFast, tn_emaSlow, tn_price],
+         barmerge.gaps_off, barmerge.lookahead_off)
+    [state, emaF, emaS, priceSrc]
+
+// Build consensus by fetching state from each HTF
+tn_state240    = request.security(syminfo.tickerid, "240", tn_state,    barmerge.gaps_off, barmerge.lookahead_off)
+tn_state60     = request.security(syminfo.tickerid, "60",  tn_state,    barmerge.gaps_off, barmerge.lookahead_off)
+tn_state15     = request.security(syminfo.tickerid, "15",  tn_state,    barmerge.gaps_off, barmerge.lookahead_off)
+tn_state1D     = request.security(syminfo.tickerid, "D",   tn_state,    barmerge.gaps_off, barmerge.lookahead_off)
+
+// Macro (4H), Bias (1H), Micro (15M), Context (1D)
+tn_Macro  = tn_state240
+tn_Bias   = tn_state60
+tn_Micro  = tn_state15
+tn_Context = tn_state1D
+
+f_isLongFav(state) =>
+    state == MelgoState.BULL_TREND or state == MelgoState.ACCUMULATION or state == MelgoState.BULL_REJECTION
+
+f_isShortFav(state) =>
+    state == MelgoState.BEAR_TREND or state == MelgoState.DISTRIBUTION or state == MelgoState.BEAR_INDECISION
+
+tn_longConsensus = (f_isLongFav(tn_Macro) ? 1 : 0)
+                  + (f_isLongFav(tn_Bias) ? 1 : 0)
+                  + (f_isLongFav(tn_Micro) ? 1 : 0)
+                  + (f_isLongFav(tn_Context) ? 1 : 0)
+
+tn_shortConsensus = (f_isShortFav(tn_Macro) ? 1 : 0)
+                   + (f_isShortFav(tn_Bias) ? 1 : 0)
+                   + (f_isShortFav(tn_Micro) ? 1 : 0)
+                   + (f_isShortFav(tn_Context) ? 1 : 0)
+
+// ─── ATR, Spread, Risk ────────────────────────────────────────────────────────
+tn_atr     = ta.atr(tn_atrLen)
+tn_spread  = (ta.highest(high, 14) - ta.lowest(low, 14)) / math.max(tn_atr, syminfo.mintick)
+tn_spreadOk = tn_spread >= tn_spreadMin
+
+// ─── Entry Conditions ─────────────────────────────────────────────────────────
+tn_canLong  = tn_dirMode != "Short Only"
+tn_canShort = tn_dirMode != "Long Only"
+
+tn_longCond  = tn_canLong  and tn_longConsensus  >= tn_consensusCount and tn_spreadOk and tn_isLongFavorable
+tn_shortCond = tn_canShort and tn_shortConsensus >= tn_consensusCount and tn_spreadOk and tn_isShortFavorable
+
+// ─── Trade State ─────────────────────────────────────────────────────────────
+varip float tn_longSL   = na
+varip float tn_longTP   = na
+varip float tn_shortSL  = na
+varip float tn_shortTP  = na
+varip float tn_longRisk = na
+varip float tn_shortRisk = na
+
+varip int   tn_lastExitBar = na
+varip bool  tn_exitLocked  = false
+varip int   tn_barLockIdx  = -1
+
+if bar_index != tn_barLockIdx
+    tn_barLockIdx  := bar_index
+    tn_exitLocked  := false
+
+tn_inPosition = strategy.position_size != 0
+tn_cooldownOk = na(tn_lastExitBar) or (bar_index - tn_lastExitBar) > tn_cooldown
+
+// ─── Entries ─────────────────────────────────────────────────────────────────
+if tn_longCond and not tn_inPosition and tn_cooldownOk and not tn_exitLocked
+    tn_entryPrice = close
+    tn_longSL    := tn_entryPrice - tn_slMult * tn_atr
+    tn_longTP    := tn_entryPrice + tn_tpMult * tn_atr
+    tn_longRisk  := math.max(tn_entryPrice - tn_longSL, syminfo.mintick)
+    tn_shortSL   := na
+    tn_shortTP   := na
+    tn_shortRisk := na
+    strategy.entry("TN Melgo Long", strategy.long, qty=tn_posPct / 100 * strategy.equity / close)
+
+if tn_shortCond and not tn_inPosition and tn_cooldownOk and not tn_exitLocked
+    tn_entryPrice = close
+    tn_shortSL   := tn_entryPrice + tn_slMult * tn_atr
+    tn_shortTP   := tn_entryPrice - tn_tpMult * tn_atr
+    tn_shortRisk := math.max(tn_shortSL - tn_entryPrice, syminfo.mintick)
+    tn_longSL    := na
+    tn_longTP    := na
+    tn_longRisk  := na
+    strategy.entry("TN Melgo Short", strategy.short, qty=tn_posPct / 100 * strategy.equity / close)
+
+// ─── Exits (ATR-based SL/TP) ──────────────────────────────────────────────────
+if strategy.position_size > 0 and not na(tn_longSL)
+    strategy.exit("TN Melgo Long Exit", "TN Melgo Long",
+         stop=tn_longSL, limit=tn_longTP,
+         comment_profit="tp", comment_loss="sl")
+
+if strategy.position_size < 0 and not na(tn_shortSL)
+    strategy.exit("TN Melgo Short Exit", "TN Melgo Short",
+         stop=tn_shortSL, limit=tn_shortTP,
+         comment_profit="tp", comment_loss="sl")
+
+// Track exits for cooldown
+if strategy.closedtrades > strategy.closedtrades[1]
+    tn_lastExitBar := bar_index
+    tn_exitLocked  := true
+
+// ─── State Labels (visual) ───────────────────────────────────────────────────
+f_stateLabel(state) =>
+    switch state
+        MelgoState.BULL_TREND      => "Bull Trend"
+        MelgoState.BEAR_TREND      => "Bear Trend"
+        MelgoState.BULL_REJECTION  => "Bull Rej"
+        MelgoState.BEAR_INDECISION => "Bear Indec"
+        MelgoState.DISTRIBUTION    => "Distrib"
+        MelgoState.ACCUMULATION    => "Accum"
+        => "Neutral"
+
+f_stateColor(state) =>
+    switch state
+        MelgoState.BULL_TREND      => color.new(#00c853, 0)
+        MelgoState.BEAR_TREND      => color.new(#d50000, 0)
+        MelgoState.BULL_REJECTION  => color.new(#00c853, 50)
+        MelgoState.BEAR_INDECISION => color.new(#d50000, 50)
+        MelgoState.DISTRIBUTION    => color.new(#ff6d00, 0)
+        MelgoState.ACCUMULATION    => color.new(#2979ff, 0)
+        => color.new(color.gray, 70)
+
+if tn_showLabels and tn_state != MelgoState.NEUTRAL
+    label.new(bar_index, low - tn_atr * 0.5,
+         f_stateLabel(tn_state),
+         xloc=xloc.bar_index, yloc=yloc.price,
+         style=label.style_label_up, color=f_stateColor(tn_state),
+         textcolor=color.white, size=size.tiny, force_overlay=true)
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+tn_stateMacroStr  = f_stateLabel(tn_Macro)
+tn_stateBiasStr   = f_stateLabel(tn_Bias)
+tn_stateMicroStr  = f_stateLabel(tn_Micro)
+tn_stateCtxStr    = f_stateLabel(tn_Context)
+
+if barstate.islast and tn_showLabels
+    label.new(bar_index, high + tn_atr * 3,
+         'Melgo Sequence\n────────────\n' +
+         'Macro (4H): ' + tn_stateMacroStr + '\n' +
+         'Bias  (1H): ' + tn_stateBiasStr + '\n' +
+         'Micro(15M): ' + tn_stateMicroStr + '\n' +
+         'Ctx   (1D): ' + tn_stateCtxStr + '\n' +
+         'Spread: ' + str.tostring(tn_spread, '#.##') + '× ATR\n' +
+         'Long Cns: ' + str.tostring(tn_longConsensus) + '/4\n' +
+         'Short Cns: ' + str.tostring(tn_shortConsensus) + '/4' +
+         (tn_inPosition ? '\n────────\nIN POSITION' : ''),
+         xloc=xloc.bar_index, yloc=yloc.price,
+         style=label.style_label_down, color=color.new(#1a1a2e, 30),
+         textcolor=color.white, size=size.small, force_overlay=true)
+
+// ─── Background tint for active states ───────────────────────────────────────
+tn_bgColor = tn_isBullTrend      ? color.new(#00c853, 90) :
+             tn_isBearTrend      ? color.new(#d50000, 90) :
+             tn_isBullRejection  ? color.new(#00c853, 93) :
+             tn_isBearIndecision ? color.new(#d50000, 93) :
+             tn_isDistribution   ? color.new(#ff6d00, 93) :
+             tn_isAccumulation   ? color.new(#2979ff, 93) : na
+
+bgcolor(tn_bgColor, title="State Background")

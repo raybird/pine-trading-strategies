@@ -1,0 +1,262 @@
+//@version=6
+strategy('TeleNexus Sovereign Chandelier Flip Radar V6', 'Tn Chandelier Flip Radar',
+  overlay=true, max_lines_count=500, max_labels_count=500,
+  default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+  commission_type=strategy.commission.percent, commission_value=0.02,
+  slippage=1, max_bars_back=500)
+
+// ───── VERSION CONTROL ────────────────────────────────────────────────
+// Version   : v26.0530.1831
+// Author    : TeleNexus Studio (forked from WavesUnchained Chandelier Flip Radar v1.4)
+// Timestamp : 2026-05-30 18:31 CST
+// Core      : 5-level trend state + ATR trailing stop + K-means adaptive multiplier
+// ───────────────────────────────────────────────────────────────────────
+
+// ───── INPUTS ─────
+g_calc = 'Calculation'
+atrLen     = input.int(30, 'ATR Period', group=g_calc)
+atrMult    = input.float(4.5, 'ATR Multiplier', step=0.1, group=g_calc)
+useClose   = input.bool(true, 'Use Close for Extremums', group=g_calc)
+adaptMode  = input.string('Off', 'Adaptive Multiplier',
+  options=['Off','Simple','AI (K-means)'], group=g_calc)
+aiRange    = input.float(0.5, 'AI Factor Range (+-)', step=0.5, group=g_calc)
+aiStep     = input.float(0.5, 'AI Factor Step', step=0.1, group=g_calc)
+perfAlpha  = input.float(10, 'AI Performance Memory', step=1, group=g_calc)
+aiCluster  = input.string('Best', 'AI Cluster',
+  options=['Best','Average','Worst'], group=g_calc)
+bodyFilter = input.float(0.80, 'Min Body for Flip (ATRx)', step=0.05, group=g_calc)
+
+g_state = 'State Thresholds'
+dangerDist = input.float(0.35, 'Danger Zone (ATRx)', step=0.05, group=g_state)
+warnDist   = input.float(0.75, 'Warning Zone (ATRx)', step=0.05, group=g_state)
+
+g_risk = 'Risk Management'
+slMult     = input.float(1.5, 'Stop Loss (ATR)', step=0.1, group=g_risk)
+tpMult     = input.float(3.0, 'Take Profit (ATR)', step=0.1, group=g_risk)
+useTrail   = input.bool(true, 'Trailing Stop', group=g_risk)
+trailMult  = input.float(0.4, 'Trail ATR Mult', step=0.1, group=g_risk)
+useBE      = input.bool(true, 'Breakeven', group=g_risk)
+beAtrMult  = input.float(0.8, 'BE Trigger ATR', step=0.1, group=g_risk)
+
+g_vis = 'Visuals'
+showLabels = input.bool(true, 'Show Flip Labels', group=g_vis)
+showTraps  = input.bool(true, 'Show Traps', group=g_vis)
+colorBars  = input.bool(true, 'Color Bars by State', group=g_vis)
+
+g_col = 'Colors'
+bullCol    = input.color(#26a69a, 'Bullish', group=g_col)
+bearCol    = input.color(#ef5350, 'Bearish', group=g_col)
+warnCol    = input.color(#ffd600, 'Warning', group=g_col)
+dangerCol  = input.color(#ff6f00, 'Danger', group=g_col)
+
+// ───── ATR CALC ─────
+atrRaw = ta.atr(atrLen)
+atrAvg = nz(ta.sma(atrRaw, 100), atrRaw)
+volRatio = atrRaw / atrAvg
+
+// ───── AI K-MEANS ADAPTIVE MULTIPLIER ─────
+type STPerf
+  float upper
+  float lower
+  float output
+  float perf  = 0.0
+  float factor = 0.0
+  int   trend  = 1
+
+var array<STPerf> stInst    = array.new<STPerf>()
+var array<float>  stFactors = array.new<float>()
+
+if barstate.isfirst
+  f = atrMult - aiRange
+  while f <= atrMult + aiRange + aiStep * 0.01
+    stFactors.push(f)
+    stInst.push(STPerf.new(factor=f))
+    f += aiStep
+
+var float aiMult    = atrMult
+var float aiPerfIdx = 0.0
+
+if adaptMode == 'AI (K-means)' and stInst.size() > 0
+  for inst in stInst
+    up  = hl2 + atrRaw * inst.factor
+    dn  = hl2 - atrRaw * inst.factor
+    inst.upper  := na(inst.upper) ? up : (close[1] < inst.upper ? math.min(up, inst.upper) : up)
+    inst.lower  := na(inst.lower) ? dn : (close[1] > inst.lower ? math.max(dn, inst.lower) : dn)
+    inst.trend  := close > inst.upper ? 1 : close < inst.lower ? 0 : inst.trend
+    diff         = nz(math.sign(close[1] - nz(inst.output, hl2)))
+    inst.perf   += 2 / (perfAlpha + 1) * (nz(close - close[1]) * diff - inst.perf)
+    inst.output := inst.trend == 1 ? inst.lower : inst.upper
+
+  pd = array.new<float>()
+  fd = array.new<float>()
+  for inst in stInst
+    pd.push(inst.perf)
+    fd.push(inst.factor)
+
+  c = array.from(pd.percentile_linear_interpolation(25),
+    pd.percentile_linear_interpolation(50),
+    pd.percentile_linear_interpolation(75))
+
+  cf0=array.new<float>(); cf1=array.new<float>(); cf2=array.new<float>()
+  cp0=array.new<float>(); cp1=array.new<float>(); cp2=array.new<float>()
+
+  for _ = 0 to 49
+    cf0.clear(); cf1.clear(); cf2.clear()
+    cp0.clear(); cp1.clear(); cp2.clear()
+    for i = 0 to pd.size() - 1
+      d0=math.abs(pd.get(i)-c.get(0)); d1=math.abs(pd.get(i)-c.get(1)); d2=math.abs(pd.get(i)-c.get(2))
+      idx = d0<=d1 and d0<=d2 ? 0 : d1<=d2 ? 1 : 2
+      switch idx
+        0 => cf0.push(fd.get(i)); cp0.push(pd.get(i))
+        1 => cf1.push(fd.get(i)); cp1.push(pd.get(i))
+        2 => cf2.push(fd.get(i)); cp2.push(pd.get(i))
+    n0=cp0.size()>0?cp0.avg():c.get(0); n1=cp1.size()>0?cp1.avg():c.get(1); n2=cp2.size()>0?cp2.avg():c.get(2)
+    if n0==c.get(0) and n1==c.get(1) and n2==c.get(2); break
+    c.set(0,n0); c.set(1,n1); c.set(2,n2)
+
+  c0v=c.get(0); c1v=c.get(1); c2v=c.get(2)
+  bestIdx=c0v>=c1v and c0v>=c2v?0: c1v>=c2v?1:2
+  worstIdx=c0v<=c1v and c0v<=c2v?0: c1v<=c2v?1:2
+  avgIdx=math.max(0,math.min(2,3-bestIdx-worstIdx))
+  tIdx=aiCluster=='Best'?bestIdx: aiCluster=='Worst'?worstIdx: avgIdx
+  tFactors=tIdx==0?cf0: tIdx==1?cf1: cf2
+  tPerfs=  tIdx==0?cp0: tIdx==1?cp1: cp2
+  aiMult:=tFactors.size()>0?nz(tFactors.avg(),atrMult): atrMult
+  den=math.max(nz(ta.ema(math.abs(close-close[1]),int(perfAlpha)),1e-10),1e-10)
+  aiPerfIdx:=tPerfs.size()>0?math.min(math.max(tPerfs.avg(),0.0)/den,1.0):0.0
+
+dynMult = switch adaptMode
+  'Simple'       => volRatio>1.3?atrMult*1.2: volRatio<0.8?atrMult*0.85: atrMult
+  'AI (K-means)' => aiMult
+  => atrMult
+atr = dynMult * atrRaw
+
+// ───── TRAILING STOPS WITH RATCHET ─────
+longStop     = (useClose ? ta.highest(close, atrLen) : ta.highest(high, atrLen)) - atr
+longStopPrev = nz(longStop[1], longStop)
+longStop    := close[1] > longStopPrev ? math.max(longStop, longStopPrev) : longStop
+
+shortStop     = (useClose ? ta.lowest(close, atrLen) : ta.lowest(low, atrLen)) + atr
+shortStopPrev = nz(shortStop[1], shortStop)
+shortStop    := close[1] < shortStopPrev ? math.min(shortStop, shortStopPrev) : shortStop
+
+// ───── BODY FILTER & DIRECTION ─────
+bodyOk    = bodyFilter <= 0.0 or math.abs(close - open) >= atrRaw * bodyFilter
+flipLong  = close > shortStopPrev and bodyOk
+flipShort = close < longStopPrev  and bodyOk
+
+var int dir = 1
+dir := flipLong ? 1 : flipShort ? -1 : dir
+
+buySignal  = dir == 1  and dir[1] == -1
+sellSignal = dir == -1 and dir[1] == 1
+
+// ───── STATE CLASSIFICATION ─────
+triggerStop = dir == 1 ? longStopPrev : shortStopPrev
+distAtr     = math.abs(close - triggerStop) / math.max(atrRaw, 1e-10)
+
+warnLvl = math.max(warnDist, dangerDist + 0.05)
+danger  = distAtr < dangerDist
+warn    = not danger and distAtr < warnLvl
+
+ema5 = ta.ema(close, 5)
+pullbackLong  = dir == 1  and close < ema5
+pullbackShort = dir == -1 and close > ema5
+
+int state = 0
+if not danger
+  if dir == 1; state := (warn or pullbackLong) ? 1 : 2
+  else;        state := (warn or pullbackShort) ? -1 : -2
+
+// Trap markers
+bullTrap = dir == -1 and high > shortStopPrev and close <= shortStopPrev
+bearTrap = dir == 1  and low  < longStopPrev  and close >= longStopPrev
+
+// ───── BAR COLORING ─────
+barColor = switch
+  danger                                    => dangerCol
+  warn                                      => warnCol
+  state == 2 or state == 1                  => bullCol
+  state == -2 or state == -1                => bearCol
+  => color.gray
+barcolor(colorBars ? barColor : na)
+
+// ───── SOVEREIGN AUDIT: CAUSAL STATE ─────
+var float auditEntryPrice = na
+var int   auditEntryBar    = na
+var string auditMode       = ''
+var float auditEntryATR    = na
+
+// ───── ENTRY CONDITIONS ─────
+longCondition  = buySignal and dir == 1 and strategy.position_size == 0
+shortCondition = sellSignal and dir == -1 and strategy.position_size == 0
+
+if longCondition
+  auditEntryPrice := close; auditEntryBar := bar_index; auditEntryATR := atr; auditMode := 'Long'
+  strategy.entry('Long', strategy.long)
+  if showLabels
+    label.new(bar_index, low - atrRaw, '▲ FLIP\nLONG', color=color.new(bullCol,70),
+      style=label.style_label_up, textcolor=bullCol, size=size.small)
+
+if shortCondition
+  auditEntryPrice := close; auditEntryBar := bar_index; auditEntryATR := atr; auditMode := 'Short'
+  strategy.entry('Short', strategy.short)
+  if showLabels
+    label.new(bar_index, high + atrRaw, '▼ FLIP\nSHORT', color=color.new(bearCol,70),
+      style=label.style_label_down, textcolor=bearCol, size=size.small)
+
+// ───── TRAP LABELS ─────
+if showTraps
+  if bullTrap; label.new(bar_index, low - atrRaw, 'TRAP', color=color.new(color.yellow,70),
+    style=label.style_label_up, textcolor=color.yellow, size=size.tiny)
+  if bearTrap; label.new(bar_index, high + atrRaw, 'TRAP', color=color.new(color.yellow,70),
+    style=label.style_label_down, textcolor=color.yellow, size=size.tiny)
+
+// ───── EXIT MANAGEMENT ─────
+useTrail := input.bool(true, 'Trailing Stop', group=g_risk)
+if useBE and strategy.position_size > 0 and close >= strategy.position_avg_price + atrRaw * beAtrMult
+  strategy.exit('Long BE','Long',stop=strategy.position_avg_price+0.01,
+    limit=strategy.position_avg_price+atrRaw*tpMult)
+if useBE and strategy.position_size < 0 and close <= strategy.position_avg_price - atrRaw * beAtrMult
+  strategy.exit('Short BE','Short',stop=strategy.position_avg_price-0.01,
+    limit=strategy.position_avg_price-atrRaw*tpMult)
+
+if strategy.position_size > 0
+  sl = close - atrRaw * slMult; tp = close + atrRaw * tpMult
+  if useTrail; strategy.exit('Long X','Long',stop=sl,limit=tp,trail_offset=atrRaw*trailMult)
+  else; strategy.exit('Long X','Long',stop=sl,limit=tp)
+
+if strategy.position_size < 0
+  sl = close + atrRaw * slMult; tp = close - atrRaw * tpMult
+  if useTrail; strategy.exit('Short X','Short',stop=sl,limit=tp,trail_offset=atrRaw*trailMult)
+  else; strategy.exit('Short X','Short',stop=sl,limit=tp)
+
+// ───── SOVEREIGN TABLE ─────
+var table t = table.new(position.bottom_right, 2, 8, border_width=1)
+if barstate.islast
+  modeLbl = 'Adapt: ' + adaptMode
+  table.cell(t,0,0,modeLbl,text_color=color.white,bgcolor=#1565C0,text_size=size.large)
+  table.merge_cells(t,0,0,1,0)
+  table.cell(t,0,1,'Net Profit',text_color=color.white,bgcolor=color.new(color.gray,80))
+  np = strategy.netprofit
+  table.cell(t,1,1,str.tostring(np,'#.##'),text_color=np>=0?bullCol:bearCol)
+  table.cell(t,0,2,'Trades',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,2,str.tostring(strategy.closedtrades))
+  wr = strategy.closedtrades>0?strategy.wintrades/strategy.closedtrades*100:0
+  table.cell(t,0,3,'Win Rate',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,3,str.tostring(wr,'#.#')+'%',text_color=wr>=50?bullCol:bearCol)
+  pf = strategy.grossprofit/math.max(strategy.grossloss,1)
+  table.cell(t,0,4,'PF',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,4,str.tostring(pf,'#.##'),text_color=pf>=2?bullCol:color.yellow)
+  table.cell(t,0,5,'Max DD',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,5,str.tostring(strategy.max_drawdown,'#.##')+'%',text_color=bearCol)
+  table.cell(t,0,6,'State',text_color=color.white,bgcolor=color.new(color.gray,80))
+  stateStr = state==2?'Strong': state==1?'Soft': state==0?'Neutral': state==-1?'BearSoft':'BearStrong'
+  table.cell(t,1,6,stateStr,text_color=color.white)
+  table.cell(t,0,7,'Dir',text_color=color.white,bgcolor=color.new(color.gray,80))
+  table.cell(t,1,7,dir==1?'LONG':'SHORT',text_color=dir==1?bullCol:bearCol)
+
+// ───── PLOTS ─────
+plot(longStop, 'Long Stop', color=color.new(bullCol,40), linewidth=2)
+plot(shortStop, 'Short Stop', color=color.new(bearCol,40), linewidth=2)
+plot(triggerStop, 'Trigger Stop', color=color.new(color.gray,30), linewidth=1)
