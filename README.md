@@ -59,6 +59,8 @@
 | **Total** | **144** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0531.1830）**: `TnSovereignScalpingProV6` — TeleNexus Sovereign Scalping Pro V6（4 模式風險縮放 + 11 項因果優化模組 + 市場結構引擎 CHoCH/BOS/IDM + Kelly 倉位 + 動態 R:R + 波動體制自適應），移植自 KEBOSLABS/scalping-pro-strategy (Scalping Pro v3)
+> 
 > **最新加入（v26.0531.0630）**: `tn_melgo_sequence_v6` — 六態價格結構分類策略（HL2/HLC3/OHLC4 排序狀態機 + MTF 共識投票 + Spread 信心閾值），移植自 jeffreymelgo/melgo-sequence (SSRN 6658238)
 > 
 > **最新加入（v26.0531.0630）**: `tn_wavetrend_v4_v6` — WaveTrend v4 動量反轉策略（多時框 OS/OB + Gate A/C/G 品質過濾 + ATR 風控），移植自 casoon/pine-scripts (WavesUnchained)

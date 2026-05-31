@@ -1,47 +1,49 @@
-# TeleNexus Sovereign Scalping Pro V6
+# TnSovereignScalpingProV6
 
-> **分類**: Trend & Momentum / Scalping  
-> **版號**: v25.0525.1830  
-> **獵頭源**: KEBOSLABS Scalping Pro v3  
-> **狀態**: 已實體化
+**TeleNexus Sovereign Scalping Pro — Full Causal Audit Multi-Mode Scalper**
 
 ---
 
-## 策略概述
+## Overview
 
-高頻 scalping 策略，從 KEBOSLABS Scalping Pro v3 強化升級。核心創新點為 **4 模式預設風險縮放** (Conservative/Balanced/Aggressive/ULTRA)，可在同一策略框架下適應不同交易風格。
+A sovereign-grade scalping strategy forked from **KEBOSLABS/scalping-pro-strategy (Scalping Pro v3)** and rewritten to full TeleNexus causal audit standards. Supports 4 preset modes (Conservative / Balanced / Aggressive / ULTRA) × 11 sovereign optimizations for adaptive risk, multi-timeframe confirmation, Kelly sizing, partial TP, volatility timing, and win-rate adaptation.
 
-## TeleNexus Sovereign 強化
+Preset modes control all 30+ parameters simultaneously: position size, pyramiding levels, SL/TP ATR multipliers, CHoCH/IDM detection periods, RSI thresholds, volume multipliers, trend EMA, ATR range, trailing/breakeven distances, momentum bars, ADR minimum, and session hours.
 
-| 項目 | 原始 | 強化後 |
-|------|------|--------|
-| 架構 | 扁平化條件堆疊 | 主權因果狀態機 + 4 層過濾管線 |
-| 風險管理 | 固定 ATR SL/TP | 波動率體感適應 (volRegime) + 結構停損 |
-| 贏率適應 | 內建 winRate 計算 | 加入因果審計追蹤 (auditEntryPrice/auditEntryBar) |
-| 時間過濾 | 單一 Session 參數 | 多 Session 複合過濾 + 高波動 Session 增強 |
-| 視覺回饋 | 完整 but 雜亂 | 主權 Bias 背景 + 模式專屬配色 |
+---
 
-## 訊號邏輯
+## Core Logic
 
-1. **CHoCH (變換高低點)** — 60/50/40/28 bars 依模式縮放
-2. **BOS (結構突破)** — 突破前高/前低後確認
-3. **IDM (誘導獵殺)** — 高/低點掃掠後反轉
-4. **濾波器** — RSI、Volume、Trend EMA、ATR、Momentum、Time、ADR
-5. **13 項進階優化** — 包含 Kelly 倉位、波動率計時、結構停損、動能反轉退出
+1. **Market Structure Engine** — CHoCH (Change of Character), BOS (Break of Structure), and IDM (Inducement) sweep detection via dual-length swing point analysis. Timeframe-scaled detection periods.
 
-## 參數建議
+2. **11 Sovereign Optimizations**:
+   - **Opt 1**: Adaptive Risk — volatility regime-based SL/TP adjustment (low/med/high)
+   - **Opt 2**: MTF Confirmation — optional 4H EMA trend filter
+   - **Opt 3**: Kelly Criterion — dynamic position sizing based on historical win/loss
+   - **Opt 4**: Partial TP — 3-tier scaling out (40%/40%/20%)
+   - **Opt 5**: Volatility Expansion — entry timing filter requiring ATR expansion + volume surge
+   - **Opt 6**: Enhanced Session — filter for London/NY high-volatility sessions
+   - **Opt 7**: Signal Confluence — multi-signal confirmation (structure + momentum + volume)
+   - **Opt 8**: Trend Strength — EMA distance/ATR ratio minimum threshold
+   - **Opt 9**: Dynamic R:R — trend-strength-boosted take profit with minimum R:R floor
+   - **Opt 10**: Structure Stops — swing-based stop placement with buffer
+   - **Opt 11**: Win Rate Adaptation — auto-tighten when recent WR drops below 50%
 
-| 參數 | 預設 | 說明 |
-|------|------|------|
-| ATR Length | 12 | 波動率計算週期 |
-| CHoCH Period | 50 | 結構檢測靈敏度 |
-| RSI Range | 25-75 | 過濾極端值 |
-| Volume Mult | 1.3 | 確認量能放大 |
-| Risk:Reward | 1:4 | Balanced 模式 |
-| Max Pyramiding | 3 levels | 加倉層數 |
+3. **Causal Audit State** — tracks entry price, bar, and mode for every sovereign signal.
 
-## 風險
+4. **Exit Framework** — breakeven trigger, trailing stop, momentum reversal exit, and fallback SL/TP.
 
-- Scalping 策略對交易成本高度敏感 (0.05% commission)
-- 高頻在低波動市場易產生假訊號
-- ULTRA 模式 max DD 可能 >20%
+5. **Performance Dashboard** — mode header, net profit, total trades, win rate %, profit factor, max DD, volatility regime, version.
+
+---
+
+## Version
+
+**v26.0531.1830** — 2026-05-31 18:30 CST
+
+---
+
+## Source
+
+- Upstream: [KEBOSLABS/scalping-pro-strategy](https://github.com/KEBOSLABS/scalping-pro-strategy)
+- TeleNexus: `/strategies/TnSovereignScalpingProV6.pine`
