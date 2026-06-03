@@ -59,8 +59,8 @@
 | **Total** | **144** | 主權策略矩陣 |
 
 
-> **最新加入（v26.0603.0630）**: 本輪獵頭審計：GitHub 16 個 Pine Script v6 儲存庫已全數檢索完畢，無全新未移植策略；現存 144 個主權策略維持物理對位。
-> 
+> **最新加入（v26.0603.1830）**: 本輪獵頭審計：GitHub 16 個 Pine Script v6 儲存庫已全數檢索完畢，TradingView 社群腳本頁面無新增開源 v6 策略可供移植；現存 144 個主權策略維持物理對位，Dashboard 同步更新至 v26.0603.1830。
+
 > **最新加入（v26.0531.1830）**: `TnSovereignScalpingProV6` — TeleNexus Sovereign Scalping Pro V6（4 模式風險縮放 + 11 項因果優化模組 + 市場結構引擎 CHoCH/BOS/IDM + Kelly 倉位 + 動態 R:R + 波動體制自適應），移植自 KEBOSLABS/scalping-pro-strategy (Scalping Pro v3)
 > 
 > **最新加入（v26.0531.0630）**: `tn_melgo_sequence_v6` — 六態價格結構分類策略（HL2/HLC3/OHLC4 排序狀態機 + MTF 共識投票 + Spread 信心閾值），移植自 jeffreymelgo/melgo-sequence (SSRN 6658238)
