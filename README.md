@@ -50,16 +50,16 @@
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
-| **Multi-Agent, Swarm & Macro** | 11 | 聯邦共識、蜂群、宏觀建模、組合優化 |
+| **Multi-Agent, Swarm & Macro** | 12 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散 |
 | **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
 | **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **144** | 主權策略矩陣 |
+| **Total** | **145** | 主權策略矩陣 |
 
 
-> **最新加入（v26.0603.1830）**: 本輪獵頭審計：GitHub 16 個 Pine Script v6 儲存庫已全數檢索完畢，TradingView 社群腳本頁面無新增開源 v6 策略可供移植；現存 144 個主權策略維持物理對位，Dashboard 同步更新至 v26.0603.1830。
+> **最新加入（v26.0605.0630）**: `tn_pair_corr_divergence_v6` — TeleNexus 成對相關性 Z-Score 發散策略（雙資產回報擴散的 Z-Score 均值回歸 + EMA 趨勢濾網 + RSI/MACD 動量確認 + 相關性門檻 + ATR 風控），移植自 PineGen-AI/pair-correlation-divergence-strategy
 
 > **最新加入（v26.0531.1830）**: `TnSovereignScalpingProV6` — TeleNexus Sovereign Scalping Pro V6（4 模式風險縮放 + 11 項因果優化模組 + 市場結構引擎 CHoCH/BOS/IDM + Kelly 倉位 + 動態 R:R + 波動體制自適應），移植自 KEBOSLABS/scalping-pro-strategy (Scalping Pro v3)
 > 

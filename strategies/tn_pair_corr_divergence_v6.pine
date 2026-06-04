@@ -1,0 +1,126 @@
+//@version=6
+// tn_pair_corr_divergence_v6 — TeleNexus Pair Correlation Z-Score Divergence (Sovereign Port)
+// v26.0605.0630 | 2026-06-05 06:30 CST
+// Ported from: PineGen-AI/pair-correlation-divergence-strategy
+// Core concept: Z-score normalized return spread between two assets,
+//                trend/momentum/correlation filters + sovereign causal audit.
+
+strategy("TeleNexus Pair Correlation Divergence V6",
+     overlay=false,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.02,
+     pyramiding=1)
+
+// ─── Inputs ───
+sym1       = input.symbol("OANDA:EURUSD", "Primary Asset")
+sym2       = input.symbol("OANDA:GBPUSD", "Secondary Asset")
+corrLen    = input.int(50,  "Correlation Length")
+zLen       = input.int(30,  "Z-Score Length")
+entryZ     = input.float(1.0, "Z Entry Threshold")
+exitZ      = input.float(0.1, "Z Exit Threshold")
+atrLen     = input.int(14,  "ATR Length")
+rrRatio    = input.float(2.0, "Risk:Reward Ratio")
+fastEMA    = input.int(20,  "Fast EMA")
+slowEMA    = input.int(50,  "Slow EMA")
+rsiLen     = input.int(14,  "RSI Length")
+macdFast   = input.int(12,  "MACD Fast")
+macdSlow   = input.int(26,  "MACD Slow")
+macdSig    = input.int(9,   "MACD Signal")
+useCorr    = input.bool(true, "Enable Correlation Filter")
+minCorr    = input.float(0.5, "Min Correlation")
+showPlots  = input.bool(true, "Show Plots")
+
+// ─── Sovereign Audit State ───
+var string lastSignal = "NONE"
+var int    lastSignalBar = na
+var float  lastSignalZ = 0.0
+var float  lastCorr = 0.0
+
+// ─── Data ───
+s1 = request.security(sym1, timeframe.period, close)
+s2 = request.security(sym2, timeframe.period, close)
+
+// ─── Returns & Spread ───
+ret1 = ta.roc(s1, 1)
+ret2 = ta.roc(s2, 1)
+spread = ret1 - ret2
+spreadMA = ta.sma(spread, zLen)
+spreadSD = ta.stdev(spread, zLen)
+zScore = (spread - spreadMA) / spreadSD
+
+// ─── Trend Filter ───
+emaFast = ta.ema(s1, fastEMA)
+emaSlow = ta.ema(s1, slowEMA)
+trendLong  = emaFast > emaSlow
+trendShort = emaFast < emaSlow
+
+// ─── RSI Confirmation ───
+rsiVal = ta.rsi(s1, rsiLen)
+rsiLong  = rsiVal > 50
+rsiShort = rsiVal < 50
+
+// ─── MACD Confirmation ───
+[macdLine, signalLine, _] = ta.macd(s1, macdFast, macdSlow, macdSig)
+macdLong  = macdLine > signalLine
+macdShort = macdLine < signalLine
+
+// ─── Correlation Filter ───
+corrVal = ta.correlation(ret1, ret2, corrLen)
+corrOk = not useCorr or corrVal >= minCorr
+
+// ─── ATR Risk ───
+atrVal = ta.atr(atrLen)
+slDist = atrVal * 1.5
+tpDist = slDist * rrRatio
+
+// ─── Entry Conditions ───
+longCond  = barstate.isconfirmed and zScore < -entryZ and trendLong and rsiLong and macdLong and corrOk
+shortCond = barstate.isconfirmed and zScore >  entryZ and trendShort and rsiShort and macdShort and corrOk
+
+// ─── Exit Condition: Z-Score Reversion ───
+zExit = math.abs(zScore) < exitZ
+
+// ─── Execution ───
+if longCond and strategy.position_size == 0
+    strategy.entry("LongSpread", strategy.long)
+    lastSignal := "LONG"
+    lastSignalBar := bar_index
+    lastSignalZ := zScore
+    lastCorr := corrVal
+
+if shortCond and strategy.position_size == 0
+    strategy.entry("ShortSpread", strategy.short)
+    lastSignal := "SHORT"
+    lastSignalBar := bar_index
+    lastSignalZ := zScore
+    lastCorr := corrVal
+
+if zExit
+    strategy.close("LongSpread")
+    strategy.close("ShortSpread")
+
+strategy.exit("TP/SL Long",  "LongSpread",  stop=close - slDist, limit=close + tpDist)
+strategy.exit("TP/SL Short", "ShortSpread", stop=close + slDist, limit=close - tpDist)
+
+// ─── Causal Audit Log ───
+if barstate.islastconfirmedhistory
+    label.new(bar_index, highest(zScore, 100)[1],
+         "Last Signal: " + lastSignal + "\n" +
+         "Z at Entry: "  + str.tostring(lastSignalZ, "#.##") + "\n" +
+         "Corr: "        + str.tostring(lastCorr, "#.##") + "\n" +
+         "v26.0605.0630",
+         style=label.style_label_left, size=size.small)
+
+// ─── Plots ───
+if showPlots
+    plot(zScore,    "Z-Score",          color=color.new(color.blue, 0))
+    hline( entryZ,  "Upper Entry",      color=color.red,    linestyle=hline.style_dashed)
+    hline(-entryZ,  "Lower Entry",      color=color.green,  linestyle=hline.style_dashed)
+    hline( exitZ,   "Exit Zone",        color=color.gray,   linestyle=hline.style_dotted)
+    hline(-exitZ,   "Exit Zone",        color=color.gray,   linestyle=hline.style_dotted)
+    plot(emaFast,   "Fast EMA",         color=color.new(color.purple, 50))
+    plot(emaSlow,   "Slow EMA",         color=color.new(color.orange, 50))
+    plot(corrVal,   "Correlation",      color=color.new(color.teal, 60))
