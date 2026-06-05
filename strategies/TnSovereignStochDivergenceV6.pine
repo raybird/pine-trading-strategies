@@ -1,0 +1,145 @@
+//@version=6
+strategy("Tn Sovereign Stoch Divergence v6 [v26.0605.1830]",
+    shorttitle         = "TN_STOCH_DIV",
+    overlay            = false,
+    initial_capital    = 10000,
+    default_qty_type   = strategy.fixed,
+    default_qty_value  = 1,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    max_lines_count    = 500,
+    max_labels_count   = 500,
+    process_orders_on_close = true)
+
+groupStoch = "📊 隨機指標 (Stochastic)"
+periodK    = input.int(14, "%K 週期", minval=1, group=groupStoch)
+smoothK    = input.int(1,  "%K 平滑", minval=1, group=groupStoch)
+periodD    = input.int(3,  "%D 平滑", minval=1, group=groupStoch)
+
+groupLevel = "📏 水準 (Levels)"
+obLevel    = input.int(80, "超買水準", minval=50, maxval=100, group=groupLevel)
+osLevel    = input.int(20, "超賣水準", minval=0,  maxval=50,  group=groupLevel)
+
+groupDiv   = "🔍 背離偵測 (Divergence)"
+pivotLeft  = input.int(5, "左樞軸回看", minval=1, group=groupDiv)
+pivotRight = input.int(5, "右樞軸回看", minval=1, group=groupDiv)
+maxBarsBk  = input.int(100, "最大回溯 K 線", minval=10, maxval=500, group=groupDiv)
+
+groupRisk  = "⚖️ 風險管理 (Risk)"
+useSL      = input.bool(true,  "啟用停損", group=groupRisk)
+slPerc     = input.float(2.0, "停損 (%)", minval=0.1, step=0.1, group=groupRisk)
+useTP      = input.bool(true,  "啟用停利", group=groupRisk)
+tpPerc     = input.float(4.0, "停利 (%)", minval=0.1, step=0.1, group=groupRisk)
+
+k = ta.sma(ta.stoch(close, high, low, periodK), smoothK)
+d = ta.sma(k, periodD)
+
+hline(obLevel, "超買", color=#787B86)
+hline(50, "中線", color=color.new(#787B86, 50))
+hline(osLevel, "超賣", color=#787B86)
+
+pk = plot(k, "%K", color=#2962FF, linewidth=2)
+pd = plot(d, "%D", color=#FF6D00, linewidth=1)
+
+pricePL  = ta.pivotlow(close, pivotLeft, pivotRight)
+pricePH  = ta.pivothigh(close, pivotLeft, pivotRight)
+
+var int[]      swLowsBars   = array.new_int()
+var float[]    swLowsPrice  = array.new_float()
+var float[]    swLowsD      = array.new_float()
+var int[]      swHighsBars  = array.new_int()
+var float[]    swHighsPrice = array.new_float()
+var float[]    swHighsD     = array.new_float()
+
+var line[]     bullLines    = array.new_line()
+var line[]     bearLines    = array.new_line()
+var label[]    bullLabels   = array.new_label()
+var label[]    bearLabels   = array.new_label()
+var float[]    bullLineEnd  = array.new_float()
+var float[]    bearLineEnd  = array.new_float()
+
+if not na(pricePL)
+    pb = bar_index - pivotRight
+    array.push(swLowsBars, pb)
+    array.push(swLowsPrice, pricePL)
+    array.push(swLowsD, d[pivotRight])
+    if array.size(swLowsBars) > 50
+        array.shift(swLowsBars); array.shift(swLowsPrice); array.shift(swLowsD)
+
+if not na(pricePH)
+    pb = bar_index - pivotRight
+    array.push(swHighsBars, pb)
+    array.push(swHighsPrice, pricePH)
+    array.push(swHighsD, d[pivotRight])
+    if array.size(swHighsBars) > 50
+        array.shift(swHighsBars); array.shift(swHighsPrice); array.shift(swHighsD)
+
+var bool bullDiv = false
+bullDiv := false
+
+if not na(pricePL) and array.size(swLowsBars) >= 2
+    curBar = array.get(swLowsBars, array.size(swLowsBars) - 1)
+    curPrc = array.get(swLowsPrice, array.size(swLowsPrice) - 1)
+    curD   = array.get(swLowsD, array.size(swLowsD) - 1)
+    for i = array.size(swLowsBars) - 2 to 0
+        pBar = array.get(swLowsBars, i)
+        pPrc = array.get(swLowsPrice, i)
+        pD   = array.get(swLowsD, i)
+        if curBar - pBar <= maxBarsBk and curPrc < pPrc and curD > pD
+            dl = line.new(pBar, pD, curBar, curD, color=color.green, width=3, style=line.style_dotted)
+            array.push(bullLines, dl); array.push(bullLineEnd, curD)
+            lb = label.new(curBar, curD, "多背", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+            array.push(bullLabels, lb)
+            bullDiv := true; break
+
+var bool bearDiv = false
+bearDiv := false
+
+if not na(pricePH) and array.size(swHighsBars) >= 2
+    curBar = array.get(swHighsBars, array.size(swHighsBars) - 1)
+    curPrc = array.get(swHighsPrice, array.size(swHighsPrice) - 1)
+    curD   = array.get(swHighsD, array.size(swHighsD) - 1)
+    for i = array.size(swHighsBars) - 2 to 0
+        pBar = array.get(swHighsBars, i)
+        pPrc = array.get(swHighsPrice, i)
+        pD   = array.get(swHighsD, i)
+        if curBar - pBar <= maxBarsBk and curPrc > pPrc and curD < pD
+            dl = line.new(pBar, pD, curBar, curD, color=color.red, width=3, style=line.style_dotted)
+            array.push(bearLines, dl); array.push(bearLineEnd, curD)
+            lb = label.new(curBar, curD, "空背", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+            array.push(bearLabels, lb)
+            bearDiv := true; break
+
+if array.size(bullLines) > 0
+    for i = array.size(bullLines) - 1 to 0
+        if i < array.size(bullLineEnd) and d < array.get(bullLineEnd, i) - 5
+            line.delete(array.get(bullLines, i))
+            array.remove(bullLines, i); array.remove(bullLineEnd, i)
+            if i < array.size(bullLabels)
+                label.delete(array.get(bullLabels, i)); array.remove(bullLabels, i)
+
+if array.size(bearLines) > 0
+    for i = array.size(bearLines) - 1 to 0
+        if i < array.size(bearLineEnd) and d > array.get(bearLineEnd, i) + 5
+            line.delete(array.get(bearLines, i))
+            array.remove(bearLines, i); array.remove(bearLineEnd, i)
+            if i < array.size(bearLabels)
+                label.delete(array.get(bearLabels, i)); array.remove(bearLabels, i)
+
+if bullDiv
+    strategy.entry("多", strategy.long, comment="多背離")
+if bearDiv
+    strategy.entry("空", strategy.short, comment="空背離")
+
+if strategy.position_size > 0
+    sl = useSL ? strategy.position_avg_price * (1 - slPerc / 100) : na
+    tp = useTP ? strategy.position_avg_price * (1 + tpPerc / 100) : na
+    strategy.exit("多退出", "多", stop=sl, limit=tp)
+if strategy.position_size < 0
+    sl = useSL ? strategy.position_avg_price * (1 + slPerc / 100) : na
+    tp = useTP ? strategy.position_avg_price * (1 - tpPerc / 100) : na
+    strategy.exit("空退出", "空", stop=sl, limit=tp)
+
+alertcondition(bullDiv, "多頭背離", "多頭背離: 價格更低低點 + Stochastic %D 更高低點")
+alertcondition(bearDiv, "空頭背離", "空頭背離: 價格更高高點 + Stochastic %D 更低高點")

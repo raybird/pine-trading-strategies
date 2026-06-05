@@ -1,0 +1,49 @@
+//@version=6
+strategy("Tn Sovereign Donchian Breakout v6 [v26.0605.1830]",
+    shorttitle         = "TN_DONCH_BO",
+    overlay            = true,
+    initial_capital    = 10000,
+    default_qty_type   = strategy.fixed,
+    default_qty_value  = 1,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.05,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+groupDC     = "📊 唐奇安通道 (Donchian)"
+donchianLen = input.int(25, "通道週期", minval=1, group=groupDC)
+
+groupTime   = "⏰ 時間規則 (Time Rule)"
+targetHour  = input.int(17, "掛單小時 (Exchange Hour)", minval=0, maxval=23, group=groupTime)
+validHours  = input.int(60, "訂單有效 K 線數", minval=1, group=groupTime)
+
+groupRisk   = "⚖️ 風險管理 (Risk)"
+lotSize     = input.int(1, "倉位大小", minval=1, group=groupRisk)
+
+upperBand = ta.highest(high, donchianLen)[1]
+lowerBand = ta.lowest(low, donchianLen)[1]
+
+plot(upperBand, "通道上緣", color=color.green, linewidth=2)
+plot(lowerBand, "通道下緣", color=color.red, linewidth=1)
+
+isTargetTime = (hour == targetHour) and (minute == 0)
+
+var float pendingPrice  = na
+var int   entryBarIndex = 0
+
+if isTargetTime
+    pendingPrice  := upperBand
+    entryBarIndex := bar_index
+    strategy.entry("多突破", strategy.long, stop=pendingPrice, comment="通道突破", qty=lotSize)
+
+barsPassed = bar_index - entryBarIndex
+if strategy.opentrades == 0 and barsPassed >= validHours
+    strategy.cancel("多突破")
+    pendingPrice := na
+
+if strategy.opentrades > 0
+    strategy.exit("多退出", "多突破", stop=lowerBand, comment="通道回踩")
+
+bgcolor(isTargetTime ? color.new(color.blue, 80) : na)
+
+plotshape(hour == targetHour ? high : na, "掛單標記", location=location.abovebar, color=color.green, style=shape.triangledown, text="Buy Stop", size=size.tiny)

@@ -1,0 +1,64 @@
+//@version=6
+strategy("Tn Sovereign VIOP Session v6 [v26.0605.1830]",
+    shorttitle         = "TN_VIOP_SES",
+    overlay            = true,
+    initial_capital    = 100000,
+    default_qty_type   = strategy.fixed,
+    default_qty_value  = 1,
+    commission_type    = strategy.commission.cash_per_contract,
+    commission_value   = 2.0,
+    slippage           = 2,
+    process_orders_on_close = true)
+
+groupSig    = "📊 信號配置 (Signal)"
+fastLen     = input.int(9,  "快線 EMA", minval=1, group=groupSig)
+slowLen     = input.int(21, "慢線 EMA", minval=1, group=groupSig)
+longOnly    = input.bool(false, "僅做多 (Long Only)", group=groupSig)
+
+groupRisk   = "⚖️ 風險管理 (Risk)"
+atrLen      = input.int(14, "ATR 週期", minval=1, group=groupRisk)
+slMult      = input.float(2.0, "停損 ATR 倍數", step=0.1, group=groupRisk)
+tpMult      = input.float(3.0, "停利 ATR 倍數", step=0.1, group=groupRisk)
+
+groupSess   = "⏰ 時段規訓 (Session)"
+sessStart   = input.string("0930", "開盤時間 (HHMM UTC+3)", group=groupSess)
+sessEnd     = input.string("1815", "收盤時間 (HHMM UTC+3)", group=groupSess)
+sessTZ      = input.string("UTC+3", "時區", group=groupSess)
+
+sessFilter  = sessStart + "-" + sessEnd
+inSession   = not na(time(timeframe.period, sessFilter, sessTZ))
+sessionEnd  = not inSession and inSession[1]
+
+if sessionEnd
+    strategy.close_all(comment="收盤平倉")
+
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+atrVal  = ta.atr(atrLen)
+bullish = fastEma > slowEma
+
+bullCross = ta.crossover(fastEma, slowEma) and inSession
+bearCross = ta.crossunder(fastEma, slowEma) and inSession
+
+if bullCross
+    strategy.entry("L", strategy.long, comment="↑多")
+    strategy.exit("LX", "L", stop=close - slMult * atrVal, limit=close + tpMult * atrVal)
+
+if bearCross and not longOnly
+    strategy.entry("S", strategy.short, comment="↓空")
+    strategy.exit("SX", "S", stop=close + slMult * atrVal, limit=close - tpMult * atrVal)
+
+if bullCross
+    alert("VIOP 多訊 " + syminfo.ticker + " @ " + str.tostring(close, "#.##"), alert.freq_once_per_bar)
+if bearCross
+    alert("VIOP 空訊 " + syminfo.ticker + " @ " + str.tostring(close, "#.##"), alert.freq_once_per_bar)
+if sessionEnd
+    alert("VIOP 收盤平倉", alert.freq_once_per_bar)
+
+bgcolor(inSession ? color.new(color.blue, 96) : color.new(color.gray, 97))
+
+plot(fastEma, "快線", bullish ? color.green : color.red, linewidth=2)
+plot(slowEma, "慢線", bullish ? color.lime : color.orange, linewidth=2)
+
+plotshape(bullCross, "多訊", shape.triangleup, location.belowbar, color.green)
+plotshape(bearCross, "空訊", shape.triangledown, location.abovebar, color.red)

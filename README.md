@@ -56,9 +56,15 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **145** | 主權策略矩陣 |
+| **Total** | **148** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0606.0630）**: `TnSovereignViopSessionV6` — TeleNexus 主權 VIOP 時段策略（EMA 9/21 交叉 + 09:30–18:15 時段規訓 + ATR SL/TP + 收盤強制平倉），移植自 trugurpala/pinescriptv6 (VIOP Session Strategy)
+>
+> **最新加入（v26.0606.0630）**: `TnSovereignStochDivergenceV6` — TeleNexus 主權 Stochastic 背離策略（5-bar pivot 多空背離偵測 + %D 背離線 + 破裂移除），移植自 JoelPasapera/Strategies-in-Pine-Script-v6 (Stochastic Divergence Strategy)
+>
+> **最新加入（v26.0606.0630）**: `TnSovereignDonchianBreakoutV6` — TeleNexus 主權 Donchian 突破策略（時間觸發 Buy Stop + 25-bar Donchian 通道 + 通道下緣動態停損），移植自 JoelPasapera/Strategies-in-Pine-Script-v6 (Donchian Breakout Strategy)
+>
 > **最新加入（v26.0605.0630）**: `tn_pair_corr_divergence_v6` — TeleNexus 成對相關性 Z-Score 發散策略（雙資產回報擴散的 Z-Score 均值回歸 + EMA 趨勢濾網 + RSI/MACD 動量確認 + 相關性門檻 + ATR 風控），移植自 PineGen-AI/pair-correlation-divergence-strategy
 
 > **最新加入（v26.0531.1830）**: `TnSovereignScalpingProV6` — TeleNexus Sovereign Scalping Pro V6（4 模式風險縮放 + 11 項因果優化模組 + 市場結構引擎 CHoCH/BOS/IDM + Kelly 倉位 + 動態 R:R + 波動體制自適應），移植自 KEBOSLABS/scalping-pro-strategy (Scalping Pro v3)

@@ -1,0 +1,223 @@
+//@version=6
+// TnSovereignHFTEngineV6 — TeleNexus 機構級 HFT 機率評分引擎
+// Author: TeleNexus (Raybird) — ported from QuantAlgo institutional-hft-engine
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0604.0630
+//
+// 核心規訓:
+// 1. 機率評分系統 0-100：結構品質 + 動量 + 區間脈絡 + 流動性獵取
+// 2. 機構級風控：日虧限額 / 動態風險縮放 / 連損暫停 / 冷卻機制
+// 3. HFT 執行：雙 TP（1.5R / 3.0R）、波動率追蹤、Break-Even 後自動保護
+// 4. 自適應閾值：根據市場體質動態調整最低准入分數
+
+strategy("TN HFT Engine [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.cash,
+     default_qty_value=10000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.01,
+     margin_long=1, margin_short=1,
+     pyramiding=0,
+     max_lines_count=200,
+     max_labels_count=200,
+     max_boxes_count=200)
+
+// ── 機構風控 ─────────────────────────────────────────────────────────────────
+grpRisk = "💎 INSTITUTIONAL RISK"
+riskPctInp   = input.float(1.0, "Base Risk Per Trade (%)", group=grpRisk, step=0.1)/100
+maxDDayInp   = input.float(4.0, "Max Daily Drawdown (%)", group=grpRisk, step=0.5)
+maxLossInp   = input.int(3,     "Max Consec Losses (Pause)", group=grpRisk)
+cdBarsInp    = input.int(5,     "Cooldown Bars After Loss", group=grpRisk)
+useDynRisk   = input.bool(true, "Dynamic Risk Scaling", group=grpRisk)
+
+// ── 機率評分 ─────────────────────────────────────────────────────────────────
+grpScore = "🎯 PROBABILISTIC SCORING"
+minScoreInp   = input.float(65.0, "Base Score Threshold (0-100)", group=grpScore)
+strictModeInp = input.bool(true,  "Strict Mode (HTF alignment req)", group=grpScore)
+
+// ── SMC ──────────────────────────────────────────────────────────────────────
+grpSMC = "🏗️ SMC / ICT"
+bosLenInp = input.int(7, "Swing Lookback", group=grpSMC, minval=3)
+fvgMinInp = input.float(0.5, "FVG Min (xATR)", group=grpSMC, step=0.1)
+
+// ── 執行 ─────────────────────────────────────────────────────────────────────
+grpExec = "⚡ EXECUTION & TRAILING"
+tp1RR = input.float(1.5, "TP1 Risk/Reward", group=grpExec, step=0.1)
+tp2RR = input.float(3.0, "TP2 Risk/Reward", group=grpExec, step=0.1)
+useTrail = input.bool(true, "Vol Trailing on TP2", group=grpExec)
+beOff    = input.float(0.2, "Break-Even Offset (xATR)", group=grpExec, step=0.1)
+
+// ── 視覺 ─────────────────────────────────────────────────────────────────────
+grpVis = "🎨 VISUALS"
+showDashInp = input.bool(true, "Show Dashboard", group=grpVis)
+showLblInp  = input.bool(true, "Show Labels", group=grpVis)
+showFVGinp  = input.bool(true, "Show FVG", group=grpVis)
+showOBinp   = input.bool(true, "Show OB", group=grpVis)
+useKZinp    = input.bool(true, "Killzones Only", group=grpVis)
+
+// ── 基礎指標 ─────────────────────────────────────────────────────────────────
+atr14 = ta.atr(14); atr50 = ta.atr(50)
+volRatio = atr14/atr50
+isComp   = volRatio<0.75; isHV = volRatio>1.5
+volAvg   = ta.sma(volume,20)
+isExp    = ta.crossover(volRatio,1.0) and volume>volAvg*1.5
+isVSpike = volume>volAvg*2.0
+[dp,dm,adx] = ta.dmi(14,14)
+isStrongTrend = adx>25; isRanging = adx<20; isChop = isRanging and not isExp
+emaF=ta.ema(close,9); emaM=ta.ema(close,21); emaS=ta.ema(close,50); ema2=ta.ema(close,200)
+
+// ── MTF（反重繪）─────────────────────────────────────────────────────────────
+htfE50  = request.security(syminfo.tickerid,"240",ta.ema(close[1],50),gaps=barmerge.gaps_off,lookahead=barmerge.lookahead_off)
+htfE200 = request.security(syminfo.tickerid,"240",ta.ema(close[1],200),gaps=barmerge.gaps_off,lookahead=barmerge.lookahead_off)
+mtfBull = htfE50>htfE200; mtfBear = htfE50<htfE200
+
+// ── 時段 ─────────────────────────────────────────────────────────────────────
+hUTC=hour(time,"UTC"); isKZ=(hUTC>=7 and hUTC<10) or (hUTC>=13 and hUTC<16)
+isSessionOK=useKZinp?isKZ:true
+
+// ── SMC 結構 ─────────────────────────────────────────────────────────────────
+swH=ta.pivothigh(high,bosLenInp,bosLenInp); swL=ta.pivotlow(low,bosLenInp,bosLenInp)
+var float rsh=na; var float rsl=na
+if not na(swH); rsh:=swH
+if not na(swL); rsl:=swL
+
+bullSweep=not na(rsl) and low<rsl and close>rsl
+bearSweep=not na(rsh) and high>rsh and close<rsh
+bullBOS=not na(rsh) and close>rsh and close[1]<=rsh
+bearBOS=not na(rsl) and close<rsl and close[1]>=rsl
+var int mStruct=0
+if bullBOS; mStruct:=1
+if bearBOS; mStruct:=-1
+bullCHOCH=bullBOS and mStruct[1]==-1; bearCHOCH=bearBOS and mStruct[1]==1
+bSz=math.abs(close-open)
+dUp=close>high[1] and bSz>atr14*0.8 and close>open
+dDn=close<low[1] and bSz>atr14*0.8 and close<open
+bullOB=dUp and close[1]<open[1]; bearOB=dDn and close[1]>open[1]
+bullFVG=low>high[2] and (low-high[2])>atr14*fvgMinInp
+bearFVG=high<low[2] and (low[2]-high)>atr14*fvgMinInp
+rMid=(rsh+rsl)/2; isDisc=not na(rMid) and close<rMid; isPrem=not na(rMid) and close>rMid
+
+// ── 機率評分 (0-100) ─────────────────────────────────────────────────────────
+float bScore=0
+bScore+=mtfBull?15:0; bScore+=(emaF>emaM and emaM>emaS)?10:0
+bScore+=bullSweep?25:0; bScore+=bullCHOCH?20:(bullBOS?10:0); bScore+=bullOB?10:0
+bScore+=isVSpike?10:0; bScore+=isExp?5:0; bScore+=bullFVG?5:0; bScore+=isDisc?10:0
+
+float sScore=0
+sScore+=mtfBear?15:0; sScore+=(emaF<emaM and emaM<emaS)?10:0
+sScore+=bearSweep?25:0; sScore+=bearCHOCH?20:(bearBOS?10:0); sScore+=bearOB?10:0
+sScore+=isVSpike?10:0; sScore+=isExp?5:0; sScore+=bearFVG?5:0; sScore+=isPrem?10:0
+
+float aThresh=minScoreInp
+aThresh+=isChop?15:0; aThresh+=isHV?10:0; aThresh-=isStrongTrend?10:0
+aThresh:=math.min(math.max(aThresh,40),95)
+
+bool buyS  = bScore>=aThresh and isSessionOK and not isChop
+bool sellS = sScore>=aThresh and isSessionOK and not isChop
+if strictModeInp
+    buyS  := buyS and mtfBull
+    sellS := sellS and mtfBear
+
+// ── 機構風控 ─────────────────────────────────────────────────────────────────
+var float dStart=strategy.initial_capital
+var int tToday=0; var int cLoss=0; var int barsSinceLoss=0; var bool paused=false
+if ta.change(time("D"))!=0
+    dStart:=strategy.equity; tToday:=0; paused:=false
+dailyPnLPct=((strategy.equity-dStart)/dStart)*100
+ddHit=dailyPnLPct<=-maxDDayInp
+var int prevC=0
+if strategy.closedtrades>prevC
+    ltp=strategy.closedtrades.profit(strategy.closedtrades-1)
+    if ltp<0; cLoss+=1; barsSinceLoss:=0; else; cLoss:=0
+    prevC:=strategy.closedtrades
+barsSinceLoss+=1
+if cLoss>=maxLossInp; paused:=true
+bool canT=not ddHit and not paused and (barsSinceLoss>=cdBarsInp or cLoss==0)
+float rMult=1.0
+if useDynRisk
+    rMult:=cLoss>1?0.5:1.0; rMult:=isHV?rMult*0.7:rMult; rMult:=isChop?rMult*0.5:rMult
+
+// ── HFT 執行 ─────────────────────────────────────────────────────────────────
+var float aSL=na; var float aT1=na; var float aT2=na
+bSLs=not na(rsl)?math.min(rsl-atr14*0.2,close-atr14*1.5):close-atr14*1.5
+sSLs=not na(rsh)?math.max(rsh+atr14*0.2,close+atr14*1.5):close+atr14*1.5
+
+if buyS and canT and strategy.position_size==0
+    sd=math.max(close-bSLs,atr14*0.5); aSL:=close-sd
+    aT1:=close+sd*tp1RR; aT2:=close+sd*tp2RR
+    ra=strategy.equity*riskPctInp*rMult; qty=sd>0?ra/sd:0
+    strategy.entry("TN HFT Long",strategy.long,qty=qty)
+    strategy.exit("TP1 L","TN HFT Long",qty_percent=50,limit=aT1,stop=aSL)
+    strategy.exit("TP2 L","TN HFT Long",limit=aT2,stop=aSL); tToday+=1
+if sellS and canT and strategy.position_size==0
+    sd=math.max(sSLs-close,atr14*0.5); aSL:=close+sd
+    aT1:=close-sd*tp1RR; aT2:=close-sd*tp2RR
+    ra=strategy.equity*riskPctInp*rMult; qty=sd>0?ra/sd:0
+    strategy.entry("TN HFT Short",strategy.short,qty=qty)
+    strategy.exit("TP1 S","TN HFT Short",qty_percent=50,limit=aT1,stop=aSL)
+    strategy.exit("TP2 S","TN HFT Short",limit=aT2,stop=aSL); tToday+=1
+
+if strategy.position_size>0
+    if high>=aT1; aSL:=math.max(aSL,strategy.position_avg_price+atr14*beOff)
+    if useTrail and high>=aT1; aSL:=math.max(aSL,close-atr14*2.0)
+    strategy.exit("TP2 L","TN HFT Long",limit=aT2,stop=aSL)
+if strategy.position_size<0
+    if low<=aT1; aSL:=math.min(aSL,strategy.position_avg_price-atr14*beOff)
+    if useTrail and low<=aT1; aSL:=math.min(aSL,close+atr14*2.0)
+    strategy.exit("TP2 S","TN HFT Short",limit=aT2,stop=aSL)
+if strategy.position_size==0; aSL:=na; aT1:=na; aT2:=na
+if ddHit and strategy.position_size!=0; strategy.close_all(comment="DD LIMIT")
+
+// ── 視覺 ─────────────────────────────────────────────────────────────────────
+if showFVGinp and bullFVG
+    box.new(bar_index[2],high[2],bar_index,low,bgcolor=color.new(#00E676,88),border_color=color.new(#00E676,100))
+if showFVGinp and bearFVG
+    box.new(bar_index[2],low[2],bar_index,high,bgcolor=color.new(#FF5252,88),border_color=color.new(#FF5252,100))
+if showOBinp and bullOB
+    box.new(bar_index[1],high[1],bar_index+3,low[1],bgcolor=color.new(#2196F3,85),border_color=color.new(#2196F3,50))
+if showOBinp and bearOB
+    box.new(bar_index[1],high[1],bar_index+3,low[1],bgcolor=color.new(#FF9800,85),border_color=color.new(#FF9800,50))
+if showLblInp and buyS and canT and strategy.position_size==0
+    label.new(bar_index,low-atr14,"HFT LONG\nS:"+str.tostring(bScore,"#")+" R:"+str.tostring(rMult*100,"#")+"%",color=color.new(#00E676,10),textcolor=color.white,style=label.style_label_up)
+if showLblInp and sellS and canT and strategy.position_size==0
+    label.new(bar_index,high+atr14,"HFT SHORT\nS:"+str.tostring(sScore,"#")+" R:"+str.tostring(rMult*100,"#")+"%",color=color.new(#FF5252,10),textcolor=color.white,style=label.style_label_down)
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+if showDashInp and barstate.islast
+    var table dash=table.new(position.top_right,2,11,border_width=1,border_color=color.new(#1e222d,0))
+    table.cell(dash,0,0,"TN HFT ENGINE",bgcolor=color.new(#000,10),text_color=color.white,text_size=size.normal)
+    table.cell(dash,1,0,"v26.0604.0630",bgcolor=color.new(#000,10),text_color=color.white,text_size=size.normal)
+    sStat=ddHit?"DD LIMIT":paused?"PAUSED":"ACTIVE"; sC=ddHit?color.new(#FF5252,20):paused?color.new(#FF9800,20):color.new(#00E676,20)
+    table.cell(dash,0,1,"Status",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,1,sStat,bgcolor=sC,text_color=color.white,text_size=size.small)
+    table.cell(dash,0,2,"Daily DD",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,2,str.tostring(dailyPnLPct,"#.##")+"% / "+str.tostring(-maxDDayInp,"#")+"%",bgcolor=dailyPnLPct<0?color.new(#FF5252,20):color.new(#00E676,20),text_color=color.white,text_size=size.small)
+    rStr=isChop?"CHOP":isExp?"EXPANSION":isHV?"HIGH VOL":isStrongTrend?"TRENDING":"NORMAL"
+    rC=isChop?color.new(#9E9E9E,20):isExp?color.new(#2196F3,20):isHV?color.new(#FF5252,20):color.new(#00E676,20)
+    table.cell(dash,0,3,"Regime",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,3,rStr,bgcolor=rC,text_color=color.white,text_size=size.small)
+    table.cell(dash,0,4,"Macro Bias",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    hStr=mtfBull?"BULLISH":mtfBear?"BEARISH":"NEUTRAL"
+    hC=mtfBull?color.new(#00E676,20):mtfBear?color.new(#FF5252,20):color.new(#9E9E9E,20)
+    table.cell(dash,1,4,hStr,bgcolor=hC,text_color=color.white,text_size=size.small)
+    table.cell(dash,0,5,"Threshold",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,5,str.tostring(aThresh,"#.#"),bgcolor=color.new(#2196F3,20),text_color=color.white,text_size=size.small)
+    table.cell(dash,0,6,"Score L/S",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,6,str.tostring(bScore,"#")+"/"+str.tostring(sScore,"#"),bgcolor=color.new(#9C27B0,20),text_color=color.white,text_size=size.small)
+    table.cell(dash,0,7,"Risk",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,7,str.tostring(riskPctInp*rMult*100,"#.##")+"%",bgcolor=rMult<1?color.new(#FF9800,20):color.new(#00E676,20),text_color=color.white,text_size=size.small)
+    pStr=strategy.position_size>0?"LONG":strategy.position_size<0?"SHORT":"FLAT"
+    pC=strategy.position_size>0?color.new(#00E676,20):strategy.position_size<0?color.new(#FF5252,20):color.new(#9E9E9E,20)
+    table.cell(dash,0,8,"Position",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,8,pStr,bgcolor=pC,text_color=color.white,text_size=size.small)
+    wr=strategy.closedtrades>0?(strategy.wintrades/strategy.closedtrades)*100:0
+    table.cell(dash,0,9,"Winrate",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,9,str.tostring(wr,"#.##")+"%",bgcolor=wr>=50?color.new(#00E676,20):color.new(#FF5252,20),text_color=color.white,text_size=size.small)
+    gl=strategy.grossloss>0?strategy.grossloss:1; pf=strategy.grossprofit/gl
+    table.cell(dash,0,10,"PF",bgcolor=color.new(#1e222d,0),text_color=color.gray,text_size=size.small)
+    table.cell(dash,1,10,str.tostring(pf,"#.##"),bgcolor=pf>=1.5?color.new(#00E676,20):color.new(#FF9800,20),text_color=color.white,text_size=size.small)
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(buyS and canT,"HFT LONG","TN HFT Engine: LONG Signal Score:"+str.tostring(bScore,"#"))
+alertcondition(sellS and canT,"HFT SHORT","TN HFT Engine: SHORT Signal Score:"+str.tostring(sScore,"#"))

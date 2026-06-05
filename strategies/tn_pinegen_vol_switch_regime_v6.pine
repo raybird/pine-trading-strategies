@@ -1,0 +1,45 @@
+//@version=6
+// tn_pinegen_vol_switch_regime_v6 — PineGen Adaptive Volatility Regime Switch (Sovereign Port)
+// Author: TeleNexus (Raybird) — ported from PineGen-AI/adaptive-risk-regime-strategy
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0604.1830
+//
+// 核心規訓:
+// 1. ATR 波動體制偵測（高波動 vs 低波動）
+// 2. 低波動 → 均值回歸（反轉交易）
+// 3. 高波動 → 突破追蹤（動量交易）
+// 4. ATR 風控 + 固定 R:R
+strategy("TN PineGen Vol Switch Regime [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=5)
+atrLen    = input.int(14, "ATR Length")
+lookback  = input.int(50, "Volatility Lookback")
+rangeLen  = input.int(20, "Range Length")
+rr        = input.float(2.0, "Risk Reward", step=0.1)
+atrMult   = input.float(1.5, "Stop ATR Mult", step=0.1)
+atrVal    = ta.atr(atrLen)
+atrAvg    = ta.sma(atrVal, lookback)
+highVol   = atrVal > atrAvg
+lowVol    = atrVal < atrAvg
+rangeHigh = ta.highest(high, rangeLen)
+rangeLow  = ta.lowest(low, rangeLen)
+crossUp   = ta.crossover(close, rangeHigh[1])
+crossDown = ta.crossunder(close, rangeLow[1])
+longMR    = lowVol and close < rangeLow[1]
+shortMR   = lowVol and close > rangeHigh[1]
+longBR    = highVol and crossUp
+shortBR   = highVol and crossDown
+longC     = (longMR or longBR) and strategy.position_size == 0
+shortC    = (shortMR or shortBR) and strategy.position_size == 0
+if longC; strategy.entry("VSR Long", strategy.long)
+if shortC; strategy.entry("VSR Short", strategy.short)
+ls = strategy.position_avg_price - atrVal * atrMult
+lt = strategy.position_avg_price + atrVal * atrMult * rr
+ss = strategy.position_avg_price + atrVal * atrMult
+st = strategy.position_avg_price - atrVal * atrMult * rr
+strategy.exit("XL", "VSR Long", stop=ls, limit=lt)
+strategy.exit("XS", "VSR Short", stop=ss, limit=st)
+plot(rangeHigh, "Range High", color.green)
+plot(rangeLow, "Range Low", color.red)

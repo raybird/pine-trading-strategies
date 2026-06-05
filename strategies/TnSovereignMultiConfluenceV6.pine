@@ -1,0 +1,234 @@
+//@version=6
+// TnSovereignMultiConfluenceV6 — TeleNexus ICT 多重匯聚主權框架
+// Author: TeleNexus (Raybird) — ported from QuantAlgo smc-pro-multi-confluence-strategy
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0604.0630
+//
+// 核心規訓:
+// 1. ICT 三層篩選：HTF 偏向 → 流動性獵取 → 訂單塊/FVG 入場
+// 2. 匯聚評分：BOS + CHOCH + Sweep + OB + FVG + CRT 位移確認
+// 3. 動態 SL 選擇：Zone / Swing / Sweep 三模式，自適應距離開倉
+// 4. 記憶體優化：Zone_Data / Liq_Data UDT，受限顯示數量防洩漏
+
+strategy("TN Multi-Confluence [TeleNexus]",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=2,
+     commission_type=strategy.commission.percent,
+     commission_value=0.075,
+     margin_long=1, margin_short=1,
+     pyramiding=0,
+     max_lines_count=300,
+     max_labels_count=300,
+     max_boxes_count=300)
+
+// ── HTF 偏向與趨勢 ───────────────────────────────────────────────────────────
+grpTrend = "1. HTF BIAS & TREND"
+htfTF     = input.timeframe("240", "HTF Timeframe", group=grpTrend)
+useHTF    = input.bool(true, "Filter with HTF Bias", group=grpTrend)
+emaLen    = input.int(200, "EMA Length", group=grpTrend)
+showEMA   = input.bool(false, "Show EMA", group=grpTrend)
+
+// ── 結構與流動性 ─────────────────────────────────────────────────────────────
+grpStruct = "2. STRUCTURE & LIQUIDITY"
+swLen   = input.int(5, "Swing Sensitivity", group=grpStruct)
+liqTol  = input.float(5.0, "Equal HL Tolerance (pips)", group=grpStruct)
+showLiq = input.bool(true, "Show Liquidity", group=grpStruct)
+
+// ── 訂單塊與 FVG ─────────────────────────────────────────────────────────────
+grpZone = "3. ORDER BLOCKS & FVG"
+minFVG    = input.float(3.0, "Min FVG Size (pips)", group=grpZone)
+showOB    = input.bool(true, "Show Order Blocks", group=grpZone)
+showFVG   = input.bool(true, "Show FVG", group=grpZone)
+maxZones  = input.int(10, "Max Displayed Zones", group=grpZone)
+
+// ── CRT 確認 ─────────────────────────────────────────────────────────────────
+grpCRT = "4. CRT CONFIRMATION"
+useCRT   = input.bool(true, "Require CRT Confirmation", group=grpCRT)
+dispMult = input.float(1.5, "Displacement Mult (xATR)", group=grpCRT)
+
+// ── 風控 ─────────────────────────────────────────────────────────────────────
+grpRisk = "5. RISK MANAGEMENT"
+riskPct  = input.float(1.0, "Risk %", group=grpRisk, step=0.1)
+rrRatio  = input.float(4.0, "Target RR", group=grpRisk, step=0.5)
+slType   = input.string("Zone", "SL Type", options=["Zone","Swing","Sweep"], group=grpRisk)
+
+// ── 時段 ─────────────────────────────────────────────────────────────────────
+grpSess = "6. SESSIONS & LEVELS"
+useNY  = input.bool(true, "New York Session", group=grpSess)
+useLDN = input.bool(true, "London Session", group=grpSess)
+showPDH = input.bool(true, "Previous Day H/L", group=grpSess)
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+grpUI = "7. INTERFACE"
+showDashInp = input.bool(true, "Show Dashboard", group=grpUI)
+showLblInp  = input.bool(true, "Show Labels", group=grpUI)
+
+// ── UDT ──────────────────────────────────────────────────────────────────────
+type ZoneData
+    box bx; bool isBull; float top; float bot; bool mitigated; string zType
+type LiqData
+    line ln; float price; bool isBSL; bool swept
+
+var array<ZoneData> obArr  = array.new<ZoneData>()
+var array<ZoneData> fvgArr = array.new<ZoneData>()
+var array<LiqData>  liqArr = array.new<LiqData>()
+
+// ── HTF 偏向（反重繪）─────────────────────────────────────────────────────────
+getHTFBias() =>
+    [h,l,c] = request.security(syminfo.tickerid, htfTF, [high,low,close], barmerge.gaps_off, barmerge.lookahead_on)
+    hc=h[1]; lc=l[1]; cc=c[1]
+    if not na(cc)
+        if cc>math.avg(hc,lc) and cc>cc[1]; "BULL"
+        else if cc<math.avg(hc,lc) and cc<cc[1]; "BEAR"
+        else "NEUTRAL"
+    else "NEUTRAL"
+
+isSessionActive() =>
+    sess=(useLDN?"0800-1200:":"")+(useNY?"1300-1700:":"")
+    not na(time(timeframe.period,sess))
+
+// ── 趨勢與結構 ───────────────────────────────────────────────────────────────
+emaVal = ta.ema(close, emaLen)
+plot(showEMA?emaVal:na,"EMA",color=ta.crossover(close,emaVal)?#089981:ta.crossunder(close,emaVal)?#f23645:color.gray,linewidth=2)
+
+pivH = ta.pivothigh(high, swLen, swLen)
+pivL = ta.pivotlow(low, swLen, swLen)
+
+var string trend = "NEUTRAL"
+var float lastSH = na; var float lastSL = na
+if not na(pivH); lastSH:=pivH; if close<lastSL; trend:="BEAR"
+if not na(pivL); lastSL:=pivL; if close>lastSH; trend:="BULL"
+
+htfBias = useHTF ? getHTFBias() : "NEUTRAL"
+finalTrend = useHTF ? (htfBias!="NEUTRAL"?htfBias:trend) : trend
+
+// ── 流動性獵取 ───────────────────────────────────────────────────────────────
+var string lastSweep = "NONE"
+if barstate.isconfirmed
+    if not na(pivH)
+        ln=line.new(bar_index[swLen],pivH,bar_index,pivH,color=color.new(#f23645,70),style=line.style_dotted)
+        array.push(liqArr,LiqData.new(ln,pivH,true,false))
+    if not na(pivL)
+        ln=line.new(bar_index[swLen],pivL,bar_index,pivL,color=color.new(#089981,70),style=line.style_dotted)
+        array.push(liqArr,LiqData.new(ln,pivL,false,false))
+    if array.size(liqArr)>0
+        for i=array.size(liqArr)-1 to 0
+            lq=array.get(liqArr,i)
+            if not lq.swept
+                if lq.isBSL and high>lq.price and close<lq.price
+                    lq.swept:=true; line.set_style(lq.ln,line.style_solid); lastSweep:="BSL"
+                else if not lq.isBSL and low<lq.price and close>lq.price
+                    lq.swept:=true; line.set_style(lq.ln,line.style_solid); lastSweep:="SSL"
+
+// ── OB / FVG 引擎 ────────────────────────────────────────────────────────────
+manageSize(arr)=>
+    while array.size(arr)>maxZones; old=array.shift(arr); box.delete(old.bx)
+
+isOBBull=close[1]<open[1] and close>open and close>high[1]
+isOBBear=close[1]>open[1] and close<open and close<low[1]
+
+if barstate.isconfirmed and showOB
+    if isOBBull; bx=box.new(bar_index[1],high[1],bar_index+10,low[1],border_color=#089981,bgcolor=color.new(#089981,85)); array.push(obArr,ZoneData.new(bx,true,high[1],low[1],false,"OB")); manageSize(obArr)
+    if isOBBear; bx=box.new(bar_index[1],high[1],bar_index+10,low[1],border_color=#f23645,bgcolor=color.new(#f23645,85)); array.push(obArr,ZoneData.new(bx,false,high[1],low[1],false,"OB")); manageSize(obArr)
+
+fvgTop=low<high[2]?high[2]:na; fvgBot=high>low[2]?low[2]:na
+fvgSz=(fvgTop-fvgBot)/syminfo.mintick
+isFVGBull=close>open and fvgSz>minFVG; isFVGBear=close<open and fvgSz>minFVG
+
+if barstate.isconfirmed and showFVG
+    if isFVGBull; bx=box.new(bar_index[1],fvgTop,bar_index+15,fvgBot,border_color=color.new(#089981,60),bgcolor=color.new(#089981,92)); array.push(fvgArr,ZoneData.new(bx,true,fvgTop,fvgBot,false,"FVG")); manageSize(fvgArr)
+    if isFVGBear; bx=box.new(bar_index[1],fvgTop,bar_index+15,fvgBot,border_color=color.new(#f23645,60),bgcolor=color.new(#f23645,92)); array.push(fvgArr,ZoneData.new(bx,false,fvgTop,fvgBot,false,"FVG")); manageSize(fvgArr)
+
+checkMitigate(arr)=>
+    if array.size(arr)>0 and barstate.isconfirmed
+        for i=array.size(arr)-1 to 0
+            z=array.get(arr,i)
+            if not z.mitigated
+                if (z.isBull and close<z.bot) or (not z.isBull and close>z.top)
+                    z.mitigated:=true; box.set_bgcolor(z.bx,color.new(color.gray,95)); box.set_border_color(z.bx,color.new(color.gray,95))
+checkMitigate(obArr); checkMitigate(fvgArr)
+
+// ── 入場邏輯（多重匯聚）───────────────────────────────────────────────────────
+inValidZone(isBuy)=>
+    res=false
+    if showOB
+        for i=array.size(obArr)-1 to 0
+            z=array.get(obArr,i)
+            if not z.mitigated and z.isBull==isBuy and close>=z.bot and close<=z.top; res:=true; break
+    if not res and showFVG
+        for i=array.size(fvgArr)-1 to 0
+            z=array.get(fvgArr,i)
+            if not z.mitigated and z.isBull==isBuy and close>=z.bot and close<=z.top; res:=true; break
+    res
+
+atrVal=ta.atr(14)
+isCRTBull=close>open and (close-open)>(atrVal*dispMult)
+isCRTBear=close<open and (open-close)>(atrVal*dispMult)
+
+condBuy  = finalTrend=="BULL" and lastSweep=="SSL" and inValidZone(true) and (useCRT?isCRTBull:true) and isSessionActive()
+condSell = finalTrend=="BEAR" and lastSweep=="BSL" and inValidZone(false) and (useCRT?isCRTBear:true) and isSessionActive()
+
+// ── PDH/PDL ──────────────────────────────────────────────────────────────────
+if showPDH
+    pdh=request.security(syminfo.tickerid,"D",high[1],barmerge.gaps_off,barmerge.lookahead_on)
+    pdl=request.security(syminfo.tickerid,"D",low[1],barmerge.gaps_off,barmerge.lookahead_on)
+    plot(pdh,"PDH",color.new(color.white,50),style=plot.style_circles)
+    plot(pdl,"PDL",color.new(color.white,50),style=plot.style_circles)
+
+// ── 執行 ─────────────────────────────────────────────────────────────────────
+if strategy.position_size==0
+    if condBuy
+        sl=slType=="Zone"?lastSL:(slType=="Swing"?ta.lowest(low,swLen):low[1])
+        sl:=sl-(2*syminfo.mintick); tp=close+((close-sl)*rrRatio)
+        strategy.entry("TN MC Long",strategy.long)
+        strategy.exit("Exit Long","TN MC Long",stop=sl,limit=tp)
+        if showLblInp
+            label.new(bar_index,low,"BUY MC",style=label.style_label_up,color=#089981,textcolor=color.white,size=size.large)
+            label.new(bar_index,sl,"SL",style=label.style_label_down,color=color.new(#f23645,50),textcolor=color.white,size=size.small)
+            label.new(bar_index,tp,"TP "+str.tostring(rrRatio)+"R",style=label.style_label_up,color=color.new(#089981,50),textcolor=color.white,size=size.small)
+            box.new(bar_index,close,bar_index+5,sl,border_color=color.new(#f23645,70),bgcolor=color.new(#f23645,92))
+    if condSell
+        sl=slType=="Zone"?lastSH:(slType=="Swing"?ta.highest(high,swLen):high[1])
+        sl:=sl+(2*syminfo.mintick); tp=close-((sl-close)*rrRatio)
+        strategy.entry("TN MC Short",strategy.short)
+        strategy.exit("Exit Short","TN MC Short",stop=sl,limit=tp)
+        if showLblInp
+            label.new(bar_index,high,"SELL MC",style=label.style_label_down,color=#f23645,textcolor=color.white,size=size.large)
+            label.new(bar_index,sl,"SL",style=label.style_label_up,color=color.new(#f23645,50),textcolor=color.white,size=size.small)
+            label.new(bar_index,tp,"TP "+str.tostring(rrRatio)+"R",style=label.style_label_down,color=color.new(#089981,50),textcolor=color.white,size=size.small)
+            box.new(bar_index,close,bar_index+5,sl,border_color=color.new(#f23645,70),bgcolor=color.new(#f23645,92))
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(condBuy,"MC BUY","TN Multi-Confluence: BUY Signal")
+alertcondition(condSell,"MC SELL","TN Multi-Confluence: SELL Signal")
+alertcondition(lastSweep=="SSL","SSL SWEEP","Sell-Side Liquidity Swept")
+alertcondition(lastSweep=="BSL","BSL SWEEP","Buy-Side Liquidity Swept")
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+if showDashInp and barstate.islast
+    var table dash=table.new(position.top_right,2,9,border_width=1,border_color=color.new(color.white,80))
+    table.cell(dash,0,0,"TN MULTI-CONFLUENCE",text_color=color.white,bgcolor=color.new(#1e222d,0),text_size=size.normal)
+    table.cell(dash,1,0,"v26.0604.0630",text_color=color.white,bgcolor=color.new(#1e222d,0),text_size=size.normal)
+    table.cell(dash,0,1,"HTF Bias",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    hc=htfBias=="BULL"?#089981:htfBias=="BEAR"?#f23645:color.gray
+    table.cell(dash,1,1,htfBias,text_color=hc,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,0,2,"Trend",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    tc=trend=="BULL"?#089981:trend=="BEAR"?#f23645:color.gray
+    table.cell(dash,1,2,trend,text_color=tc,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,0,3,"Liquidity",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    lc=lastSweep=="SSL"?#089981:lastSweep=="BSL"?#f23645:color.gray
+    table.cell(dash,1,3,lastSweep,text_color=lc,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,0,4,"Session",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,1,4,isSessionActive()?"ACTIVE":"OFF",text_color=isSessionActive()?#089981:color.red,bgcolor=color.new(#131722,10),text_size=size.small)
+    wr=strategy.closedtrades>0?(strategy.wintrades/strategy.closedtrades)*100:na
+    table.cell(dash,0,5,"Win Rate",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,1,5,str.tostring(wr,"#.##")+"%",text_color=wr>50?#089981:color.red,bgcolor=color.new(#131722,10),text_size=size.small)
+    gl=strategy.grossloss>0?strategy.grossloss:1; pf=strategy.grossprofit/gl
+    table.cell(dash,0,6,"Profit Factor",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,1,6,str.tostring(pf,"#.##"),text_color=pf>1.5?#089981:color.red,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,0,7,"Total Trades",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,1,7,str.tostring(strategy.closedtrades),text_color=color.white,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,0,8,"Max DD %",text_color=color.gray,bgcolor=color.new(#131722,10),text_size=size.small)
+    table.cell(dash,1,8,str.tostring(strategy.max_drawdown/strategy.initial_capital*100,"#.##")+"%",text_color=color.red,bgcolor=color.new(#131722,10),text_size=size.small)

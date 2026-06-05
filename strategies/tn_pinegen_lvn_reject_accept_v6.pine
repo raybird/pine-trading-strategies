@@ -1,0 +1,44 @@
+//@version=6
+// tn_pinegen_lvn_reject_accept_v6 — PineGen LVN Rejection / Acceptance (Sovereign Port)
+// Author: TeleNexus (Raybird) — ported from PineGen-AI/lvn-rejection-acceptance-strategy
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0604.1830
+//
+// 核心規訓:
+// 1. SMA 低量節點近似 + ATR 波動頻帶
+// 2. 相對成交量過濾（<0.8 avgVol 視為低參與）
+// 3. 拒絕（回到頻帶內）/ 接受（站穩頻帶外）雙邏輯
+// 4. ATR 風控 + 固定 R:R 出場
+strategy("TN PineGen LVN Reject/Accept [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=5)
+zoneLen  = input.int(40, "LVN Detection Length")
+atrLen   = input.int(14, "ATR Length")
+zoneW    = input.float(0.8, "LVN Width (ATR mult)", step=0.1)
+stopM    = input.float(1.5, "Stop ATR Mult", step=0.1)
+rr       = input.float(2.0, "Risk Reward", step=0.1)
+basis    = ta.sma(close, zoneLen)
+atrVal   = ta.atr(atrLen)
+lvnUp    = basis + atrVal * zoneW
+lvnDn    = basis - atrVal * zoneW
+avgVol   = ta.sma(volume, zoneLen)
+lowVol   = volume < avgVol * 0.8
+bullRej  = low < lvnDn and close > lvnDn and lowVol
+bearRej  = high > lvnUp and close < lvnUp and lowVol
+bullAcc  = close > lvnUp and close[1] > lvnUp
+bearAcc  = close < lvnDn and close[1] < lvnDn
+longC    = (bullRej or bullAcc) and strategy.position_size == 0
+shortC   = (bearRej or bearAcc) and strategy.position_size == 0
+if longC; strategy.entry("LPN Long", strategy.long)
+if shortC; strategy.entry("LPN Short", strategy.short)
+ls = strategy.position_avg_price - atrVal * stopM
+lt = strategy.position_avg_price + atrVal * stopM * rr
+ss = strategy.position_avg_price + atrVal * stopM
+st = strategy.position_avg_price - atrVal * stopM * rr
+strategy.exit("XL", "LPN Long", stop=ls, limit=lt)
+strategy.exit("XS", "LPN Short", stop=ss, limit=st)
+plot(basis, "LVN Mid", color.orange)
+plot(lvnUp, "LVN Upper", color.red)
+plot(lvnDn, "LVN Lower", color.green)

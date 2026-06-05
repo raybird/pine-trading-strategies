@@ -1,0 +1,42 @@
+//@version=6
+// tn_pinegen_vol_exp_fake_break_v6 — PineGen Vol Expansion + Fake Breakout (Sovereign Port)
+// Author: TeleNexus (Raybird) — ported from PineGen-AI/volatility-expansion-fake-breakout-strategy
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0604.1830
+//
+// 核心規訓:
+// 1. ATR 波動擴張偵測（atr > avg * mult）
+// 2. 範圍突破偵測 + 蠟燭強度過濾防假突破
+// 3. 強力收盤確認（close > high[1] 多 / close < low[1] 空）
+// 4. ATR 風控 + 固定 R:R
+strategy("TN PineGen Vol Exp FakeBreak [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=5)
+rangeLen  = input.int(20, "Range Lookback")
+atrLen    = input.int(14, "ATR Length")
+volMult   = input.float(1.3, "Vol Expansion Mult", step=0.1)
+atrMult   = input.float(1.5, "Stop ATR Mult", step=0.1)
+rr        = input.float(2.0, "Risk Reward", step=0.1)
+atrVal    = ta.atr(atrLen)
+atrAvg    = ta.sma(atrVal, rangeLen)
+volExp    = atrVal > atrAvg * volMult
+rangeHigh = ta.highest(high, rangeLen)
+rangeLow  = ta.lowest(low, rangeLen)
+breakUp   = ta.crossover(close, rangeHigh[1])
+breakDown = ta.crossunder(close, rangeLow[1])
+strongB   = close > open and close > high[1]
+strongS   = close < open and close < low[1]
+longC     = volExp and breakUp and strongB and strategy.position_size == 0
+shortC    = volExp and breakDown and strongS and strategy.position_size == 0
+if longC; strategy.entry("VEF Long", strategy.long)
+if shortC; strategy.entry("VEF Short", strategy.short)
+ls = strategy.position_avg_price - atrVal * atrMult
+lt = strategy.position_avg_price + atrVal * atrMult * rr
+ss = strategy.position_avg_price + atrVal * atrMult
+st = strategy.position_avg_price - atrVal * atrMult * rr
+strategy.exit("XL", "VEF Long", stop=ls, limit=lt)
+strategy.exit("XS", "VEF Short", stop=ss, limit=st)
+plot(rangeHigh, "Range High", color.green)
+plot(rangeLow, "Range Low", color.red)
