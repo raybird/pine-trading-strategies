@@ -59,6 +59,8 @@
 | **Total** | **153** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0607.0630）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含新增 Viprasol-Tech/pine-script-strategy、NizamAhmad233/pine-script-ai-generator、s7cret/openpine-trading，均無全新可移植策略）+ TradingView 社群無全新 v6 策略；維持 153 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0606.1830）**: 獵頭審計 — GitHub 53 儲存庫 + TradingView 社群全數檢索，無全新可移植策略；維持 153 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0606.0630）**: `TnSovereignViopSessionV6` — TeleNexus 主權 VIOP 時段策略（EMA 9/21 交叉 + 09:30–18:15 時段規訓 + ATR SL/TP + 收盤強制平倉），移植自 trugurpala/pinescriptv6 (VIOP Session Strategy)
