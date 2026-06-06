@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 135 個已實體化主權策略，分 10 大類
+- **[`/strategies`](./strategies/README.md)** — 153 個已實體化主權策略，分 14 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **148** | 主權策略矩陣 |
+| **Total** | **153** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0606.1830）**: 獵頭審計 — GitHub 53 儲存庫 + TradingView 社群全數檢索，無全新可移植策略；維持 153 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0606.0630）**: `TnSovereignViopSessionV6` — TeleNexus 主權 VIOP 時段策略（EMA 9/21 交叉 + 09:30–18:15 時段規訓 + ATR SL/TP + 收盤強制平倉），移植自 trugurpala/pinescriptv6 (VIOP Session Strategy)
 >
 > **最新加入（v26.0606.0630）**: `TnSovereignStochDivergenceV6` — TeleNexus 主權 Stochastic 背離策略（5-bar pivot 多空背離偵測 + %D 背離線 + 破裂移除），移植自 JoelPasapera/Strategies-in-Pine-Script-v6 (Stochastic Divergence Strategy)
