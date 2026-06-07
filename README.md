@@ -59,6 +59,8 @@
 | **Total** | **153** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0607.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 PineGen-AI 系列 14 倉僅 README 無 .pine 實作、Viprasol-Tech/pine-script-strategy 為 EMA 交叉基礎策略無移植價值）+ TradingView 社群無全新 v6 策略；維持 153 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0607.0630）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含新增 Viprasol-Tech/pine-script-strategy、NizamAhmad233/pine-script-ai-generator、s7cret/openpine-trading，均無全新可移植策略）+ TradingView 社群無全新 v6 策略；維持 153 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0606.1830）**: 獵頭審計 — GitHub 53 儲存庫 + TradingView 社群全數檢索，無全新可移植策略；維持 153 策略物理對位；Dashboard 同步更新
