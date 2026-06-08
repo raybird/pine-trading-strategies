@@ -4,7 +4,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-## Sovereign Core（主權核心，12）
+## Sovereign Core（主權核心，13）
 
 | 策略 | 說明 |
 |------|------|
@@ -20,8 +20,9 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignMtfViopV6` | MTF VIOP，時序審計特徵 |
 | `TnSovereignMultiCausalityV6` | 三層因果共振趨勢追蹤 |
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
+| `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，14）
+## Trend & Momentum（趨勢與動量，16）
 
 | 策略 | 說明 |
 |------|------|
@@ -39,8 +40,10 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignTripleEmaV6` | 5/13/34 EMA 對位 + 200 EMA 全球地板 |
 | `TnSovereignVAMOStrategyV6` | VAMO 波動調整動量策略（完整版） |
 | `TnSovereignVortexV6` | 渦流極性審計 + 200 EMA 過濾 |
+| `tn_wavetrend_v4_v6` | WaveTrend v4 波動交易策略 |
+| `tn_smooth_trend_radar_v6` | 雙平滑超級趨勢 + 樞軸拒絕雷達 |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，13）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，15）
 
 | 策略 | 說明 |
 |------|------|
@@ -57,8 +60,10 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignVwapRegimeV6` | VWAP Regime 偏差策略 |
 | `TnSovereignVWAPV6` | 動態錨定 VWAP + 標準差通道均值回歸 |
 | `TnSovereignWaveTrendV20` | WaveTrend 熱力學反轉 |
+| `v6_stochastic_divergence` | 隨機指標背離 (v6 移植) |
+| `TnSovereignStochDivergenceV6` | Stoch + MACD 雙重背離偵測 |
 
-## Volatility & Breakout（波動率與突破，17）
+## Volatility & Breakout（波動率與突破，23）
 
 | 策略 | 說明 |
 |------|------|
@@ -79,8 +84,14 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignThermodynamicSqueezeV20` | 熱力學擠壓膨脹策略 |
 | `TnSovereignVolumeProfileScalpV6` | Volume Profile 精準 scalp |
 | `tokyo_breakout_v6_refined` | 東京時段突破策略 |
+| `TnSovereignOrbMultiSessionV6` | 多時段開盤區間突破 |
+| `TnSovereignDonchianBreakoutV6` | 唐奇安通道突破 |
+| `tn_adaptive_risk_regime_v6` | 自適應風險體制突破 |
+| `tn_chandelier_flip_radar_v6` | 5 級趨勢 + ATR 追蹤反轉雷達 |
+| `tn_pinegen_vol_exp_fake_break_v6` | 波動擴張 + 假突破過濾 (PineGen 移植) |
+| `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
 
-## Market Structure & Price Action（市場結構與價格行為，18）
+## Market Structure & Price Action（市場結構與價格行為，28）
 
 | 策略 | 說明 |
 |------|------|
@@ -102,8 +113,18 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `XauusdIntradayTrendPullbackV6` | 黃金日內趨勢拉回 |
 | `ZzcCorridorSovereignV6` | 擠壓偵測 + Wyckoff 審計波段走廊 |
 | `ZzcMarketStructureSovereignV6` | ZZC 波段結構主權策略 |
+| `TnSovereignVeinReversalV6` | 靜脈反轉 + 流動性掃蕩 |
+| `tn_melgo_sequence_v6` | Melgo 序列結構策略 |
+| `tn_value_area_rejection_v6` | 價值區拒絕策略 |
+| `TnSovereignIctComboV6` | ICT 組合策略 |
+| `TnSovereignIctSmcComboV6` | ICT/SMC 融合組合策略 |
+| `TnSovereignIctSurgicalV20` | ICT 外科手術式 V20 策略 |
+| `TnSovereignIctV6` | ICT 核心策略 |
+| `TnSovereignMultiConfluenceV6` | ICT 多重匯聚主權框架 |
+| `TnSovereignSMCV6` | SMC 主權策略 |
+| `tn_pinegen_lvn_reject_accept_v6` | LVN 拒絕/接受 (PineGen 移植) |
 
-## Volume & Order Flow（成交量與訂單流，11）
+## Volume & Order Flow（成交量與訂單流，14）
 
 | 策略 | 說明 |
 |------|------|
@@ -118,6 +139,9 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignFootprintPOCV6` | 足跡圖 POC 突破 + 機構意圖審計 |
 | `TnSovereignVolumeDeltaV6` | 累積 Delta 背離偵測 + 200 EMA 過濾 |
 | `volume_profile_matrix_v6` | 自適應成交量分佈矩陣 |
+| `TnSovereignLiquidityHuntV6` | 流動性獵取 + 機構位移確認 |
+| `TnSovereignViopSessionV6` | VIOP 時序審計時段策略 |
+| `tn_liquidity_sovereign_v6` | 4 層因果對位流動性審計 |
 
 ## Deep Reinforcement Learning（深度強化學習，1）
 
@@ -140,7 +164,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignLorentzianV6` | Lorentzian 分類 + 多維特徵因果審計 |
 | `TnSovereignTopologicalSutureV6` | 拓撲連接性策略 |
 
-## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，11）
+## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，12）
 
 | 策略 | 說明 |
 |------|------|
@@ -155,6 +179,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignLiquidityMatrixV6` | 適應性宏觀錨定矩陣 |
 | `TnSovereignSignalForgeV20` | 7 因子適應性集成 |
 | `TnSovereignSignalForgeV6` | ML 驅動多模型主權 |
+| `tn_pair_corr_divergence_v6` | 配對相關性背離偵測 |
 
 ## Optimization & Portfolio（優化與組合，7）
 
@@ -180,12 +205,17 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 |------|------|
 | `TnSovereignPropFirmUltraV6` | 三層風控自營防禦與完整 SMC 引擎 |
 
-## Signal Quality & Fakeout Prevention（信號品質與假突破預防，2）
+## Signal Quality & Fakeout Prevention（信號品質與假突破預防，7）
 
 | 策略 | 說明 |
 |------|------|
 | `tn_fakeout_signal_quality_v6` | 4 層信號品質過濾器（成交量 + HTF 趨勢 + ATR 波動帶 + 條形結構），移植自 trugurpala/pinescriptv6 |
 | `tn_sovereign_fakeout_v6` | 4 層因果審計與假突破過濾 |
+| `TnSovereignFakeoutConfirmedV6` | 假突破確認策略 |
+| `TnSovereignFakeoutFilterV6` | 假突破過濾策略 |
+| `TnSovereignFakeoutV6` | 主權假突破偵測 |
+| `tn_fakeout_filter_v6` | 4 層信號品質評分過濾 |
+| `tn_fakeout_sovereign_v6` | Enum 狀態機因果假突破審計 |
 
 ## Core Library & Utility（核心庫與工具，5）
 
