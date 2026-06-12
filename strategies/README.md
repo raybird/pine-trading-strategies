@@ -63,7 +63,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `v6_stochastic_divergence` | 隨機指標背離 (v6 移植) |
 | `TnSovereignStochDivergenceV6` | Stoch + MACD 雙重背離偵測 |
 
-## Volatility & Breakout（波動率與突破，23）
+## Volatility & Breakout（波動率與突破，24）
 
 | 策略 | 說明 |
 |------|------|
@@ -90,6 +90,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_chandelier_flip_radar_v6` | 5 級趨勢 + ATR 追蹤反轉雷達 |
 | `tn_pinegen_vol_exp_fake_break_v6` | 波動擴張 + 假突破過濾 (PineGen 移植) |
 | `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
+| `tn_opening_range_magnet_v6` | 開盤區間磁鐵效應策略（OR High/Low 磁鐵 + 價格漂移回測 + NR7/缺口過濾），移植自 biagDev/nq-magnet-framework |
 
 ## Market Structure & Price Action（市場結構與價格行為，28）
 

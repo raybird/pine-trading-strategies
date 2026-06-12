@@ -1,0 +1,201 @@
+//@version=6
+// 🛡️ TeleNexus Sovereign Opening Range Magnet v6 (v26.0612.1830)
+// Base: biagDev/nq-magnet-framework (NQ Magnet Framework v2/v3)
+// Optimized for: Multi-Market Opening Range Retest & Magnet Edge Capture
+
+strategy("TN OR Magnet v6", overlay=true, initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=1.0,
+     pyramiding=0, commission_type=strategy.commission.percent, commission_value=0.05,
+     slippage=2)
+
+// ------------------------------------------------------------
+// MODULE 0. TIME & SESSION CONFIGURATION
+// ------------------------------------------------------------
+groupTime = "Session Configuration"
+tzID = input.string("America/New_York", "Timezone", group=groupTime)
+rangeStartH = input.int(9, "Range Start Hour (ET)", minval=0, maxval=23, group=groupTime)
+rangeStartM = input.int(30, "Range Start Minute", minval=0, maxval=59, group=groupTime)
+rangeDuration = input.int(5, "Range Duration (minutes)", minval=1, maxval=120, group=groupTime)
+tradeWindowStartH = input.int(9, "Trade Window Start Hour (ET)", minval=0, maxval=23, group=groupTime)
+tradeWindowStartM = input.int(36, "Trade Window Start Minute", minval=0, maxval=59, group=groupTime)
+tradeWindowEndH = input.int(11, "Trade Window End Hour (ET)", minval=0, maxval=23, group=groupTime)
+tradeWindowEndM = input.int(0, "Trade Window End Minute", minval=0, maxval=59, group=groupTime)
+forceCloseH = input.int(16, "Force Close Hour (ET)", minval=0, maxval=23, group=groupTime)
+forceCloseM = input.int(0, "Force Close Minute", minval=0, maxval=59, group=groupTime)
+
+nyTime(h, m) => timestamp(tzID, year, month, dayofmonth, h, m)
+rangeStart = nyTime(rangeStartH, rangeStartM)
+rangeEnd = nyTime(rangeStartH, rangeStartM) + rangeDuration * 60000
+tradeOpen = nyTime(tradeWindowStartH, tradeWindowStartM)
+tradeClose = nyTime(tradeWindowEndH, tradeWindowEndM)
+marketClose = nyTime(forceCloseH, forceCloseM)
+
+inRange = time >= rangeStart and time < rangeEnd
+tradeActive = time >= tradeOpen and time < tradeClose
+forceCloseActive = time >= marketClose
+
+var float orHigh = na
+var float orLow = na
+var float orOpen = na
+var bool rangeReady = false
+
+if inRange and not inRange[1]
+    orHigh := high
+    orLow := low
+    orOpen := open
+    rangeReady := false
+if inRange
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow := na(orLow) ? low : math.min(orLow, low)
+if not inRange and inRange[1]
+    rangeReady := true
+
+float orMid = na(orHigh) or na(orLow) ? na : (orHigh + orLow) / 2
+float orRange = na(orHigh) or na(orLow) ? na : orHigh - orLow
+bool orGreen = not na(orOpen) and not na(orClose) ? orClose > orOpen : na
+
+// ------------------------------------------------------------
+// MODULE 1. MAGNET STATE MACHINE
+// ------------------------------------------------------------
+groupSetup = "Setup Configuration"
+enableSetupA = input.bool(true, "Setup A: Magnet Drift + Retest", group=groupSetup)
+enableSetupB = input.bool(false, "Setup B: Breakout + Retest (Conservative)", group=groupSetup)
+minDriftPct = input.float(0.02, "Min Drift from Magnet (%)", minval=0.0, step=0.01, group=groupSetup) / 100
+
+float magnetHigh = na(orHigh) ? na : orHigh
+float magnetLow = na(orLow) ? na : orLow
+float magnetMid = orMid
+
+float driftUpPct = na(magnetHigh) ? 0 : (close - magnetHigh) / magnetHigh * 100
+float driftDownPct = na(magnetLow) ? 0 : (magnetLow - close) / magnetLow * 100
+
+bool magnetDriftUp = rangeReady and not na(driftUpPct) and driftUpPct >= minDriftPct
+bool magnetDriftDown = rangeReady and not na(driftDownPct) and driftDownPct >= minDriftPct
+
+// ------------------------------------------------------------
+// MODULE 2. SETUP A — MAGNET CONFLUENCE
+// ------------------------------------------------------------
+groupConfluence = "Setup A Confluence (Entry)"
+confMinDriftPct = input.float(0.10, "Confluence Min Drift (%)", minval=0.01, step=0.01, group=groupConfluence) / 100
+
+bool confDriftUp = na(driftUpPct) ? false : driftUpPct >= confMinDriftPct
+bool confDriftDown = na(driftDownPct) ? false : driftDownPct >= confMinDriftPct
+
+bool pullbackToMagnetLong = confDriftUp and low <= magnetHigh and close > magnetHigh
+bool pullbackToMagnetShort = confDriftDown and high >= magnetLow and close < magnetLow
+
+// ------------------------------------------------------------
+// MODULE 3. REGIME FILTERS (NR7, Gap, Trend)
+// ------------------------------------------------------------
+groupFilter = "Regime Filters"
+useNR7 = input.bool(true, "Skip NR7 Days", group=groupFilter)
+useGapFilter = input.bool(true, "Skip Large Gap Days", group=groupFilter)
+gapThreshold = input.float(0.5, "Gap Threshold (%)", minval=0.1, step=0.1, group=groupFilter) / 100
+useEMA200Filter = input.bool(false, "Require Price Above 200 EMA", group=groupFilter)
+
+ema200 = ta.sma(close, 200)
+above200 = close > ema200
+
+prevDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+prevDayLow = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+prevDayClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dayOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_off)
+prevDayRange = not na(prevDayHigh) and not na(prevDayLow) ? prevDayHigh - prevDayLow : na
+
+range2 = request.security(syminfo.tickerid, "D", high[2] - low[2], lookahead=barmerge.lookahead_off)
+range3 = request.security(syminfo.tickerid, "D", high[3] - low[3], lookahead=barmerge.lookahead_off)
+range4 = request.security(syminfo.tickerid, "D", high[4] - low[4], lookahead=barmerge.lookahead_off)
+range5 = request.security(syminfo.tickerid, "D", high[5] - low[5], lookahead=barmerge.lookahead_off)
+range6 = request.security(syminfo.tickerid, "D", high[6] - low[6], lookahead=barmerge.lookahead_off)
+range7 = request.security(syminfo.tickerid, "D", high[7] - low[7], lookahead=barmerge.lookahead_off)
+
+bool isNR7 = not na(prevDayRange) and not na(range2) and not na(range3) and not na(range4)
+     and not na(range5) and not na(range6) and not na(range7)
+     and prevDayRange < range2 and prevDayRange < range3 and prevDayRange < range4
+     and prevDayRange < range5 and prevDayRange < range6 and prevDayRange < range7
+
+float gapSize = not na(dayOpen) and not na(prevDayClose) and prevDayClose != 0
+     ? math.abs(dayOpen - prevDayClose) / prevDayClose : 0
+bool isLargeGap = gapSize > gapThreshold
+
+bool skipDay = (useNR7 and isNR7) or (useGapFilter and isLargeGap)
+bool trendOK = not useEMA200Filter or above200
+
+// ------------------------------------------------------------
+// MODULE 4. RISK & EXECUTION
+// ------------------------------------------------------------
+groupRisk = "Risk Management"
+riskPctA = input.float(1.0, "Risk % (Setup A)", minval=0.05, step=0.05, group=groupRisk)
+riskPctB = input.float(0.5, "Risk % (Setup B)", minval=0.05, step=0.05, group=groupRisk)
+atrLen = input.int(14, "ATR Length", group=groupRisk)
+atrMult = input.float(2.0, "ATR Stop Multiplier", minval=1.0, step=0.1, group=groupRisk)
+maxLossPerDay = input.int(2, "Max Losing Trades Per Day", minval=1, group=groupRisk)
+
+atrVal = ta.atr(atrLen)
+
+var int dailyLosses = 0
+var int lastTradeDay = -1
+int currentDay = dayofmonth
+
+if currentDay != lastTradeDay and lastTradeDay != -1
+    dailyLosses := 0
+
+bool riskLimitHit = dailyLosses >= maxLossPerDay
+
+calcPositionSize(float stopDist) =>
+    float riskCapital = strategy.equity * riskPctA / 100
+    float qty = stopDist > 0 ? riskCapital / stopDist : 0
+    math.floor(qty / (syminfo.mincontract > 0 ? syminfo.mincontract : 1)) * (syminfo.mincontract > 0 ? syminfo.mincontract : 1)
+
+// ------------------------------------------------------------
+// MODULE 5. SIGNAL GENERATION
+// ------------------------------------------------------------
+bool setupALong = enableSetupA and rangeReady and tradeActive and not skipDay and trendOK
+     and not riskLimitHit and pullbackToMagnetLong and magnetDriftUp
+
+bool setupAShort = enableSetupA and rangeReady and tradeActive and not skipDay and trendOK
+     and not riskLimitHit and pullbackToMagnetShort and magnetDriftDown
+
+// ------------------------------------------------------------
+// MODULE 6. ORDER EXECUTION
+// ------------------------------------------------------------
+if setupALong
+    dailyLosses := 0
+    float stop = orLow - atrVal * atrMult
+    float target = close + (close - stop) * 2.0
+    strategy.entry("OR Magnet Long", strategy.long, comment="SetupA_Long")
+    strategy.exit("OR Magnet Long Exit", "OR Magnet Long", stop=stop, limit=target)
+
+if setupAShort
+    dailyLosses := 0
+    float stop = orHigh + atrVal * atrMult
+    float target = close - (stop - close) * 2.0
+    strategy.entry("OR Magnet Short", strategy.short, comment="SetupA_Short")
+    strategy.exit("OR Magnet Short Exit", "OR Magnet Short", stop=stop, limit=target)
+
+if forceCloseActive
+    strategy.close("OR Magnet Long", comment="EOD_Close")
+    strategy.close("OR Magnet Short", comment="EOD_Close")
+
+// ------------------------------------------------------------
+// MODULE 7. TRACKING & VISUALS
+// ------------------------------------------------------------
+var table dash = table.new(position.top_right, 2, 6, border_width=1, bgcolor=color.new(color.black, 60))
+if barstate.islast
+    table.cell(dash, 0, 0, "OR High", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 0, na(orHigh) ? "n/a" : str.tostring(orHigh, format.mintick), bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 0, 1, "OR Low", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 1, na(orLow) ? "n/a" : str.tostring(orLow, format.mintick), bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 0, 2, "Range Ready", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 2, rangeReady ? "YES" : "NO", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 0, 3, "Setup A Long", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 3, setupALong ? "TRIGGERED" : "WAITING", bgcolor=setupALong ? color.new(color.green, 40) : color.gray, text_color=color.white)
+    table.cell(dash, 0, 4, "Setup A Short", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 4, setupAShort ? "TRIGGERED" : "WAITING", bgcolor=setupAShort ? color.new(color.red, 40) : color.gray, text_color=color.white)
+    table.cell(dash, 0, 5, "Daily Losses", bgcolor=color.gray, text_color=color.white)
+    table.cell(dash, 1, 5, str.tostring(dailyLosses), bgcolor=riskLimitHit ? color.new(color.red, 50) : color.gray, text_color=color.white)
+
+plotshape(setupALong, "Long Entry", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(setupAShort, "Short Entry", shape.triangledown, location.abovebar, color.red, size=size.small)
+hline(na(orHigh) ? na : orHigh, "OR High", color.blue, hline.style_dashed)
+hline(na(orLow) ? na : orLow, "OR Low", color.blue, hline.style_dashed)

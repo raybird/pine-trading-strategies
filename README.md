@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 153 個已實體化主權策略，分 14 大類
+- **[`/strategies`](./strategies/README.md)** — 154 個已實體化主權策略，分 14 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -45,7 +45,7 @@
 | **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 15 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4 |
 | **Mean Reversion & Oscillator** | 14 | 均值回歸、超買超賣反轉 |
-| **Volatility & Breakout** | 19 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應 |
+| **Volatility & Breakout** | 20 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應 |
 | **Market Structure & Price Action** | 21 | SMC/ICT、波段結構、FVG、訂單塊、反轉品質分級、價值區拒絕、Melgo 六態分類 |
 | **Volume & Order Flow** | 11 | 足跡圖、失衡偵測、流動性獵取 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
@@ -56,10 +56,12 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **153** | 主權策略矩陣 |
+| **Total** | **154** | 主權策略矩陣 |
 
 
-> **最新加入（v26.0609.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example DCA+BBW+Webhook 策略已有 `TnSovereignDcaWebhookV6` 覆蓋；reggytrades/pine-script-workspace 為 v5/v6 混合 snippets 無獨立策略；PineGen-AI 14 倉全數檢視 modular-trend-pullback 與 pivot-based-dynamic-trend 均為基礎 EMA+ATR 已有對應策略覆蓋）+ TradingView 社群無法存取（Cloudflare 阻擋）；維持 153 策略物理對位；Dashboard 同步更新
+> **最新加入（v26.0612.1830）**: `tn_opening_range_magnet_v6` — TeleNexus 主權開盤區間磁鐵策略（OR High/Low 磁鐵效應 + 價格漂移回測入場 + NR7/缺口/趨勢過濾 + ATR 風控 + 每日虧損限制），移植自 biagDev/nq-magnet-framework (NQ Magnet Framework v2/v3)
+>
+> **最新加入（v26.0609.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example DCA+BBW+Webhook 策略已有 `TnSovereignDcaWebhookV6` 覆蓋；reggytrades/pine-script-workspace 為 v5/v6 混合 snippets 無獨立策略；PineGen-AI 14 倉全數檢視 modular-trend-pullback 與 pivot-based-dynamic-trend 均為基礎 EMA+ATR 已有對應策略覆蓋）+ TradingView 社群無法存取（Cloudflare 阻擋）；Dashboard 同步更新
 >
 > **最新加入（v26.0607.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 PineGen-AI 系列 14 倉僅 README 無 .pine 實作、Viprasol-Tech/pine-script-strategy 為 EMA 交叉基礎策略無移植價值）+ TradingView 社群無全新 v6 策略；維持 153 策略物理對位；Dashboard 同步更新
 >
