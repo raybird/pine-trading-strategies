@@ -1,0 +1,172 @@
+//@version=6
+// tn_ifvg_cisd_double_confirm_v6 — TeleNexus Sovereign IFVG + CISD Double Confirmation
+// Author: TeleNexus (Raybird) — ported from aleks-drozy/fyp-trading-strategy (FYP_Bot_1.pine)
+// Source: https://github.com/aleks-drozy/fyp-trading-strategy
+// Timezone: Asia/Taipei (CST)
+// Version: v26.0619.0630
+//
+// 核心邏輯:
+// 1. IFVG (Inverse Fair Value Gap) — 三燭失衡翻轉偵測
+// 2. CISD (Change in State of Delivery) — 回調高/低點結構破壞追蹤
+// 3. 雙重確認入場 — IFVG + CISD 同向共振
+// 4. 流動性掃蕩過濾 (等效 1m sweep proxy)
+// 5. EMA 趨勢濾網 + ATR 風控
+strategy("TN IFVG CISD Double Confirm [TeleNexus]",
+     overlay=true, initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=3)
+
+// ─── IFVG 參數 ───
+fvgLen       = input.int(3, "FVG Lookback")
+fvgThreshold = input.float(0.0, "FVG Threshold %", step=0.1)
+
+// ─── CISD 參數 ───
+swingLook    = input.int(8, "Swing Lookback", minval=3, maxval=30)
+
+// ─── 趨勢濾網 ───
+emaLen    = input.int(20, "EMA Length", minval=5)
+useEma    = input.bool(true, "Use EMA Trend Filter")
+
+// ─── 流動性掃蕩過濾 ───
+sweepLen   = input.int(5, "Sweep Lookback", minval=2, maxval=30)
+useSweep   = input.bool(true, "Use Sweep Filter")
+
+// ─── 交易時段 ───
+useSession = input.bool(false, "Use NY Session Only")
+nyStartH   = input.int(9, "NY Start Hour", minval=0, maxval=23)
+nyStartM   = input.int(32, "NY Start Minute", minval=0, maxval=59)
+nyEndH     = input.int(10, "NY End Hour", minval=0, maxval=23)
+nyEndM     = input.int(0, "NY End Minute", minval=0, maxval=59)
+
+// ─── 風險管理 ───
+atrLen     = input.int(14, "ATR Length")
+stopMult   = input.float(1.5, "Stop ATR Mult", step=0.1)
+rrRatio    = input.float(1.5, "Risk Reward", step=0.1)
+
+// ─── 狀態機 ───
+var float ifvgTop = na, float ifvgBottom = na, string ifvgState = "None"
+var int ifvgBar = na, var int lastTradeDay = 0
+var bool bullIfvg = false, var bool bearIfvg = false
+var float cisdBullLevel = na, var float cisdBearLevel = na
+var bool cisdState = false
+var int tradesToday = 0
+
+// ─── 時段檢查 ───
+nyHour    = hour(time, "America/New_York")
+nyMinute  = minute(time, "America/New_York")
+nyNow     = nyHour * 60 + nyMinute
+nyStart   = nyStartH * 60 + nyStartM
+nyEnd     = nyEndH * 60 + nyEndM
+inNySess  = nyNow >= nyStart and nyNow < nyEnd
+isWknd    = dayofweek == dayofweek.saturday or dayofweek == dayofweek.sunday
+sessionOk = useSession ? (inNySess and not isWknd) : true
+
+// ─── 日重置 ───
+today = dayofmonth + month * 100 + year * 10000
+if today != lastTradeDay
+    lastTradeDay := today
+    tradesToday := 0
+
+// ─── FVG 偵測 (三燭失衡) ───
+bearFvg = high[2] < low and low - high[2] > fvgThreshold / 100 * high[2]
+bullFvg = low[2] > high and low[2] - high > fvgThreshold / 100 * low[2]
+
+// ─── IFVG 翻轉偵測 ───
+ifvgTopTemp = na; ifvgBottomTemp = na; ifvgStateTemp = "None"
+
+// Bearish FVG → Bullish IFVG (價格從下方突破 bearish FVG)
+if bearFvg and close > low and sessionOk
+    ifvgTopTemp := low; ifvgBottomTemp := high[2]
+    ifvgStateTemp := "Bullish"
+
+// Bullish FVG → Bearish IFVG (價格從上方跌破 bullish FVG)
+if bullFvg and close < high and sessionOk
+    ifvgTopTemp := low[2]; ifvgBottomTemp := high
+    ifvgStateTemp := "Bearish"
+
+if ifvgStateTemp != "None" and ifvgState == "None"
+    ifvgTop := ifvgTopTemp; ifvgBottom := ifvgBottomTemp
+    ifvgState := ifvgStateTemp; ifvgBar := bar_index
+
+// IFVG 過期 (10 bar)
+if not na(ifvgBar) and bar_index - ifvgBar > 10
+    ifvgState := "None"; ifvgBar := na
+
+bullIfvg := ifvgState == "Bullish"
+bearIfvg := ifvgState == "Bearish"
+
+// ─── CISD 狀態機 (結構破壞追蹤) ───
+swingLow  = ta.lowest(low, swingLook)
+swingHigh = ta.highest(high, swingLook)
+
+var float entryHigh = na, var float entryLow = na
+var bool inPullback = false
+var int breakBar = na
+
+// CISD 觸發: 結構高低點突破
+if not na(swingLow[1]) and close > swingHigh[1] and close[1] <= swingHigh[1]
+    cisdState := true
+    cisdBearLevel := na
+if not na(swingHigh[1]) and close < swingLow[1] and close[1] >= swingLow[1]
+    cisdState := false
+    cisdBullLevel := na
+
+// ─── 流動性掃蕩過濾 (等效 proxy) ───
+recentLow  = ta.lowest(low, sweepLen)
+recentHigh = ta.highest(high, sweepLen)
+bullSweep  = low < recentLow[1] and close > recentLow[1]
+bearSweep  = high > recentHigh[1] and close < recentHigh[1]
+
+var int bullSweepExp = 0; var bool bullSweepPending = false
+var int bearSweepExp = 0; var bool bearSweepPending = false
+
+if bullSweep and useSweep
+    bullSweepPending := true; bullSweepExp := bar_index + sweepLen
+if bearSweep and useSweep
+    bearSweepPending := true; bearSweepExp := bar_index + sweepLen
+if bar_index >= bullSweepExp; bullSweepPending := false
+if bar_index >= bearSweepExp; bearSweepPending := false
+
+sweepOkLong  = useSweep ? bullSweepPending : true
+sweepOkShort = useSweep ? bearSweepPending : true
+
+// ─── EMA 趨勢濾網 ───
+emaVal = ta.ema(close, emaLen)
+trendOkLong  = useEma ? close > emaVal : true
+trendOkShort = useEma ? close < emaVal : true
+
+// ─── 雙重確認入場 ───
+noPos  = strategy.position_size == 0
+canTrd = tradesToday < 1
+
+longC  = noPos and canTrd and sessionOk and bullIfvg and cisdState
+longC := longC and sweepOkLong and trendOkLong
+
+shortC = noPos and canTrd and sessionOk and bearIfvg and not cisdState
+shortC := shortC and sweepOkShort and trendOkShort
+
+// ─── 執行 ───
+atrVal = ta.atr(atrLen)
+
+if longC
+    strategy.entry("IFVG L", strategy.long)
+    tradesToday += 1
+
+if shortC
+    strategy.entry("IFVG S", strategy.short)
+    tradesToday += 1
+
+// ─── ATR 風控出場 ───
+if strategy.position_size > 0
+    stopP  = strategy.position_avg_price - atrVal * stopMult
+    limitP = strategy.position_avg_price + atrVal * stopMult * rrRatio
+    strategy.exit("XL", "IFVG L", stop=stopP, limit=limitP)
+
+if strategy.position_size < 0
+    stopP  = strategy.position_avg_price + atrVal * stopMult
+    limitP = strategy.position_avg_price - atrVal * stopMult * rrRatio
+    strategy.exit("XS", "IFVG S", stop=stopP, limit=limitP)
+
+// ─── 視覺化 ───
+plot(emaVal, "Trend EMA", color.yellow, 1, useEma ? na : display.none)
+plotshape(longC, "Long", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortC, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)

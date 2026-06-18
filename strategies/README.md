@@ -92,7 +92,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
 | `tn_opening_range_magnet_v6` | 開盤區間磁鐵效應策略（OR High/Low 磁鐵 + 價格漂移回測 + NR7/缺口過濾），移植自 biagDev/nq-magnet-framework |
 
-## Market Structure & Price Action（市場結構與價格行為，29）
+## Market Structure & Price Action（市場結構與價格行為，30）
 
 | 策略 | 說明 |
 |------|------|
@@ -125,6 +125,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSMCV6` | SMC 主權策略 |
 | `tn_pinegen_lvn_reject_accept_v6` | LVN 拒絕/接受 (PineGen 移植) |
 | `TnSovereignPowerOfThreeV6` | PO3 三相位引擎（Accumulation→Manipulation→Distribution），移植自 FEELS Power of Three v1.5 |
+| `tn_ifvg_cisd_double_confirm_v6` | IFVG（反轉 FVG）+ CISD（結構破壞）雙重確認入場，移植自 aleks-drozy/fyp-trading-strategy |
 
 ## Volume & Order Flow（成交量與訂單流，15）
 
