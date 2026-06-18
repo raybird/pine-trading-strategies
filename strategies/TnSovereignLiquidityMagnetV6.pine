@@ -1,0 +1,263 @@
+//@version=6
+// TeleNexus Sovereign: Liquidity Magnet Probability Engine [v26.0618.1830]
+// Spirit Inheritance: FEELS Liquidity Magnet v1.6.4 → TeleNexus Sovereign Framework
+// Goal: Probabilistic liquidity pool ranking with magnet pull scoring
+//
+// Logic Matrix:
+// 1. Pool Detection: Swing pivot identification with equal H/L clustering
+// 2. Probability Scoring: Strength × Proximity × Age × Momentum
+// 3. Magnet Pull: Top-ranked pool = current market magnet with bias direction
+// 4. Sovereign Filter: HTF EMA trend alignment + regime gating
+// 5. Risk Management: ATR-based dynamic SL/TP
+
+indicator("TnSovereignLiquidityMagnetV6",
+     shorttitle         = "Tn_LiqMag_V6",
+     overlay            = true,
+     max_boxes_count    = 500,
+     max_lines_count    = 500,
+     max_labels_count   = 500,
+     max_bars_back      = 5000)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_det = "▼ Liquidity Detection"
+pivotLen  = input.int(10, "Pivot Lookback", minval = 2, group = group_det)
+maxPools  = input.int(25, "Max Active Pools", minval = 5, maxval = 50, group = group_det)
+maxAgeB   = input.int(500, "Max Pool Age (bars)", minval = 50, group = group_det)
+
+group_eq  = "▼ Equal H/L Clustering"
+autoEqTol = input.bool(true, "Auto-Scale Tolerance", group = group_eq)
+manualEq  = input.float(0.15, "Manual Tolerance %", minval = 0.0, step = 0.05, group = group_eq)
+eqBonus   = input.float(1.7, "Equal H/L Bonus Mult", minval = 1.0, step = 0.1, group = group_eq)
+
+group_dist = "▼ Distance Filter"
+autoScale  = input.bool(true, "Auto-Scale by Timeframe", group = group_dist)
+manualLogD = input.float(0.45, "Manual Log-Distance", minval = 0.05, maxval = 2.0, step = 0.05, group = group_dist)
+
+group_score = "▼ Scoring Weights"
+wStrength  = input.float(1.0, "Strength Weight", minval = 0.0, step = 0.1, group = group_score)
+wProximity = input.float(1.2, "Proximity Weight", minval = 0.0, step = 0.1, group = group_score)
+wAge       = input.float(0.6, "Age Decay Weight", minval = 0.0, step = 0.1, group = group_score)
+wMomentum  = input.float(0.9, "Momentum Bias Weight", minval = 0.0, step = 0.1, group = group_score)
+
+group_sov = "▼ Sovereign Filters"
+htfRes    = input.timeframe("D", "HTF Bias Timeframe", group = group_sov)
+minMagPct = input.float(40.0, "Min Magnet Pull %", minval = 10.0, maxval = 90.0, step = 5.0, group = group_sov)
+
+group_risk = "▼ Risk Management"
+slAtrMul  = input.float(2.0, "SL ATR Multiple", group = group_risk)
+tpRr      = input.float(2.5, "Target R:R", group = group_risk)
+
+group_vis = "▼ Visualization"
+showZones = input.bool(true, "Show Liquidity Zones", group = group_vis)
+showTop   = input.bool(true, "Highlight TOP MAGNET", group = group_vis)
+showDash  = input.bool(true, "Dashboard", group = group_vis)
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atrVal = ta.atr(14)
+float momRaw = ta.ema(close, 8) - ta.ema(close, 21)
+float volMa  = ta.sma(volume, 50)
+
+// HTF Bias
+float htfEma  = request.security(syminfo.tickerid, htfRes, ta.ema(close, 50), lookahead = barmerge.lookahead_off)
+bool  biasUp  = close > htfEma
+bool  biasDn  = close < htfEma
+
+// Auto-scale by timeframe
+tfSec     = timeframe.in_seconds(timeframe.period)
+logDistMax = autoScale ? (tfSec >= 86400 ? 0.65 : tfSec >= 14400 ? 0.45 : tfSec >= 3600 ? 0.30 : tfSec >= 900 ? 0.18 : 0.10) : manualLogD
+eqTolPct  = (autoEqTol ? (tfSec >= 86400 ? 8.0 : tfSec >= 14400 ? 5.0 : tfSec >= 3600 ? 0.8 : tfSec >= 900 ? 0.5 : 0.15) : manualEq) / 100.0
+
+// ── Type Definitions ─────────────────────────────────────────────────────────
+type Pool
+    float price
+    int   barIdx
+    bool  isHigh
+    bool  isEqual
+    float volAt
+    float score
+    float probPct
+    box   bx
+    line  ln
+    label lbl
+
+// ── Pool Management ─────────────────────────────────────────────────────────
+var array<Pool> pools = array.new<Pool>()
+
+findClosest(float newPrice, bool isHigh) =>
+    idx = -1
+    minDist = 1e10
+    for i = 0 to array.size(pools) - 1
+        p = array.get(pools, i)
+        if p.isHigh == isHigh
+            diff = math.abs(p.price - newPrice) / newPrice
+            if diff <= eqTolPct and diff < minDist
+                minDist := diff
+                idx := i
+    idx
+
+clearDraws(Pool p) =>
+    if not na(p.bx)
+        box.delete(p.bx)
+    if not na(p.ln)
+        line.delete(p.ln)
+    if not na(p.lbl)
+        label.delete(p.lbl)
+
+// Pivot detection + merge
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low,  pivotLen, pivotLen)
+
+if not na(ph)
+    mIdx = findClosest(ph, true)
+    if mIdx >= 0
+        existing = array.get(pools, mIdx)
+        existing.isEqual := true
+        existing.price   := math.max(existing.price, ph)
+        existing.volAt   := existing.volAt + volume[pivotLen]
+        array.set(pools, mIdx, existing)
+    else
+        array.push(pools, Pool.new(ph, bar_index - pivotLen, true, false, volume[pivotLen], 0.0, 0.0, na, na, na))
+
+if not na(pl)
+    mIdx = findClosest(pl, false)
+    if mIdx >= 0
+        existing = array.get(pools, mIdx)
+        existing.isEqual := true
+        existing.price   := math.min(existing.price, pl)
+        existing.volAt   := existing.volAt + volume[pivotLen]
+        array.set(pools, mIdx, existing)
+    else
+        array.push(pools, Pool.new(pl, bar_index - pivotLen, false, false, volume[pivotLen], 0.0, 0.0, na, na, na))
+
+// Prune
+ii = array.size(pools) - 1
+while ii >= 0
+    p     = array.get(pools, ii)
+    age   = bar_index - p.barIdx
+    swept = (p.isHigh and high > p.price) or (not p.isHigh and low < p.price)
+    lDist = (p.price > 0 and close > 0) ? math.abs(math.log(p.price / close)) : 1e10
+    if swept or age > maxAgeB or lDist > logDistMax
+        clearDraws(p)
+        array.remove(pools, ii)
+    ii -= 1
+
+while array.size(pools) > maxPools
+    pShift = array.shift(pools)
+    clearDraws(pShift)
+
+// ── Scoring ──────────────────────────────────────────────────────────────────
+totalScore = 0.0
+scoreUp    = 0.0
+scoreDn    = 0.0
+topIdx     = -1
+topScore   = -1.0
+
+calcScore(Pool p) =>
+    age   = bar_index - p.barIdx
+    lDist = (p.price > 0 and close > 0) ? math.abs(math.log(p.price / close)) : 1e10
+    volFactor = (na(p.volAt) or volMa <= 0) ? 1.0 : math.min(p.volAt / volMa, 3.0)
+    eqMult    = p.isEqual ? eqBonus : 1.0
+    strength  = volFactor * eqMult
+    prox = lDist < 0.002 ? 0.3 : lDist < 0.05 ? math.max(0.5, 1.0 - math.abs(lDist - 0.02) * 10.0) : math.max(0.05, 1.0 - (lDist - 0.05) * 3.0)
+    ageScore = age < 50 ? (age < 3 ? 0.5 : 1.0) : math.max(0.1, 1.0 - (age - 50) / 450.0)
+    momNorm  = close > 0 ? momRaw / close : 0.0
+    dirToPool = p.price > close ? 1.0 : -1.0
+    momScore  = 1.0 + math.max(-0.5, math.min(0.5, dirToPool * momNorm * 100.0))
+    math.max(strength * wStrength + prox * wProximity + ageScore * wAge + momScore * wMomentum, 0.01)
+
+for i = 0 to array.size(pools) - 1
+    p = array.get(pools, i)
+    p.score := calcScore(p)
+    array.set(pools, i, p)
+    totalScore += p.score
+    if p.score > topScore
+        topScore := p.score
+        topIdx   := i
+
+if totalScore > 0
+    for i = 0 to array.size(pools) - 1
+        p = array.get(pools, i)
+        p.probPct := (p.score / totalScore) * 100.0
+        array.set(pools, i, p)
+        if p.isHigh
+            scoreUp += p.score
+        else
+            scoreDn += p.score
+
+topPrice  = (topIdx >= 0 and array.size(pools) > 0) ? array.get(pools, topIdx).price  : na
+topProb   = (topIdx >= 0 and array.size(pools) > 0) ? array.get(pools, topIdx).probPct : na
+topIsHigh = (topIdx >= 0 and array.size(pools) > 0) ? array.get(pools, topIdx).isHigh  : false
+
+// Magnet pull
+biasMag = 0.0
+if not na(topPrice) and totalScore > 0
+    sameSidePct = topIsHigh ? scoreUp / totalScore * 100.0 : scoreDn / totalScore * 100.0
+    biasMag := sameSidePct
+biasDir = topIsHigh ? 1 : -1
+bias    = biasMag * biasDir
+
+// ── Sovereign Filter ─────────────────────────────────────────────────────────
+bool htfAlign = (topIsHigh and biasUp) or (not topIsHigh and biasDn)
+bool magValid = not na(topPrice) and biasMag >= minMagPct
+
+// ── Entry Signals ────────────────────────────────────────────────────────────
+bool longCond  = magValid and not topIsHigh and htfAlign and bias < -minMagPct
+bool shortCond = magValid and topIsHigh and htfAlign and bias > minMagPct
+
+// ── Strategy Execution ───────────────────────────────────────────────────────
+if longCond
+    strategy.entry("LiqMagL", strategy.long)
+if shortCond
+    strategy.entry("LiqMagS", strategy.short)
+
+if strategy.position_size > 0
+    strategy.exit("LiqMagLX", "LiqMagL", stop = close - atrVal * slAtrMul, limit = close + atrVal * slAtrMul * tpRr)
+if strategy.position_size < 0
+    strategy.exit("LiqMagSX", "LiqMagS", stop = close + atrVal * slAtrMul, limit = close - atrVal * slAtrMul * tpRr)
+
+// ── Visualization ───────────────────────────────────────────────────────────
+if barstate.islast and showZones and array.size(pools) > 0
+    atrH = atrVal * 0.04
+    for i = 0 to array.size(pools) - 1
+        p = array.get(pools, i)
+        clearDraws(p)
+        isTop  = (i == topIdx) and showTop
+        baseC  = p.isHigh ? color.new(#ef4444, 0) : color.new(#22c55e, 0)
+        zoneC  = isTop ? color.new(#f59e0b, 0) : color.new(baseC, 70)
+        lineC  = isTop ? color.new(#f59e0b, 0) : color.new(baseC, 55)
+        lineW  = isTop ? 3 : 1
+        extBar = 20
+        p.bx := box.new(p.barIdx, p.price + atrH, bar_index + extBar, p.price - atrH, border_color = color.new(zoneC, 80), bgcolor = color.new(zoneC, 70))
+        p.ln := line.new(p.barIdx, p.price, bar_index + extBar, p.price, color = lineC, width = lineW, style = isTop ? line.style_solid : line.style_dotted)
+        lblTxt = str.tostring(p.probPct, "#.0") + "%" + (p.isEqual ? " ⊜" : "") + (isTop ? " ◆" : "")
+        p.lbl := label.new(bar_index + extBar, p.price, lblTxt, style = label.style_label_left, color = color.new(zoneC, 40), textcolor = isTop ? color.white : color.new(color.white, 10), size = size.small)
+        array.set(pools, i, p)
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+if showDash and barstate.islast
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.top_right, 2, 8, bgcolor = color.new(#0f172a, 85), border_width = 1, border_color = color.new(#1e293b, 0))
+    biasLabel = biasMag > 60 ? (bias > 0 ? "STRONG BULL" : "STRONG BEAR") : biasMag > 40 ? (bias > 0 ? "BULL" : "BEAR") : "NEUTRAL"
+    biasCol   = bias > 40 ? color.new(#ef4444, 0) : bias < -40 ? color.new(#22c55e, 0) : color.new(#94a3b8, 0)
+
+    table.cell(dash, 0, 0, "LIQUIDITY MAGNET", text_color = color.new(#f59e0b, 0), text_size = size.small)
+    table.cell(dash, 1, 0, "v26.0618.1830", text_color = color.new(#8b949e, 0), text_size = size.tiny)
+    table.cell(dash, 0, 1, "Magnet Pull", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 1, biasLabel, text_color = biasCol, text_size = size.small)
+    table.cell(dash, 0, 2, "Pull Intensity", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 2, str.tostring(biasMag, "#.0") + "%", text_color = biasCol, text_size = size.small)
+    table.cell(dash, 0, 3, "Top Target", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 3, na(topPrice) ? "—" : str.tostring(topPrice, format.mintick), text_color = color.new(#f59e0b, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "Probability", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 4, na(topProb) ? "—" : str.tostring(topProb, "#.0") + "%", text_color = color.new(#f59e0b, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "Active Pools", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 5, str.tostring(array.size(pools)), text_color = color.new(#e2e8f0, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "Bias", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 6, biasUp ? "BULL" : "BEAR", text_color = biasUp ? color.new(#22c55e, 0) : color.new(#ef4444, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "HTF Align", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 7, htfAlign ? "✓" : "✗", text_color = htfAlign ? color.new(#22c55e, 0) : color.new(#ef4444, 0), text_size = size.small)
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(longCond,  "LiqMag Long",  "Liquidity Magnet: downside pool attracted, bullish entry")
+alertcondition(shortCond, "LiqMag Short", "Liquidity Magnet: upside pool attracted, bearish entry")

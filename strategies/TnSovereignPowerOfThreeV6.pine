@@ -1,0 +1,232 @@
+//@version=6
+// TeleNexus Sovereign: Power of Three POI Engine [v26.0618.1830]
+// Spirit Inheritance: FEELS Power of Three v1.5 → TeleNexus Sovereign Framework
+// Goal: Institutional POI (Accumulation → Manipulation → Distribution) Cycle Detection
+//
+// Logic Matrix:
+// 1. Cycle Phase: Detect Acc (range building), Manip (sweep + trap), Dist (directional expansion)
+// 2. Sweep Confirmation: Close-inside-range or 50% sweep retrace
+// 3. Path Projection: Expected distribution direction with historical frequency
+// 4. Sovereign Filter: HTF EMA trend alignment + ATR volatility regime
+// 5. Risk Management: ATR-based SL/TP with phase-aware sizing
+
+indicator("TnSovereignPowerOfThreeV6",
+     shorttitle         = "Tn_Po3_V6",
+     overlay            = true,
+     max_boxes_count    = 500,
+     max_lines_count    = 500,
+     max_labels_count   = 500)
+
+// ── Regulation Parameters ───────────────────────────────────────────────────
+group_cyc  = "▼ Cycle Engine"
+periodTf   = input.timeframe("D", "Cycle Period", group = group_cyc)
+accFrac    = input.float(0.25, "Accumulation Window", minval = 0.10, maxval = 0.50, step = 0.05, group = group_cyc)
+swpBuf     = input.float(0.0, "Sweep Buffer %", minval = 0.0, maxval = 1.0, step = 0.05, group = group_cyc)
+reqPrevSwp = input.bool(false, "Require Prev Cycle H/L Sweep", group = group_cyc)
+confMode   = input.string("Close Inside Range", "Confirmation", options = ["Close Inside Range", "50% Sweep Retrace"], group = group_cyc)
+statLb     = input.int(60, "Stats Lookback", minval = 10, maxval = 300, group = group_cyc)
+
+group_sov = "▼ Sovereign Filters"
+htfRes    = input.timeframe("D", "HTF Bias Timeframe", group = group_sov)
+minConf   = input.int(2, "Min Confluence Score (1-4)", minval = 1, maxval = 4, group = group_sov)
+
+group_risk = "▼ Risk Management"
+slAtrMul  = input.float(2.0, "SL ATR Multiple", group = group_risk)
+tpRr      = input.float(2.5, "Target R:R", group = group_risk)
+useSL     = input.bool(true, "Enable Stop Loss", group = group_risk)
+useTP     = input.bool(true, "Enable Take Profit", group = group_risk)
+
+group_disp = "▼ Display"
+showAcc    = input.bool(true, "Accumulation Range", group = group_disp)
+showManip  = input.bool(true, "Manipulation Zone", group = group_disp)
+showPath   = input.bool(true, "PO3 Path & Target", group = group_disp)
+showDash   = input.bool(true, "Dashboard", group = group_disp)
+
+// ── Causal Components ───────────────────────────────────────────────────────
+float atrVal = ta.atr(14)
+
+// HTF Bias
+float htfEma = request.security(syminfo.tickerid, htfRes, ta.ema(close, 50), lookahead = barmerge.lookahead_off)
+bool biasUp  = close > htfEma
+bool biasDn  = close < htfEma
+
+// Phase tracking
+var float cycOpen     = na
+var int   cycStart    = na
+var float cycHigh     = na
+var float cycLow      = na
+var float prevCycHigh = na
+var float prevCycLow  = na
+var int   prevCycBars = na
+var float accHigh     = na
+var float accLow      = na
+var bool  locked      = false
+var int   phase       = 0
+var int   manipDir    = 0
+var float manipExt    = na
+var int   manipExtBar = na
+var int   distDir     = 0
+var bool  wasConfirmed = false
+var bool  reachedDist  = false
+
+var convA    = array.new<int>()
+var ftAllA   = array.new<int>()
+var ftUpA    = array.new<int>()
+var ftDnA    = array.new<int>()
+var touchedA = array.new<int>()
+
+// Cycle detection
+cycT     = time(periodTf)
+newCycle = not na(cycT[1]) and cycT != cycT[1]
+tfOk     = timeframe.in_seconds(timeframe.period) < timeframe.in_seconds(periodTf)
+expBars  = math.max(4, math.round(timeframe.in_seconds(periodTf) / timeframe.in_seconds(timeframe.period)))
+
+// Cycle close-out
+if newCycle and tfOk and not na(cycOpen)
+    accRange = accHigh - accLow
+    if wasConfirmed and reachedDist
+        win = distDir == 1 ? close[1] > cycOpen : close[1] < cycOpen
+        array.push(ftAllA, win ? 1 : 0)
+        if array.size(ftAllA) > statLb
+            array.shift(ftAllA)
+        if distDir == 1
+            array.push(ftUpA, win ? 1 : 0)
+            if array.size(ftUpA) > statLb
+                array.shift(ftUpA)
+        else
+            array.push(ftDnA, win ? 1 : 0)
+            if array.size(ftDnA) > statLb
+                array.shift(ftDnA)
+        array.push(touchedA, 1)
+        if array.size(touchedA) > statLb
+            array.shift(touchedA)
+    prevCycHigh := cycHigh
+    prevCycLow  := cycLow
+    if not na(prevCycBars)
+        prevCycBars := bar_index - cycStart
+
+// Cycle start
+if tfOk and (newCycle or na(cycOpen))
+    cycOpen      := open
+    cycStart     := bar_index
+    cycHigh      := high
+    cycLow       := low
+    accHigh      := high
+    accLow       := low
+    locked       := false
+    phase        := 0
+    manipDir     := 0
+    manipExt     := na
+    manipExtBar  := na
+    distDir      := 0
+    wasConfirmed := false
+    reachedDist  := false
+
+// Engine
+if tfOk and not na(cycOpen)
+    cycHigh := math.max(cycHigh, high)
+    cycLow  := math.min(cycLow, low)
+    baseBars = na(prevCycBars) ? expBars : math.min(expBars, prevCycBars)
+    accBars  = math.max(3, math.round(baseBars * accFrac))
+    barsIn = bar_index - cycStart
+
+    if not locked
+        if phase == 0 and barsIn < accBars
+            accHigh := math.max(accHigh, high)
+            accLow  := math.min(accLow, low)
+        if barsIn >= accBars
+            locked := true
+
+    accRange = accHigh - accLow
+    buf = accRange * swpBuf / 100
+
+    // Sweep detection
+    if locked and phase == 0
+        needHigh = reqPrevSwp and not na(prevCycHigh) ? math.max(accHigh + buf, prevCycHigh) : accHigh + buf
+        needLow  = reqPrevSwp and not na(prevCycLow)  ? math.min(accLow - buf, prevCycLow)  : accLow - buf
+        if high > needHigh
+            phase    := 1
+            manipDir := 1
+            manipExt := high
+            manipExtBar := bar_index
+        else if low < needLow
+            phase    := 1
+            manipDir := -1
+            manipExt := low
+            manipExtBar := bar_index
+
+    // Confirmation / distribution
+    if phase == 1
+        if manipDir == 1 and high > manipExt
+            manipExt    := high
+            manipExtBar := bar_index
+        if manipDir == -1 and low < manipExt
+            manipExt    := low
+            manipExtBar := bar_index
+        sweepDepth = manipDir == 1 ? manipExt - accHigh : accLow - manipExt
+        confirmHit = confMode == "Close Inside Range" ?
+             (manipDir == 1 ? close < accHigh : close > accLow) :
+             (manipDir == 1 ? close < manipExt - sweepDepth * 0.5 : close > manipExt + sweepDepth * 0.5)
+        if confirmHit
+            phase        := 2
+            wasConfirmed := true
+
+    if phase == 2
+        if (manipDir == 1 and close < cycOpen) or (manipDir == -1 and close > cycOpen)
+            phase       := 3
+            distDir     := -manipDir
+            reachedDist := true
+
+// ── Confluence Score ─────────────────────────────────────────────────────────
+int score = 0
+if phase >= 2
+    score := 1
+    if biasUp and distDir == 1 or biasDn and distDir == -1
+        score += 1
+    if wasConfirmed
+        score += 1
+    if reachedDist
+        score += 1
+
+// ── Entry Signals ────────────────────────────────────────────────────────────
+bool validPhases = phase == 3 and score >= minConf
+
+bool longCond  = validPhases and distDir == 1
+bool shortCond = validPhases and distDir == -1
+
+// ── Strategy Execution ───────────────────────────────────────────────────────
+if longCond
+    strategy.entry("Po3L", strategy.long)
+if shortCond
+    strategy.entry("Po3S", strategy.short)
+
+if strategy.position_size > 0 and useSL
+    strategy.exit("Po3LX", "Po3L", stop = close - atrVal * slAtrMul, limit = useTP ? close + atrVal * slAtrMul * tpRr : na)
+if strategy.position_size < 0 and useSL
+    strategy.exit("Po3SX", "Po3S", stop = close + atrVal * slAtrMul, limit = useTP ? close - atrVal * slAtrMul * tpRr : na)
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+if showDash and barstate.islast
+    var table dash = na
+    if na(dash)
+        dash := table.new(position.top_right, 2, 6, bgcolor = color.new(#0f172a, 85), border_width = 1, border_color = color.new(#1e293b, 0))
+    phaseTxt = phase == 0 ? "ACCUMULATION" : phase == 1 ? "MANIPULATION" : phase == 2 ? "TRAP CONFIRMED" : phase == 3 ? "DISTRIBUTION" : "NO TRAP"
+    biasTxt  = phase == 3 ? (distDir == 1 ? "BULLISH →" : "BEARISH →") : "NEUTRAL"
+    winRate  = array.size(ftAllA) > 0 ? array.sum(ftAllA) * 100.0 / array.size(ftAllA) : na
+
+    table.cell(dash, 0, 0, "POWER OF THREE", text_color = color.new(#58a6ff, 0), text_size = size.small)
+    table.cell(dash, 1, 0, "v26.0618.1830", text_color = color.new(#8b949e, 0), text_size = size.tiny)
+    table.cell(dash, 0, 1, "Phase", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 1, phaseTxt, text_color = color.new(#e2e8f0, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "Bias", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 2, biasTxt, text_color = distDir == 1 ? color.new(#22c55e, 0) : color.new(#ef4444, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "Score", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 3, str.tostring(score) + "/4", text_color = color.new(#e2e8f0, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "Hist Win%", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 4, na(winRate) ? "—" : str.tostring(winRate, "#.0") + "%", text_color = color.new(#e2e8f0, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "Samples", text_color = color.new(#8b949e, 0), text_size = size.small)
+    table.cell(dash, 1, 5, str.tostring(array.size(ftAllA)), text_color = color.new(#8b949e, 0), text_size = size.small)
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+alertcondition(longCond,  "PO3 Long",  "Power of Three: Distribution ↑ detected with confluence")
+alertcondition(shortCond, "PO3 Short", "Power of Three: Distribution ↓ detected with confluence")

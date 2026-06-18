@@ -92,7 +92,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
 | `tn_opening_range_magnet_v6` | 開盤區間磁鐵效應策略（OR High/Low 磁鐵 + 價格漂移回測 + NR7/缺口過濾），移植自 biagDev/nq-magnet-framework |
 
-## Market Structure & Price Action（市場結構與價格行為，28）
+## Market Structure & Price Action（市場結構與價格行為，29）
 
 | 策略 | 說明 |
 |------|------|
@@ -124,8 +124,9 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignMultiConfluenceV6` | ICT 多重匯聚主權框架 |
 | `TnSovereignSMCV6` | SMC 主權策略 |
 | `tn_pinegen_lvn_reject_accept_v6` | LVN 拒絕/接受 (PineGen 移植) |
+| `TnSovereignPowerOfThreeV6` | PO3 三相位引擎（Accumulation→Manipulation→Distribution），移植自 FEELS Power of Three v1.5 |
 
-## Volume & Order Flow（成交量與訂單流，14）
+## Volume & Order Flow（成交量與訂單流，15）
 
 | 策略 | 說明 |
 |------|------|
@@ -143,6 +144,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignLiquidityHuntV6` | 流動性獵取 + 機構位移確認 |
 | `TnSovereignViopSessionV6` | VIOP 時序審計時段策略 |
 | `tn_liquidity_sovereign_v6` | 4 層因果對位流動性審計 |
+| `TnSovereignLiquidityMagnetV6` | 機率評分流動性磁鐵引擎（四維權重 + Pool 排名），移植自 FEELS Liquidity Magnet v1.6.4 |
 
 ## Deep Reinforcement Learning（深度強化學習，1）
 
