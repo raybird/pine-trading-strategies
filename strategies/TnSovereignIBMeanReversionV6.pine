@@ -1,0 +1,118 @@
+// TeleNexus Sovereign IB Mean Reversion Fade v6
+// Version: v26.0619.1830 | CST 2026-06-19 18:30
+// Ported from Prat617/strategic — IB Mean Reversion Fade (day-type + extension zones)
+//@version=6
+strategy("TeleNexus Sovereign IB Mean Reversion V6", overlay=true,
+     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=2.50, slippage=1)
+
+i_ibStartHour   = input.int(9,  "IB Start Hour (ET)", group="IB")
+i_ibStartMin    = input.int(30, "IB Start Min (ET)", group="IB")
+i_ibEndHour     = input.int(10, "IB End Hour (ET)", group="IB")
+i_ibEndMin      = input.int(30, "IB End Min (ET)", group="IB")
+i_ibAvgLen      = input.int(20, "IB Avg Lookback (days)", group="IB")
+i_narrowPct     = input.float(0.70, "Narrow IB % of avg", group="IB")
+i_widePct       = input.float(1.30, "Wide IB % of avg", group="IB")
+
+i_skipNarrow    = input.bool(true, "Skip Narrow IB Days", group="Filter")
+i_skipTrend     = input.bool(true, "Skip Trend Day", group="Filter")
+
+i_extMin        = input.float(0.5, "Extension Min (x IB Range)", group="Entry")
+i_extMax        = input.float(1.0, "Extension Max (x IB Range)", group="Entry")
+i_maType        = input.string("EMA", "MA Type", options=["EMA","SMA","VWMA"], group="Entry")
+i_maLen         = input.int(50, "MA Length", group="Entry")
+i_volMult       = input.float(1.2, "Volume Confirm Multiplier", group="Entry")
+i_volLen        = input.int(20, "Volume Avg Length", group="Entry")
+
+i_tpTarget      = input.string("IB Midpoint", "TP Target", options=["IB Midpoint","IB Opposite"], group="Risk")
+i_slMult        = input.float(0.5, "SL (x IB Range)", group="Risk")
+i_eodHour       = input.int(15, "EOD Hour (ET)", group="Risk")
+i_eodMin        = input.int(45, "EOD Min (ET)", group="Risk")
+i_maxDailyLoss  = input.float(500.0, "Max Daily Loss ($)", group="Risk")
+
+float maValue = switch i_maType
+    "SMA"  => ta.sma(close, i_maLen)
+    "VWMA" => ta.vwma(close, i_maLen)
+    =>         ta.ema(close, i_maLen)
+
+float volAvg = ta.sma(volume, i_volLen)
+
+int   etHour  = hour(time, "America/New_York")
+int   etMin   = minute(time, "America/New_York")
+bool  isNewDay = ta.change(time("D")) != 0
+
+var float ibHigh     = na; var float ibLow = na
+var bool  ibComplete = false; var float ibRange = na
+var float ibMidpoint = na; var string ibClass = "Unknown"
+var array<float> ibRangeHistory = array.new_float(0)
+
+var int   dayTrades  = 0; var float dayPnL = 0.0
+var bool  longFired  = false; var bool shortFired = false
+
+if isNewDay
+    if not na(ibRange) and ibRange > 0.0
+        array.push(ibRangeHistory, ibRange)
+        if array.size(ibRangeHistory) > i_ibAvgLen
+            array.shift(ibRangeHistory)
+    ibHigh := na; ibLow := na; ibComplete := false
+    ibRange := na; ibMidpoint := na; ibClass := "Unknown"
+    dayTrades := 0; dayPnL := 0.0; longFired := false; shortFired := false
+
+bool inIBWindow = (etHour == i_ibStartHour and etMin >= i_ibStartMin) or
+     (etHour > i_ibStartHour and etHour < i_ibEndHour) or
+     (etHour == i_ibEndHour and etMin < i_ibEndMin)
+
+if inIBWindow and not ibComplete
+    ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
+    ibLow  := na(ibLow)  ? low  : math.min(ibLow,  low)
+
+if not ibComplete and (etHour > i_ibEndHour or (etHour == i_ibEndHour and etMin >= i_ibEndMin))
+    ibComplete := true; ibRange := ibHigh - ibLow
+    ibMidpoint := (ibHigh + ibLow) / 2.0
+    float avgRange = array.size(ibRangeHistory) > 0 ? array.avg(ibRangeHistory) : na
+    if not na(avgRange) and avgRange > 0.0
+        float pct = ibRange / avgRange
+        ibClass := pct < i_narrowPct ? "Narrow" : pct > i_widePct ? "Wide" : "Normal"
+    else
+        ibClass := "Normal"
+
+bool inRTH = (etHour > i_ibEndHour or (etHour == i_ibEndHour and etMin >= i_ibEndMin)) and
+     (etHour < i_eodHour or (etHour == i_eodHour and etMin < i_eodMin))
+bool isEOD = etHour == i_eodHour and etMin >= i_eodMin
+
+if isEOD and strategy.position_size != 0
+    strategy.close_all(comment="EOD Exit")
+
+bool skipDay = (i_skipNarrow and ibClass == "Narrow") or (i_skipTrend and ibClass == "Wide")
+
+if ibComplete and inRTH and not skipDay and not na(ibRange) and ibRange > 0.0
+    float extHigh = ibHigh + i_extMin * ibRange
+    float extLow  = ibLow  - i_extMin * ibRange
+    bool volOk = volume > i_volMult * volAvg
+
+    bool shortCond = close[1] > extHigh and close < extHigh and
+                     close < maValue and volOk and not shortFired and dayPnL > -i_maxDailyLoss
+    bool longCond  = close[1] < extLow and close > extLow and
+                     close > maValue and volOk and not longFired and dayPnL > -i_maxDailyLoss
+
+    float sl = i_slMult * ibRange
+    if longCond and not na(ibMidpoint)
+        float stopPrice   = close - sl
+        float targetPrice = i_tpTarget == "IB Midpoint" ? ibMidpoint : ibHigh
+        strategy.entry("IB Long", strategy.long)
+        strategy.exit("IB Long Exit", "IB Long", stop=stopPrice, limit=targetPrice)
+        longFired := true; dayTrades += 1
+
+    if shortCond and not na(ibMidpoint)
+        float stopPrice   = close + sl
+        float targetPrice = i_tpTarget == "IB Midpoint" ? ibMidpoint : ibLow
+        strategy.entry("IB Short", strategy.short)
+        strategy.exit("IB Short Exit", "IB Short", stop=stopPrice, limit=targetPrice)
+        shortFired := true; dayTrades += 1
+
+dayPnL := strategy.netprofit - nz(strategy.netprofit[1], strategy.netprofit)
+
+plot(ibComplete and not na(ibHigh)     ? ibHigh     : na, "IB High", color=color.blue,   linewidth=2, style=plot.style_linebr)
+plot(ibComplete and not na(ibLow)      ? ibLow      : na, "IB Low",  color=color.blue,   linewidth=2, style=plot.style_linebr)
+plot(ibComplete and not na(ibMidpoint) ? ibMidpoint : na, "IB Mid",  color=color.purple, linewidth=1, style=plot.style_linebr)
+plot(maValue, "MA Filter", color=color.yellow, linewidth=1)

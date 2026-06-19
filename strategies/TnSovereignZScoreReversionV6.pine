@@ -1,0 +1,127 @@
+// TeleNexus Sovereign Z-Score Volatility Reversion v6
+// Version: v26.0619.1830 | CST 2026-06-19 18:30
+// Ported from Prat617/strategic — Intraday Volatility Reversion Z-Score
+//@version=6
+strategy("TeleNexus Sovereign Z-Score Reversion V6", overlay=false,
+     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=2.50, slippage=1)
+
+i_zEntry       = input.float(1.8,  "Z-Score Entry Threshold", group="Z-Score")
+i_rsiLen       = input.int(14,     "RSI Length", group="Z-Score")
+i_rsiOB        = input.float(75.0, "RSI Overbought", group="Z-Score")
+i_rsiOS        = input.float(25.0, "RSI Oversold", group="Z-Score")
+i_wickMult     = input.float(2.0,  "Exhaustion Wick:Body Ratio", group="Z-Score")
+
+i_atrLen       = input.int(14,    "ATR Length", group="Regime")
+i_atrPctRank   = input.int(100,   "ATR Percentile Lookback", group="Regime")
+i_atrBlockPct  = input.float(80.0,"Block Above ATR %ile", group="Regime")
+
+i_atrSL        = input.float(1.5, "SL (x ATR)", group="Risk")
+i_eodHour      = input.int(15, "EOD Hour (ET)", group="Risk")
+i_eodMin       = input.int(45, "EOD Min (ET)", group="Risk")
+i_maxDailyLoss = input.float(500.0, "Max Daily Loss ($)", group="Risk")
+i_maxTrades    = input.int(3, "Max Trades/Day", group="Risk")
+
+i_rthStartHour = input.int(9,  "RTH Start Hour (ET)", group="Session")
+i_rthStartMin  = input.int(30, "RTH Start Min (ET)", group="Session")
+
+int   etHour   = hour(time, "America/New_York")
+int   etMin    = minute(time, "America/New_York")
+bool  isNewDay = ta.change(time("D")) != 0
+
+bool  inRTH = etHour > i_rthStartHour or (etHour == i_rthStartHour and etMin >= i_rthStartMin)
+bool  isEOD = etHour == i_eodHour and etMin >= i_eodMin
+
+float atrVal  = ta.atr(i_atrLen)
+float rsiVal  = ta.rsi(close, i_rsiLen)
+
+var float cumTPV  = 0.0
+var float cumVol  = 0.0
+var float cumTPV2 = 0.0
+
+if isNewDay
+    cumTPV  := 0.0
+    cumVol  := 0.0
+    cumTPV2 := 0.0
+
+float typicalPrice = (high + low + close) / 3.0
+
+if inRTH
+    cumTPV  := cumTPV  + typicalPrice * volume
+    cumVol  := cumVol  + volume
+    cumTPV2 := cumTPV2 + typicalPrice * typicalPrice * volume
+
+float vwap      = cumVol > 0.0 ? cumTPV / cumVol : na
+float vwapStdev = not na(vwap) and cumVol > 0.0 ?
+     math.sqrt(math.max(cumTPV2 / cumVol - vwap * vwap, 0.0)) : na
+
+float zScore = not na(vwap) and not na(vwapStdev) and vwapStdev > 0.0 ?
+     (close - vwap) / vwapStdev : na
+
+float atrPctRank = 0.0
+if not na(atrVal)
+    int countBelow = 0
+    for i = 1 to i_atrPctRank
+        if not na(atrVal[i]) and atrVal[i] < atrVal
+            countBelow := countBelow + 1
+    atrPctRank := countBelow / i_atrPctRank * 100.0
+
+bool highVolRegime = atrPctRank > i_atrBlockPct
+
+float bodySize  = math.abs(close - open)
+float upperWick = high - math.max(close, open)
+float lowerWick = math.min(close, open) - low
+
+bool exhaustionShort = bodySize > 0.0 and upperWick >= i_wickMult * bodySize
+bool exhaustionLong  = bodySize > 0.0 and lowerWick >= i_wickMult * bodySize
+
+var int   dayTrades = 0
+var float dayPnL    = 0.0
+
+if isNewDay
+    dayTrades := 0
+    dayPnL    := 0.0
+
+if isEOD and strategy.position_size != 0
+    strategy.close_all(comment="EOD Exit")
+
+bool tradeable = inRTH and not isEOD and not highVolRegime and
+     dayTrades < i_maxTrades and dayPnL > -i_maxDailyLoss and
+     strategy.position_size == 0
+
+bool shortCond = tradeable and not na(zScore) and zScore >= i_zEntry and
+     (exhaustionShort or rsiVal > i_rsiOB)
+
+bool longCond  = tradeable and not na(zScore) and zScore <= -i_zEntry and
+     (exhaustionLong  or rsiVal < i_rsiOS)
+
+if longCond and not na(atrVal) and not na(vwap)
+    float sl = close - i_atrSL * atrVal
+    float tp = vwap
+    strategy.entry("ZR Long", strategy.long, comment="Z-Score Long")
+    strategy.exit("ZR Long Exit", "ZR Long", stop=sl, limit=tp)
+    dayTrades += 1
+
+if shortCond and not na(atrVal) and not na(vwap)
+    float sl = close + i_atrSL * atrVal
+    float tp = vwap
+    strategy.entry("ZR Short", strategy.short, comment="Z-Score Short")
+    strategy.exit("ZR Short Exit", "ZR Short", stop=sl, limit=tp)
+    dayTrades += 1
+
+dayPnL := strategy.netprofit - nz(strategy.netprofit[1], strategy.netprofit)
+
+plot(zScore, "Z-Score", color=color.white, linewidth=2)
+hline(0,    "Zero",  color=color.gray,   linestyle=hline.style_dashed)
+hline(i_zEntry,  "Entry Short", color=color.red,    linestyle=hline.style_solid)
+hline(-i_zEntry, "Entry Long",  color=color.green,  linestyle=hline.style_solid)
+hline(1.0,  "+1σ", color=color.new(color.orange, 50), linestyle=hline.style_dotted)
+hline(-1.0, "-1σ", color=color.new(color.orange, 50), linestyle=hline.style_dotted)
+hline(2.0,  "+2σ", color=color.new(color.red,    50), linestyle=hline.style_dotted)
+hline(-2.0, "-2σ", color=color.new(color.red,    50), linestyle=hline.style_dotted)
+
+bgcolor(not na(zScore) and zScore >= i_zEntry  ? color.new(color.red,   88) : na)
+bgcolor(not na(zScore) and zScore <= -i_zEntry ? color.new(color.green, 88) : na)
+
+plotshape(longCond,  title="Long Signal",  style=shape.triangleup,   location=location.bottom, color=color.green, size=size.small)
+plotshape(shortCond, title="Short Signal", style=shape.triangledown, location=location.top,    color=color.red,   size=size.small)

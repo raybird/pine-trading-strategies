@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 157 個已實體化主權策略，分 14 大類
+- **[`/strategies`](./strategies/README.md)** — 162 個已實體化主權策略，分 14 大類
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -44,9 +44,9 @@
 |------|------|------|
 | **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 15 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4 |
-| **Mean Reversion & Oscillator** | 14 | 均值回歸、超買超賣反轉 |
+| **Mean Reversion & Oscillator** | 17 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸 |
 | **Volatility & Breakout** | 20 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應 |
-| **Market Structure & Price Action** | 30 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎 |
+| **Market Structure & Price Action** | 32 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回 |
 | **Volume & Order Flow** | 12 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **157** | 主權策略矩陣 |
+| **Total** | **162** | 主權策略矩陣 |
 
 
+> **最新加入（v26.0619.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 Prat617/strategic 7 款 NQ/ES/GC Elite 策略系統），新增 5 款主權化策略：`TnSovereignZScoreReversionV6`（Z-Score 波動率反轉）、`TnSovereignIBVWAPConfluenceV6`（IB+VWAP 品質評分匯流）、`TnSovereignPDHPDLFadeV6`（前日高/低均值回歸）、`TnSovereignGoldIBRetracementV6`（黃金 IB 突破拉回）、`TnSovereignIBMeanReversionV6`（IB 日型分類均值回歸）；162 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0619.0630）**: `tn_ifvg_cisd_double_confirm_v6` — TeleNexus 主權 IFVG+CISD 雙重確認入場策略（Inverse Fair Value Gap 翻轉偵測 + Change in State of Delivery 結構破壞追蹤 + 流動性掃蕩過濾 + EMA 趨勢濾網 + ATR 風控），移植自 aleks-drozy/fyp-trading-strategy (Maynooth University FYP 2026)
 >
 > **最新加入（v26.0618.1830）**: `TnSovereignPowerOfThreeV6` — TeleNexus 主權 PO3 三相位引擎（Accumulation→Manipulation→Distribution 完整狀態機 + 歷史頻率統計），移植自 FEELS Power of Three v1.5

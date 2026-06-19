@@ -1,0 +1,180 @@
+// TeleNexus Sovereign IB + VWAP Confluence v6
+// Version: v26.0619.1830 | CST 2026-06-19 18:30
+// Ported from Prat617/strategic — IB + VWAP Confluence Ultimate Combo
+//@version=6
+strategy("TeleNexus Sovereign IB+VWAP Confluence V6", overlay=true,
+     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=2.50, slippage=1)
+
+i_ibStartHour  = input.int(9,  "IB Start Hour (ET)", group="IB")
+i_ibStartMin   = input.int(30, "IB Start Min (ET)", group="IB")
+i_ibEndHour    = input.int(10, "IB End Hour (ET)", group="IB")
+i_ibEndMin     = input.int(30, "IB End Min (ET)", group="IB")
+i_ibAvgLen     = input.int(20, "IB Avg Lookback (days)", group="IB")
+i_narrowPct    = input.float(0.70, "Narrow IB % of avg", group="IB")
+i_widePct      = input.float(1.30, "Wide IB % of avg", group="IB")
+
+i_extMin       = input.float(0.5, "Extension Min (x IB Range)", group="Entry")
+i_extMax       = input.float(1.0, "Extension Max (x IB Range)", group="Entry")
+i_wickMult     = input.float(1.5, "Min Wick:Body Ratio", group="Entry")
+i_vwapBandPct  = input.float(0.5, "VWAP Confluence Zone %", group="Entry")
+i_volAvgLen    = input.int(20, "Volume Avg Length", group="Entry")
+
+i_slMult       = input.float(0.5, "SL (x IB Range)", group="Risk")
+i_eodHour      = input.int(15, "EOD Hour (ET)", group="Risk")
+i_eodMin       = input.int(45, "EOD Min (ET)", group="Risk")
+i_maxDailyLoss = input.float(500.0, "Max Daily Loss ($)", group="Risk")
+
+i_scoreHigh    = input.int(8, "Min Score 3 cts", group="Sizing")
+i_scoreMid     = input.int(6, "Min Score 2 cts", group="Sizing")
+i_scoreLow     = input.int(4, "Min Score 1 ct", group="Sizing")
+
+int   etHour   = hour(time, "America/New_York")
+int   etMin    = minute(time, "America/New_York")
+bool  isNewDay = ta.change(time("D")) != 0
+
+bool  inRTH  = etHour > i_ibEndHour or (etHour == i_ibEndHour and etMin >= i_ibEndMin)
+bool  isEOD  = etHour == i_eodHour and etMin >= i_eodMin
+bool  inOptimalWindow = (etHour == 10 and etMin >= 30) or (etHour == 11) or (etHour == 12 and etMin < 30)
+
+float volAvg  = ta.sma(volume, i_volAvgLen)
+
+var float ibHigh     = na
+var float ibLow      = na
+var bool  ibComplete = false
+var float ibRange    = na
+var float ibMidpoint = na
+var string ibClass   = "Unknown"
+
+var array<float> ibRangeHistory = array.new_float(0)
+
+var bool  longFired  = false
+var bool  shortFired = false
+var int   dayTrades  = 0
+var float dayPnL     = 0.0
+
+if isNewDay
+    if not na(ibRange) and ibRange > 0.0
+        array.push(ibRangeHistory, ibRange)
+        if array.size(ibRangeHistory) > i_ibAvgLen
+            array.shift(ibRangeHistory)
+    ibHigh     := na; ibLow := na; ibComplete := false
+    ibRange := na; ibMidpoint := na; ibClass := "Unknown"
+    longFired := false; shortFired := false
+    dayTrades := 0; dayPnL := 0.0
+
+var float cumTPV = 0.0
+var float cumVol = 0.0
+
+if isNewDay
+    cumTPV := 0.0; cumVol := 0.0
+
+float typicalPrice = (high + low + close) / 3.0
+
+if inRTH
+    cumTPV := cumTPV + typicalPrice * volume
+    cumVol := cumVol + volume
+
+float vwap = cumVol > 0.0 ? cumTPV / cumVol : na
+
+bool inIBWindow = (etHour == i_ibStartHour and etMin >= i_ibStartMin) or
+     (etHour > i_ibStartHour and etHour < i_ibEndHour) or
+     (etHour == i_ibEndHour and etMin < i_ibEndMin)
+
+if inIBWindow and not ibComplete
+    ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
+    ibLow  := na(ibLow)  ? low  : math.min(ibLow,  low)
+
+if not ibComplete and (etHour > i_ibEndHour or (etHour == i_ibEndHour and etMin >= i_ibEndMin))
+    ibComplete := true
+    ibRange    := ibHigh - ibLow
+    ibMidpoint := (ibHigh + ibLow) / 2.0
+    float avgRange = array.size(ibRangeHistory) > 0 ? array.avg(ibRangeHistory) : na
+    if not na(avgRange) and avgRange > 0.0
+        float pct = ibRange / avgRange
+        ibClass := pct < i_narrowPct ? "Narrow" : pct > i_widePct ? "Wide" : "Medium"
+    else
+        ibClass := "Medium"
+
+if isEOD and strategy.position_size != 0
+    strategy.close_all(comment="EOD Exit")
+
+float bodySize  = math.abs(close - open)
+float upperWick = high - math.max(close, open)
+float lowerWick = math.min(close, open) - low
+bool  bullishRej = close > open and bodySize > 0.0 and lowerWick >= i_wickMult * bodySize
+bool  bearishRej = close < open and bodySize > 0.0 and upperWick >= i_wickMult * bodySize
+
+int  setupScore = 0
+int  scoreShort = 0
+bool ibMedWide  = ibClass == "Medium" or ibClass == "Wide"
+bool extInZoneL = false; bool extInZoneS = false
+bool nearVWAPL  = false; bool nearVWAPS  = false
+
+if ibComplete and not na(ibRange) and ibRange > 0.0 and not na(vwap) and vwap > 0.0
+    float extLow  = ibLow  - i_extMin * ibRange
+    float extLow2 = ibLow  - i_extMax * ibRange
+    float extHigh = ibHigh + i_extMin * ibRange
+    float extHigh2= ibHigh + i_extMax * ibRange
+    extInZoneL := close <= extLow and close >= extLow2
+    extInZoneS := close >= extHigh and close <= extHigh2
+    nearVWAPL  := close <= vwap or math.abs(close - vwap) / vwap * 100.0 <= i_vwapBandPct
+    nearVWAPS  := close >= vwap or math.abs(close - vwap) / vwap * 100.0 <= i_vwapBandPct
+
+float atrVal = ta.atr(14)
+bool  rrOkL  = not na(ibRange) and not na(ibMidpoint) and not na(atrVal) and ibRange > 0.0 and atrVal > 0.0 ?
+     (ibMidpoint - close) / (0.5 * ibRange) >= 2.5 : false
+bool  rrOkS  = not na(ibRange) and not na(ibMidpoint) and not na(atrVal) and ibRange > 0.0 and atrVal > 0.0 ?
+     (close - ibMidpoint) / (0.5 * ibRange) >= 2.5 : false
+
+bool volDecline = volume < volAvg
+
+if ibMedWide                         then setupScore := setupScore + 2
+if extInZoneL                        then setupScore := setupScore + 2
+if bullishRej                        then setupScore := setupScore + 1
+if volDecline and extInZoneL         then setupScore := setupScore + 1
+if nearVWAPL  and extInZoneL         then setupScore := setupScore + 2
+if rrOkL                             then setupScore := setupScore + 1
+if inOptimalWindow                   then setupScore := setupScore + 1
+
+if ibMedWide                         then scoreShort := scoreShort + 2
+if extInZoneS                        then scoreShort := scoreShort + 2
+if bearishRej                        then scoreShort := scoreShort + 1
+if volDecline and extInZoneS         then scoreShort := scoreShort + 1
+if nearVWAPS  and extInZoneS         then scoreShort := scoreShort + 2
+if rrOkS                             then scoreShort := scoreShort + 1
+if inOptimalWindow                   then scoreShort := scoreShort + 1
+
+int qtyLong  = setupScore >= i_scoreHigh ? 3 : setupScore >= i_scoreMid ? 2 : setupScore >= i_scoreLow ? 1 : 0
+int qtyShort = scoreShort >= i_scoreHigh ? 3 : scoreShort >= i_scoreMid ? 2 : scoreShort >= i_scoreLow ? 1 : 0
+
+bool canTrade = ibComplete and inRTH and not isEOD and dayPnL > -i_maxDailyLoss and strategy.position_size == 0
+
+bool longCond  = canTrade and not longFired and extInZoneL and ibMedWide and bullishRej and qtyLong > 0
+bool shortCond = canTrade and not shortFired and extInZoneS and ibMedWide and bearishRej and qtyShort > 0
+
+if longCond and not na(ibRange) and not na(ibMidpoint) and not na(vwap)
+    float sl = close - i_slMult * ibRange
+    float tpMid = ibMidpoint; float tpVwap = vwap
+    float tp = math.abs(close - tpMid) <= math.abs(close - tpVwap) ? tpMid : tpVwap
+    strategy.entry("Conf Long", strategy.long, qty=qtyLong, comment="IBVWAP L S" + str.tostring(setupScore))
+    strategy.exit("Conf Long Exit", "Conf Long", stop=sl, limit=tp)
+    longFired := true; dayTrades += 1
+
+if shortCond and not na(ibRange) and not na(ibMidpoint) and not na(vwap)
+    float sl = close + i_slMult * ibRange
+    float tpMid = ibMidpoint; float tpVwap = vwap
+    float tp = math.abs(close - tpMid) <= math.abs(close - tpVwap) ? tpMid : tpVwap
+    strategy.entry("Conf Short", strategy.short, qty=qtyShort, comment="IBVWAP S S" + str.tostring(scoreShort))
+    strategy.exit("Conf Short Exit", "Conf Short", stop=sl, limit=tp)
+    shortFired := true; dayTrades += 1
+
+dayPnL := strategy.netprofit - nz(strategy.netprofit[1], strategy.netprofit)
+
+plot(ibComplete and not na(ibHigh)     ? ibHigh     : na, "IB High",  color=color.blue,   linewidth=2, style=plot.style_linebr)
+plot(ibComplete and not na(ibLow)      ? ibLow      : na, "IB Low",   color=color.blue,   linewidth=2, style=plot.style_linebr)
+plot(ibComplete and not na(ibMidpoint) ? ibMidpoint : na, "IB Mid",   color=color.purple, linewidth=1, style=plot.style_linebr)
+plot(not na(vwap) ? vwap : na, "VWAP", color=color.aqua, linewidth=2)
+
+bgcolor(longCond  ? color.new(color.green, 88) : na)
+bgcolor(shortCond ? color.new(color.red,   88) : na)

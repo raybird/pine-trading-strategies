@@ -1,0 +1,96 @@
+// TeleNexus Sovereign PDH/PDL Mean Reversion Fade v6
+// Version: v26.0619.1830 | CST 2026-06-19 18:30
+// Ported from Prat617/strategic — PDH/PDL Mean Reversion Fade
+//@version=6
+strategy("TeleNexus Sovereign PDH/PDL Fade V6", overlay=true,
+     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=2.50, slippage=1)
+
+i_startHour    = input.int(9,  "Session Start Hour (ET)", group="Session")
+i_startMin     = input.int(30, "Session Start Min (ET)", group="Session")
+i_endHour      = input.int(12, "Session End Hour (ET)", group="Session")
+i_endMin       = input.int(30, "Session End Min (ET)", group="Session")
+i_eodHour      = input.int(15, "EOD Hour (ET)", group="Session")
+i_eodMin       = input.int(45, "EOD Min (ET)", group="Session")
+
+i_swingLen     = input.int(3, "Swing Stop Lookback", group="Entry")
+i_volMult      = input.float(1.2, "Volume Confirm Multiplier", group="Entry")
+i_volLen       = input.int(20, "Volume Avg Length", group="Entry")
+
+i_maxDailyLoss = input.float(500.0, "Max Daily Loss ($)", group="Risk")
+i_maxTrades    = input.int(2, "Max Trades/Day", group="Risk")
+
+int   etHour   = hour(time, "America/New_York")
+int   etMin    = minute(time, "America/New_York")
+bool  isNewDay = ta.change(time("D")) != 0
+
+bool inWindow = (etHour > i_startHour or (etHour == i_startHour and etMin >= i_startMin)) and
+     (etHour < i_endHour or (etHour == i_endHour and etMin < i_endMin))
+bool inRTH    = etHour > i_startHour or (etHour == i_startHour and etMin >= i_startMin)
+bool isEOD    = etHour == i_eodHour and etMin >= i_eodMin
+
+float volAvg  = ta.sma(volume, i_volLen)
+
+float pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+float pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_on)
+
+var float cumTPV = 0.0
+var float cumVol = 0.0
+
+if isNewDay
+    cumTPV := 0.0; cumVol := 0.0
+
+float typicalPrice = (high + low + close) / 3.0
+
+if inRTH
+    cumTPV := cumTPV + typicalPrice * volume
+    cumVol := cumVol + volume
+
+float vwap = cumVol > 0.0 ? cumTPV / cumVol : na
+
+var int   dayTrades = 0
+var float dayPnL    = 0.0
+var bool  longFired = false
+var bool  shortFired = false
+
+if isNewDay
+    dayTrades := 0; dayPnL := 0.0; longFired := false; shortFired := false
+
+if isEOD and strategy.position_size != 0
+    strategy.close_all(comment="EOD Exit")
+
+bool tradeable = inWindow and not isEOD and dayTrades < i_maxTrades and
+     dayPnL > -i_maxDailyLoss and strategy.position_size == 0
+
+float pdhSwing = ta.highest(high, i_swingLen)[1]
+float pdlSwing = ta.lowest(low, i_swingLen)[1]
+
+bool touchPDH = high >= pdh - syminfo.mintick * 3 ? true : false
+bool touchPDL = low  <= pdl + syminfo.mintick * 3 ? true : false
+
+bool volOk = volume > i_volMult * volAvg
+
+bool shortCond = tradeable and not shortFired and touchPDH and close < pdh and
+     volOk and close < vwap
+
+bool longCond  = tradeable and not longFired and touchPDL and close > pdl and
+     volOk and close > vwap
+
+if longCond and not na(pdlSwing)
+    strategy.entry("PDL Long", strategy.long, comment="PDL Fade Long")
+    strategy.exit("PDL Long Exit", "PDL Long", stop=pdlSwing)
+    longFired := true; dayTrades += 1
+
+if shortCond and not na(pdhSwing)
+    strategy.entry("PDH Short", strategy.short, comment="PDH Fade Short")
+    strategy.exit("PDH Short Exit", "PDH Short", stop=pdhSwing)
+    shortFired := true; dayTrades += 1
+
+dayPnL := strategy.netprofit - nz(strategy.netprofit[1], strategy.netprofit)
+
+plot(pdh, "PDH", color=color.red,   linewidth=2, style=plot.style_linebr)
+plot(pdl, "PDL", color=color.green, linewidth=2, style=plot.style_linebr)
+plot(not na(vwap) ? vwap : na, "VWAP", color=color.aqua, linewidth=2)
+
+plotshape(longCond,  "Long",  style=shape.triangleup,   location=location.belowbar, color=color.green)
+plotshape(shortCond, "Short", style=shape.triangledown, location=location.abovebar, color=color.red)

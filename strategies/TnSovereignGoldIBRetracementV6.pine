@@ -1,0 +1,106 @@
+// TeleNexus Sovereign Gold IB Breakout Retracement v6
+// Version: v26.0619.1830 | CST 2026-06-19 18:30
+// Ported from Prat617/strategic — Gold IB Breakout Retracement
+//@version=6
+strategy("TeleNexus Sovereign Gold IB Retracement V6", overlay=true,
+     initial_capital=100000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=2.50, slippage=1)
+
+i_ibStartHour  = input.int(9,  "IB Start Hour (ET)", group="IB")
+i_ibStartMin   = input.int(30, "IB Start Min (ET)", group="IB")
+i_ibEndHour    = input.int(10, "IB End Hour (ET)", group="IB")
+i_ibEndMin     = input.int(30, "IB End Min (ET)", group="IB")
+i_minRangePct  = input.float(0.30, "Min IB Range % of Price", group="IB")
+i_maxRangePct  = input.float(1.50, "Max IB Range % of Price", group="IB")
+
+i_retracePct   = input.float(0.25, "Retracement Level (fraction of IB)", group="Entry")
+i_volMult      = input.float(1.2,  "Volume Confirm Multiplier", group="Entry")
+i_volLen       = input.int(20,     "Volume Avg Length", group="Entry")
+
+i_tpMult       = input.float(0.5,  "TP (x IB Range)", group="Risk")
+i_slMult       = input.float(0.6,  "SL (x IB Range)", group="Risk")
+i_eodHour      = input.int(16, "EOD Hour (ET)", group="Risk")
+i_eodMin       = input.int(0,  "EOD Min (ET)", group="Risk")
+i_maxDailyLoss = input.float(500.0, "Max Daily Loss ($)", group="Risk")
+
+int   etHour  = hour(time, "America/New_York")
+int   etMin   = minute(time, "America/New_York")
+bool  isNewDay = ta.change(time("D")) != 0
+float volAvg  = ta.sma(volume, i_volLen)
+
+var float ibHigh         = na
+var float ibLow          = na
+var bool  ibComplete     = false
+var float ibRange        = na
+var float ibMidPrice     = na
+var float ibRangePct     = na
+var string ibRangeStatus = "—"
+
+var bool  brkLong   = false
+var bool  brkShort  = false
+var bool  entryFilled = false
+var float retraceEntryL = na
+var float retraceEntryS = na
+var bool  tradeDone  = false
+var float dayPnL     = 0.0
+
+if isNewDay
+    ibHigh := na; ibLow := na; ibComplete := false
+    ibRange := na; ibMidPrice := na; ibRangePct := na
+    ibRangeStatus := "—"
+    brkLong := false; brkShort := false
+    entryFilled := false; retraceEntryL := na; retraceEntryS := na
+    tradeDone := false; dayPnL := 0.0
+
+bool inIBWindow = (etHour == i_ibStartHour and etMin >= i_ibStartMin) or
+     (etHour > i_ibStartHour and etHour < i_ibEndHour) or
+     (etHour == i_ibEndHour and etMin < i_ibEndMin)
+
+if inIBWindow and not ibComplete
+    ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
+    ibLow  := na(ibLow)  ? low  : math.min(ibLow,  low)
+
+if not ibComplete and (etHour > i_ibEndHour or (etHour == i_ibEndHour and etMin >= i_ibEndMin))
+    ibComplete := true
+    ibRange    := ibHigh - ibLow
+    ibMidPrice := (ibHigh + ibLow) / 2.0
+    if ibMidPrice > 0.0
+        ibRangePct := ibRange / ibMidPrice * 100.0
+        ibRangeStatus := ibRangePct >= i_minRangePct and ibRangePct <= i_maxRangePct ? "OK" : "SKIP"
+    if ibRange > 0.0
+        retraceEntryL := ibHigh - i_retracePct * ibRange
+        retraceEntryS := ibLow  + i_retracePct * ibRange
+
+bool isEOD = etHour == i_eodHour and etMin >= i_eodMin
+
+if isEOD and strategy.position_size != 0
+    strategy.close_all(comment="EOD Exit")
+
+bool rangeOk = ibRangeStatus == "OK"
+
+if ibComplete and rangeOk and not tradeDone and not isEOD and
+     not na(ibRange) and ibRange > 0.0 and dayPnL > -i_maxDailyLoss
+    if not brkLong and not brkShort
+        if close > ibHigh then brkLong := true
+        if close < ibLow  then brkShort := true
+
+    if brkLong and not entryFilled and not na(retraceEntryL)
+        if close <= retraceEntryL and volume > i_volMult * volAvg
+            float tpPrice = ibHigh + i_tpMult * ibRange
+            float slPrice = close  - i_slMult * ibRange
+            strategy.entry("Gold Long", strategy.long, comment="Gold IB Retrace L")
+            strategy.exit("Gold Long Exit", "Gold Long", stop=slPrice, limit=tpPrice)
+            entryFilled := true; tradeDone := true
+
+    if brkShort and not entryFilled and not na(retraceEntryS)
+        if close >= retraceEntryS and volume > i_volMult * volAvg
+            float tpPrice = ibLow  - i_tpMult * ibRange
+            float slPrice = close  + i_slMult * ibRange
+            strategy.entry("Gold Short", strategy.short, comment="Gold IB Retrace S")
+            strategy.exit("Gold Short Exit", "Gold Short", stop=slPrice, limit=tpPrice)
+            entryFilled := true; tradeDone := true
+
+dayPnL := strategy.netprofit - nz(strategy.netprofit[1], strategy.netprofit)
+
+plot(ibComplete and not na(ibHigh) ? ibHigh : na, "IB High", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(ibComplete and not na(ibLow)  ? ibLow  : na, "IB Low",  color=color.orange, linewidth=2, style=plot.style_linebr)

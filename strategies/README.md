@@ -43,7 +43,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_wavetrend_v4_v6` | WaveTrend v4 波動交易策略 |
 | `tn_smooth_trend_radar_v6` | 雙平滑超級趨勢 + 樞軸拒絕雷達 |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，15）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，18）
 
 | 策略 | 說明 |
 |------|------|
@@ -62,6 +62,9 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignWaveTrendV20` | WaveTrend 熱力學反轉 |
 | `v6_stochastic_divergence` | 隨機指標背離 (v6 移植) |
 | `TnSovereignStochDivergenceV6` | Stoch + MACD 雙重背離偵測 |
+| `TnSovereignZScoreReversionV6` | Z-Score 波動率反轉（Session VWAP + 耗竭 K 線 + ATR 百分位體制），移植自 Prat617/strategic |
+| `TnSovereignPDHPDLFadeV6` | 前日高/低均值回歸反轉（PDH/PDL + VWAP 偏見 + Swing Stop），移植自 Prat617/strategic |
+| `TnSovereignIBMeanReversionV6` | IB 均值回歸反轉（日型分類 + 延伸區 Fade + MA 濾網），移植自 Prat617/strategic |
 
 ## Volatility & Breakout（波動率與突破，24）
 
@@ -92,7 +95,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
 | `tn_opening_range_magnet_v6` | 開盤區間磁鐵效應策略（OR High/Low 磁鐵 + 價格漂移回測 + NR7/缺口過濾），移植自 biagDev/nq-magnet-framework |
 
-## Market Structure & Price Action（市場結構與價格行為，30）
+## Market Structure & Price Action（市場結構與價格行為，32）
 
 | 策略 | 說明 |
 |------|------|
@@ -126,6 +129,8 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_pinegen_lvn_reject_accept_v6` | LVN 拒絕/接受 (PineGen 移植) |
 | `TnSovereignPowerOfThreeV6` | PO3 三相位引擎（Accumulation→Manipulation→Distribution），移植自 FEELS Power of Three v1.5 |
 | `tn_ifvg_cisd_double_confirm_v6` | IFVG（反轉 FVG）+ CISD（結構破壞）雙重確認入場，移植自 aleks-drozy/fyp-trading-strategy |
+| `TnSovereignIBVWAPConfluenceV6` | IB+VWAP 品質評分匯流（10 分制 IB 寬度 + 延伸 + 拒絕 K 線 + VWAP 接近度 + 動態口數），移植自 Prat617/strategic |
+| `TnSovereignGoldIBRetracementV6` | 黃金 IB 突破拉回（IB 範圍 % 過濾 + 突破偵測 + 回撤入場 + 成交量確認），移植自 Prat617/strategic |
 
 ## Volume & Order Flow（成交量與訂單流，15）
 
