@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 162 個已實體化主權策略，分 14 大類（v26.0620.0630 維持）
+- **[`/strategies`](./strategies/README.md)** — 162 個已實體化主權策略，分 14 大類（v26.0620.1830 維持）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **162** | 主權策略矩陣（v26.0620.0630 維持） |
+| **Total** | **162** | 主權策略矩陣（v26.0620.1830 維持） |
 
 
+> **最新加入（v26.0620.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含新檢索 repos: FaustoS88/Pydantic-AI-Pinescript-Expert RAG agent 非策略實體、Aksee123/nq1_Scalping_Strategy 自訂 VP scalping 已有 TnSovereignVolumeProfileScalpV6 覆蓋、rajitha-yasas/Pine-Script-v6-Trading-Strategy 基礎多指標已有對應策略）、TradingView 社群無法存取；維持 162 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0620.0630）**: 獵頭審計 — GitHub 55 儲存庫 + TradingView 社群全數檢索（AE-KBN-Claude 5-Factor Confluence、OOTM Session Sweeps、capital41 Regime Matrix 等均已有對應策略覆蓋或為純指標無策略實體），無全新可移植策略；維持 162 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0619.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含 Prat617/strategic 7 款 NQ/ES/GC Elite 策略系統），新增 5 款主權化策略：`TnSovereignZScoreReversionV6`（Z-Score 波動率反轉）、`TnSovereignIBVWAPConfluenceV6`（IB+VWAP 品質評分匯流）、`TnSovereignPDHPDLFadeV6`（前日高/低均值回歸）、`TnSovereignGoldIBRetracementV6`（黃金 IB 突破拉回）、`TnSovereignIBMeanReversionV6`（IB 日型分類均值回歸）；162 策略物理對位；Dashboard 同步更新
