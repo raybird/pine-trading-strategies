@@ -66,7 +66,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignPDHPDLFadeV6` | 前日高/低均值回歸反轉（PDH/PDL + VWAP 偏見 + Swing Stop），移植自 Prat617/strategic |
 | `TnSovereignIBMeanReversionV6` | IB 均值回歸反轉（日型分類 + 延伸區 Fade + MA 濾網），移植自 Prat617/strategic |
 
-## Volatility & Breakout（波動率與突破，24）
+## Volatility & Breakout（波動率與突破，25）
 
 | 策略 | 說明 |
 |------|------|
@@ -94,6 +94,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_pinegen_vol_exp_fake_break_v6` | 波動擴張 + 假突破過濾 (PineGen 移植) |
 | `tn_pinegen_vol_switch_regime_v6` | 波動體制切換 (PineGen 移植) |
 | `tn_opening_range_magnet_v6` | 開盤區間磁鐵效應策略（OR High/Low 磁鐵 + 價格漂移回測 + NR7/缺口過濾），移植自 biagDev/nq-magnet-framework |
+| `TnSovereignNqOprBreakoutV6` | NQ NY 時段 OPR 突破策略（可配置區間 + RSI/EMA 選擇性過濾 + 擺動止損 + 每日一單止損紀律），移植自 jcornierfra/TradingView_Strategy_JCO_OPR_Breakout |
 
 ## Market Structure & Price Action（市場結構與價格行為，32）
 

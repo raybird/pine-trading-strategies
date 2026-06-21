@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 162 個已實體化主權策略，分 14 大類（v26.0621.1830 維持）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0622.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -45,7 +45,7 @@
 | **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 15 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4 |
 | **Mean Reversion & Oscillator** | 17 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸 |
-| **Volatility & Breakout** | 20 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應 |
+| **Volatility & Breakout** | 21 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破 |
 | **Market Structure & Price Action** | 32 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回 |
 | **Volume & Order Flow** | 12 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **162** | 主權策略矩陣（v26.0621.1830 維持） |
+| **Total** | **163** | 主權策略矩陣（v26.0622.0630 更新） |
 
 
-> **最新加入（v26.0621.1830）**: 獵頭審計 — GitHub 70 儲存庫全數檢索（新檢索 repos: regardhodler/tradingview-volume-profile judas-strategy.pine 為 v5 複合評分引擎，分量模組（VP/CVD/Pivots/Absorption/OIR/MTF）均已有對應策略覆蓋；AkashSasikumar47/pine-strategy-indicators-v6 為指標集合無獨立策略實體；pineforge-4pass 系列為 Pine Script 編譯引擎非策略）；TradingView 社群無法存取；維持 162 策略物理對位；Dashboard 同步更新
+> **最新加入（v26.0622.0630）**: 獵頭審計 — GitHub 55+ 儲存庫全數檢索（新檢索 repos: jcornierfra/TradingView_Strategy_JCO_OPR_Breakout NQ NY Session OPR 突破策略，移植為 `TnSovereignNqOprBreakoutV6`；yaniv1157/breakout-confluence-scanner 為 7 策略匯流掃描指標非策略實體；PineGen-AI/ml-inspired-adaptive-momentum-strategy 與 volatility-squeeze-expansion-strategy 為基礎實作已有對應策略覆蓋；SimoneGitter/AdvancedMA-Toolkit 為 MA 工具庫無獨立策略）；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0620.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含新檢索 repos: FaustoS88/Pydantic-AI-Pinescript-Expert RAG agent 非策略實體、Aksee123/nq1_Scalping_Strategy 自訂 VP scalping 已有 TnSovereignVolumeProfileScalpV6 覆蓋、rajitha-yasas/Pine-Script-v6-Trading-Strategy 基礎多指標已有對應策略）、TradingView 社群無法存取；維持 162 策略物理對位；Dashboard 同步更新
 >

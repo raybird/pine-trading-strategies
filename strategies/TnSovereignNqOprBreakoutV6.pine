@@ -1,0 +1,171 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignNqOprBreakoutV6
+// ============================================================================
+// Causal Audit: 2026-06-22 06:30 CST
+// Version: v26.0622.0630
+// Build: NQ NY Session OPR Breakout — Sovereign Port
+//
+// Core Thesis:
+//   The Opening Price Range (OPR) during the NY session is the most
+//   structurally significant price discovery period for NQ (Nasdaq Futures).
+//   Breakouts from this range carry high-probability directional bias when
+//   confirmed by RSI regime, EMA alignment, and swing-based risk management.
+//
+// Sovereign Overlays:
+//   ✓ Configurable OPR Window — customizable range accumulation duration
+//   ✓ Session-Gated Trading — entries only within NY session window
+//   ✓ Optional RSI Filter — overbought/oversold regime gating
+//   ✓ Optional EMA Filter — trend alignment confirmation
+//   ✓ Swing-Based Stop Loss — dynamic SL using recent swing structure
+//   ✓ One Trade Per Day — prevents overtrading
+//   ✓ Force Close at Session End — disciplined time-based exit
+//   ✓ Visual Range Boxes — range high/low visualization
+// ============================================================================
+
+strategy("TnSovereignNqOprBreakoutV6 [TeleNexus]", overlay=true,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 10,
+     initial_capital     = 10000,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.02,
+     slippage            = 1)
+
+// ─── Time Configuration ───────────────────────────────────────────────────
+groupTime = "Time Settings"
+rsH  = input.int(9,  "Range Start Hour", minval=0, maxval=23, group=groupTime)
+rsM  = input.int(30, "Range Start Minute", minval=0, maxval=59, group=groupTime)
+rangeLen = input.int(5, "Range Duration (minutes)", minval=1, maxval=240, group=groupTime)
+trOH = input.int(9,  "Trade Open Hour", minval=0, maxval=23, group=groupTime)
+trOM = input.int(35, "Trade Open Minute", minval=0, maxval=59, group=groupTime)
+trSH = input.int(16, "Trade Stop Hour", minval=0, maxval=23, group=groupTime)
+trSM = input.int(0,  "Trade Stop Minute", minval=0, maxval=59, group=groupTime)
+trCH = input.int(16, "Trade Close Hour", minval=0, maxval=23, group=groupTime)
+trCM = input.int(30, "Trade Close Minute", minval=0, maxval=59, group=groupTime)
+tzCustom = input.string("America/New_York", "Timezone", options=syminfo.timezone + "," + "America/New_York,UTC,America/Chicago,Europe/London,Asia/Tokyo", group=groupTime)
+useTZ = tzCustom == syminfo.timezone ? syminfo.timezone : tzCustom
+
+tradeOpen  = timestamp(useTZ, year, month, dayofmonth, trOH, trOM)
+tradeStop  = timestamp(useTZ, year, month, dayofmonth, trSH, trSM)
+tradeClose = timestamp(useTZ, year, month, dayofmonth, trCH, trCM)
+
+// ─── Range Accumulation ───────────────────────────────────────────────────
+rangeEnd = rsH * 60 + rsM + rangeLen
+endH = math.floor(rangeEnd / 60) % 24
+endM = rangeEnd % 60
+rangeSess = str.tostring(rsH) + str.tostring(rsM) + "-" + str.tostring(endH) + str.tostring(endM) + ":1234567"
+inRange = not na(time(timeframe.period, rangeSess, useTZ))
+firstRangeBar = inRange and not inRange[1]
+afterRange = not inRange and inRange[1]
+
+var float rHigh = na
+var float rLow  = na
+var bool  rReady = false
+
+if firstRangeBar
+    rHigh := na
+    rLow  := na
+    rReady := false
+if inRange
+    rHigh := na(rHigh) ? high : math.max(rHigh, high)
+    rLow  := na(rLow)  ? low  : math.min(rLow,  low)
+if afterRange
+    rReady := true
+
+// ─── Session & Trade Gates ────────────────────────────────────────────────
+inSession  = time >= tradeOpen and time <= tradeStop
+canTrade   = rReady and inSession
+forceClose = time >= tradeClose
+
+// ─── RSI Filter ──────────────────────────────────────────────────────────
+useRSI   = input.bool(true, "Enable RSI Filter", group="RSI Filter")
+rsiOB    = input.int(70, "RSI Overbought", minval=50, maxval=100, group="RSI Filter")
+rsiOS    = input.int(30, "RSI Oversold", minval=0, maxval=50, group="RSI Filter")
+rsiMode  = input.string("Outside", "RSI Condition", options=["Outside", "Inside", "Off"], group="RSI Filter")
+rsi      = ta.rsi(close, 14)
+
+rsiLongOK = switch rsiMode
+    "Off"     => true
+    "Outside" => rsi >= rsiOB
+    "Inside"  => rsi > rsiOS and rsi < rsiOB
+    => true
+
+rsiShortOK = switch rsiMode
+    "Off"     => true
+    "Outside" => rsi <= rsiOS
+    "Inside"  => rsi > rsiOS and rsi < rsiOB
+    => true
+
+// ─── EMA Filter ──────────────────────────────────────────────────────────
+useEMA  = input.bool(false, "Enable EMA Filter", group="EMA Filter")
+emaLen  = input.int(50, "EMA Period", minval=1, group="EMA Filter")
+emaVal  = ta.ema(close, emaLen)
+
+emaLongOK  = useEMA ? (close > emaVal and low > emaVal)  : true
+emaShortOK = useEMA ? (close < emaVal and high < emaVal) : true
+
+// ─── One Trade Per Day ──────────────────────────────────────────────────
+var bool tradedToday = false
+if dayofmonth != dayofmonth[1]
+    tradedToday := false
+
+// ─── Swing Detection ────────────────────────────────────────────────────
+findSwingLow() =>
+    float sl = na
+    for i = 1 to 20
+        if low[i] < low[i-1] and low[i] < low[i+1]
+            sl := low[i]
+            break
+    sl
+findSwingHigh() =>
+    float sh = na
+    for i = 1 to 20
+        if high[i] > high[i-1] and high[i] > high[i+1]
+            sh := high[i]
+            break
+    sh
+
+// ─── Trade Parameters ───────────────────────────────────────────────────
+groupRisk = "Risk Management"
+rrSep = input.bool(false, "Separate R:R for Long/Short", group=groupRisk)
+rrCom = input.float(1.5, "Common R:R", minval=0.1, step=0.1, group=groupRisk)
+rrL  = input.float(1.5, "R:R Long", minval=0.1, step=0.1, group=groupRisk)
+rrS  = input.float(1.5, "R:R Short", minval=0.1, step=0.1, group=groupRisk)
+buff = syminfo.mintick * 10
+
+rrLong  = rrSep ? rrL  : rrCom
+rrShort = rrSep ? rrS  : rrCom
+
+// ─── Entry Signals ──────────────────────────────────────────────────────
+longSig  = canTrade and not tradedToday and strategy.position_size == 0
+shortSig = canTrade and not tradedToday and strategy.position_size == 0
+
+breakLong  = longSig  and close > rHigh and rsiLongOK  and emaLongOK
+breakShort = shortSig and close < rLow  and rsiShortOK and emaShortOK
+
+// ─── Execution ──────────────────────────────────────────────────────────
+if breakLong
+    swingLow = findSwingLow()
+    slPrice = na(swingLow) ? rLow : math.max(swingLow - buff, rLow)
+    tpPrice = close + rrLong * (close - slPrice)
+    strategy.entry("Long", strategy.long)
+    strategy.exit("LongX", "Long", stop=slPrice, limit=tpPrice)
+    tradedToday := true
+
+if breakShort
+    swingHigh = findSwingHigh()
+    slPrice = na(swingHigh) ? rHigh : math.min(swingHigh + buff, rHigh)
+    tpPrice = close - rrShort * (slPrice - close)
+    strategy.entry("Short", strategy.short)
+    strategy.exit("ShortX", "Short", stop=slPrice, limit=tpPrice)
+    tradedToday := true
+
+// ─── Force Close ────────────────────────────────────────────────────────
+if forceClose and strategy.position_size != 0
+    strategy.close_all(comment="Force Close")
+
+// ─── Visuals ────────────────────────────────────────────────────────────
+showBox = input.bool(true, "Show Range Box", group="Display")
+if showBox and rReady and not na(rHigh) and not na(rLow)
+    box.new(left=bar_index, top=rHigh, right=bar_index+5, bottom=rLow,
+            border_color=color.new(color.gray, 30), bgcolor=color.new(color.gray, 85))
