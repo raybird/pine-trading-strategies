@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0622.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0622.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0622.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0622.1830 更新） |
 
 
+> **最新加入（v26.0622.1830）**: 獵頭審計 — GitHub 55+ 儲存庫全數檢索（新檢索 repos: FRX132/Trading_View_Indicator 為 OOTM Session Sweeps & Breakouts 策略已有 TnSovereignSessionQuantV6/TnSovereignOrbMultiSessionV6 覆蓋；Capitalpro123/StrategyA_Engulfing 為基礎吞噬 K 線策略已有 TnSovereignReversalEngineV6 覆蓋；Capitalpro123/StrategyA_Marketstructure 與 StrategyA_ichimoku 均已有對應 SMC/Ichimoku 策略覆蓋；piazzolimichele1/Pinescript-V6 含 6 款基礎策略（Ichimoku/Engulfing/Range Breakout）均無移植價值；hamedator/advanced-pinescript-strategy-v6 為 demo 版無完整邏輯；JackSmack1971/traderjack-pinescript-v6-sripts 為 indicators 集合無獨立策略；mrdungx2603/Tradingview-Pine-Scripts 為初始模板倉無實際 .pine 策略）；維持 163 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0622.0630）**: 獵頭審計 — GitHub 55+ 儲存庫全數檢索（新檢索 repos: jcornierfra/TradingView_Strategy_JCO_OPR_Breakout NQ NY Session OPR 突破策略，移植為 `TnSovereignNqOprBreakoutV6`；yaniv1157/breakout-confluence-scanner 為 7 策略匯流掃描指標非策略實體；PineGen-AI/ml-inspired-adaptive-momentum-strategy 與 volatility-squeeze-expansion-strategy 為基礎實作已有對應策略覆蓋；SimoneGitter/AdvancedMA-Toolkit 為 MA 工具庫無獨立策略）；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0620.1830）**: 獵頭審計 — GitHub 55 儲存庫全數檢索（含新檢索 repos: FaustoS88/Pydantic-AI-Pinescript-Expert RAG agent 非策略實體、Aksee123/nq1_Scalping_Strategy 自訂 VP scalping 已有 TnSovereignVolumeProfileScalpV6 覆蓋、rajitha-yasas/Pine-Script-v6-Trading-Strategy 基礎多指標已有對應策略）、TradingView 社群無法存取；維持 162 策略物理對位；Dashboard 同步更新
