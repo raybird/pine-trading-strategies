@@ -236,3 +236,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `template_v6` | 策略模板 |
 | `TnSovereignAliceV6` | Alice 5 法台股策略 |
 | `triple_confirmation_sovereign_v6` | 三重確認主權策略 |
+
+---
+
+*策略總數：163（v26.0624.0630 更新）*

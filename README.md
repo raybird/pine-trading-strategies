@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0623.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0624.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0623.1830 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0624.0630 更新） |
 
 
+> **最新加入（v26.0624.0630）**: 獵頭審計 #102 — GitHub 56+ 儲存庫 + TradingView 社群全數檢索（新檢索 repos: AkashSasikumar47/pine-strategy-indicators-v6 為 indicators 集合無獨立 strategy() 實體；vthattey/SignalForge 為 ML 集成 indicator(.txt) 非 strategy() 實體已有 TnSovereignSignalForgeV20 覆蓋；Parth081/ALPHA-HIVE 為 10 個月前策略框架單檔案無獨立實體；jayadevrana/pinescript-custom-confluence-futures-strategy-v6 為 NSE 印度市場 EMA+MACD+RSI+Supertrend+ADX 匯流策略，基礎指標均已覆蓋，CE/PE 選擇權對沖為 NSE 專用無移植價值；jonathanpratt5564/crypto_darvas_pinescript 為 Darvas alerts 已有 tn_sovereign_darvas_v6 覆蓋）；TradingView 社群指標/策略全數檢視，無新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0623.1830）**: 獵頭審計 #101 — GitHub 55+ 儲存庫全數檢索（新檢索 repos: VolodymyrFilias/feels-indicators 為 FEELS 指標集合（Air Pocket Profile / Confluence Pivot Zones / Support-Resistance Zones），均為 indicator() 非 strategy() 實體無移植價值；alexhowa53/pinescript-v6-toolkit 404 倉庫已下架；chris-c-thomas/chrd-tradingview-pine-scripts 為技術指標集合無獨立策略實體）；TradingView 社群 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0623.0630）**: 獵頭審計 — GitHub 55+ 儲存庫 + TradingView 社群全數檢索（新檢索 repos: randomwalkhan/Short-Term-Reversal-Strategy 為 Python 量化研究非 Pine Script 實體；EvertonTomalok/splinter 為多智能體編碼框架非策略實體；DexWilder/algo-lab 為 Pine→Python 轉換工程無原始 .pine 檔案；alvin-forex/trade-strategy-analyzer、adamopenbook/strategy-dashboard、rexlau-prog/zynerise-btc-bot 均為 HTML 儀表板非策略實體）；TradingView 社群無全新 v6 strategy 實體；維持 163 策略物理對位；Dashboard 同步更新
