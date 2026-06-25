@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0625.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0625.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0625.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0625.1830 更新） |
 
 
+> **最新加入（v26.0625.1830）**: 獵頭審計 #105 — GitHub 50+ 儲存庫全數檢索（跨 2 頁關鍵詞交叉查詢：`"pinescript v6 strategy"` + `"strategy(" v6 pinescript` + 分頁至第 6 頁確認 + 新檢索 repos 逐一驗證）。新檢索 repos: jonathanpratt5564/crypto_darvas_pinescript 為 alerts-only indicator() 非 strategy() 實體，Darvas Box 邏輯已由 `tn_sovereign_darvas_v6` 覆蓋；AleeexTk/TradingView-SMC-EPOS 為空倉無實體；其餘所有 repos（PineGen-AI 14 倉、trugurpala/pinescriptv6、JoelPasapera/Strategies-in-Pine-Script-v6 等）均已在過去審計中覆蓋無全新 strategy() 實體；TradingView 社群 Cloudflare 持續阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0625.0630）**: 獵頭審計 #104 — GitHub 60+ 儲存庫全數檢索（跨 2 頁搜尋結果 + `"strategy(" v6` 補集查詢 + PineGen-AI 14 倉二次驗證）。新檢索 repos: jayadevrana/pinescript-custom-confluence-futures-strategy-v6 為 NSE 印度市場合流策略（Supertrend + EMA + MACD + RSI + RS + ADX + HA + OI），基礎邏輯無移植價值；sametbarbaros-dev/PineScript-Architect 為 React/TypeScript AI Studio 工具非策略實體；其餘所有 repos 均已在過去審計中覆蓋無全新 strategy() 實體；TradingView 社群 Cloudflare 持續阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0624.1830）**: 獵頭審計 #103 — GitHub 60+ 儲存庫全數檢索（跨 4 頁搜尋結果 + 多組查詞交叉驗證）。新檢索 repos: codenamedevan/pinescriptv6 為 Pine Script v6 文件知識庫非策略實體；Zkalish/pinescriptv6 同為 LLM 文件庫無獨立策略；odilsonriquelme/pinescript-v6 為 PDF 文件無實體；Alephxxii/Pinescript-v6 含 ICT Scalp indicator() 非 strategy() 實體；blablablasealsaresoft/US30 為 Python 為主的 ORB 專案無 Pine Script strategy() 實體；damianpitt/capital41-indicators、mazetezr/tradingview-indicator、hungpixi/pinescript-ict 等均為 indicators 集合無獨立策略；TradingView 社群 Cloudflare 持續阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
