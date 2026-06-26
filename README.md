@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0626.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0626.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0626.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0626.1830 更新） |
 
 
-> **最新加入（v26.0626.0630）**: 獵頭審計 #106 — GitHub 搜尋引擎全數檢索（跨 4 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6` + 建立日期 `>2026-06-01` 補集搜尋 + PineGen-AI 組織確認解散無新倉）。新檢索 repos: 僅 `jayadevrana/pinescript-custom-confluence-futures-strategy-v6`（EMA+RSI+MACD+Supertrend NSE 印股匯流，已於 #104 判定無移植價值）與 `Viprasol-Tech/pine-script-strategy`（基礎 EMA 交叉，已於 #105 判定無移植價值）於近期更新；其餘所有 repos 均已在過去審計中覆蓋無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
+> **最新加入（v26.0626.1830）**: 獵頭審計 #107 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，分頁至第 2 頁確認）。所有檢索 repos（jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、trugurpala/pinescriptv6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert、jonathanpratt5564/crypto_darvas_pinescript、piazzolimichele1/Pinescript-V6）均已在 #104–#106 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0625.1830）**: 獵頭審計 #105 — GitHub 50+ 儲存庫全數檢索（跨 2 頁關鍵詞交叉查詢：`"pinescript v6 strategy"` + `"strategy(" v6 pinescript` + 分頁至第 6 頁確認 + 新檢索 repos 逐一驗證）。新檢索 repos: jonathanpratt5564/crypto_darvas_pinescript 為 alerts-only indicator() 非 strategy() 實體，Darvas Box 邏輯已由 `tn_sovereign_darvas_v6` 覆蓋；AleeexTk/TradingView-SMC-EPOS 為空倉無實體；其餘所有 repos（PineGen-AI 14 倉、trugurpala/pinescriptv6、JoelPasapera/Strategies-in-Pine-Script-v6 等）均已在過去審計中覆蓋無全新 strategy() 實體；TradingView 社群 Cloudflare 持續阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
