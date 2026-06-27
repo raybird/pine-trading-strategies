@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0627.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0627.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0627.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0627.1830 更新） |
 
 
+> **最新加入（v26.0627.1830）**: 獵頭審計 #109 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認共 16+2+17 個儲存庫，含頁面 2 驗證）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert 58★ RAG agent 非策略、JoelPasapera/Strategies-in-Pine-Script-v6、trugurpala/pinescriptv6、thesenegalesehitch/Pine-Script、hamedator/advanced-pinescript-strategy-v6、piazzolimichele1/Pinescript-V6、JackSmack1971/traderjack-pinescript-v6-sripts、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、jonathanpratt5564/crypto_darvas_pinescript、AleeexTk/TradingView-SMC-EPOS、Capitalpro123/StrategyA_Engulfing）均已在 #101–#108 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0627.0630）**: 獵頭審計 #108 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 16+2+17 個儲存庫）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、JoelPasapera/Strategies-in-Pine-Script-v6、trugurpala/pinescriptv6、thesenegalesehitch/Pine-Script、hamedator/advanced-pinescript-strategy-v6、piazzolimichele1/Pinescript-V6、JackSmack1971/traderjack-pinescript-v6-sripts、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、jonathanpratt5564/crypto_darvas_pinescript、AleeexTk/TradingView-SMC-EPOS、Capitalpro123/StrategyA_Engulfing）均已在 #101–#107 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0626.1830）**: 獵頭審計 #107 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，分頁至第 2 頁確認）。所有檢索 repos（jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、trugurpala/pinescriptv6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert、jonathanpratt5564/crypto_darvas_pinescript、piazzolimichele1/Pinescript-V6）均已在 #104–#106 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
