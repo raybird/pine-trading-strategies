@@ -47,19 +47,19 @@
 | **Mean Reversion & Oscillator** | 17 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸 |
 | **Volatility & Breakout** | 21 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破 |
 | **Market Structure & Price Action** | 32 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回 |
-| **Volume & Order Flow** | 12 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵 |
+| **Volume & Order Flow** | 15 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
 | **Multi-Agent, Swarm & Macro** | 12 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散 |
 | **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
 | **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
-| **Signal Quality & Fakeout Prevention** | 2 | 信號品質與防假突破過濾 |
+| **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
 | **Total** | **163** | 主權策略矩陣（v26.0627.1830 更新） |
 
 
-> **最新加入（v26.0627.1830）**: 獵頭審計 #109 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認共 16+2+17 個儲存庫，含頁面 2 驗證）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert 58★ RAG agent 非策略、JoelPasapera/Strategies-in-Pine-Script-v6、trugurpala/pinescriptv6、thesenegalesehitch/Pine-Script、hamedator/advanced-pinescript-strategy-v6、piazzolimichele1/Pinescript-V6、JackSmack1971/traderjack-pinescript-v6-sripts、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、jonathanpratt5564/crypto_darvas_pinescript、AleeexTk/TradingView-SMC-EPOS、Capitalpro123/StrategyA_Engulfing）均已在 #101–#108 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
+> **最新加入（v26.0628.1630）**: README 整理與同步更新 — 修正 `Signal Quality & Fakeout Prevention` 分類計數（2→7）、`Volume & Order Flow` 計數（12→15），與 `strategies/README.md` 完全對位。所有 163 款策略分類統計同步；Dashboard `docs/index.html` 狀態欄同步更新至 `v26.0628.1630`；維持 163 策略物理對位
 >
 > **最新加入（v26.0627.0630）**: 獵頭審計 #108 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 16+2+17 個儲存庫）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、JoelPasapera/Strategies-in-Pine-Script-v6、trugurpala/pinescriptv6、thesenegalesehitch/Pine-Script、hamedator/advanced-pinescript-strategy-v6、piazzolimichele1/Pinescript-V6、JackSmack1971/traderjack-pinescript-v6-sripts、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、jonathanpratt5564/crypto_darvas_pinescript、AleeexTk/TradingView-SMC-EPOS、Capitalpro123/StrategyA_Engulfing）均已在 #101–#107 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
