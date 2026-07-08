@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0627.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0709.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0627.1830 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0709.0630 更新） |
 
 
-> **最新加入（v26.0628.1630）**: README 整理與同步更新 — 修正 `Signal Quality & Fakeout Prevention` 分類計數（2→7）、`Volume & Order Flow` 計數（12→15），與 `strategies/README.md` 完全對位。所有 163 款策略分類統計同步；Dashboard `docs/index.html` 狀態欄同步更新至 `v26.0628.1630`；維持 163 策略物理對位
+> **最新加入（v26.0709.0630）**: 獵頭審計 #109 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 17+2+18 個儲存庫）。新檢索 repos: QuantForgeHQ/pinescript-portfolio 含 3 款 .pine 實體（atr_breakout_channel_v1 為 strategy() 但僅為基礎通道突破 + ATR 尾隨停損，邏輯已由現有策略覆蓋；vwap_reversion_bands_v3 為 indicator() 非 strategy() 實體；multi_condition_alert_manager_v1 為工具類無移植價值）；kierbica/pinescriptv6 為 trugurpala/pinescriptv6 同時期內容（256 commits，3 個月前最後更新），所載 13 款策略均為基礎實作已在先前審計中覆蓋無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0627.0630）**: 獵頭審計 #108 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 16+2+17 個儲存庫）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、JoelPasapera/Strategies-in-Pine-Script-v6、trugurpala/pinescriptv6、thesenegalesehitch/Pine-Script、hamedator/advanced-pinescript-strategy-v6、piazzolimichele1/Pinescript-V6、JackSmack1971/traderjack-pinescript-v6-sripts、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、jonathanpratt5564/crypto_darvas_pinescript、AleeexTk/TradingView-SMC-EPOS、Capitalpro123/StrategyA_Engulfing）均已在 #101–#107 審計中覆蓋，無全新 strategy() 實體；TradingView 社群持續受 Cloudflare 阻擋無法存取；維持 163 策略物理對位；Dashboard 同步更新
 >
