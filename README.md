@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0713.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0713.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,9 +56,11 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0713.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0713.1830 更新） |
 
 
+> **最新加入（v26.0713.1830）**: 獵頭審計 #116 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 18+2+19 個儲存庫）。所有檢索 repos 均已在 #106–#115 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
+>
 > **最新加入（v26.0713.0630）**: 獵頭審計 #115 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 18+2+19 個儲存庫）。所有檢索 repos 均已在 #106–#114 審計中覆蓋，無全新 strategy() 實體。TradingView 社群已恢復可存取，pine-script-v6 頁面列出 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 >
 > **最新加入（v26.0712.1830）**: 獵頭審計 #114 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 18+2+19 個儲存庫）。所有檢索 repos（monch1962/stratus、QuantForgeHQ/pinescript-portfolio、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、kierbica/pinescriptv6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert）均已在 #106–#113 審計中覆蓋，無全新 strategy() 實體。TradingView 社群已恢復可存取（不再受 Cloudflare 阻擋），但 scripts/pine-script-v6 頁面僅列出 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
