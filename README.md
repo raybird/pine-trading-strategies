@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0714.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0718.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0714.1830 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0718.0630 更新） |
 
 
-> **最新加入（v26.0714.1830）**: 獵頭審計 #118 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 18+2+19 個儲存庫 + PineGen-AI 24 倉二次驗證）。所有檢索 repos 均已在 #106–#117 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
+> **最新加入（v26.0718.0630）**: 獵頭審計 #119 — GitHub 全數檢索（跨 2 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"`，確認 9+3 個儲存庫）。所有檢索 repos 均已在 #106–#118 審計中覆蓋，無全新 strategy() 實體。新出現 `jayadevrana/tradingview-pine-agent` 為 MCP agent engine（非策略實體，僅含基礎模板）。TradingView 社群 pine-script-v6 頁面仍為 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0714.0630）**: 獵頭審計 #117 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認共 18+2+19 個儲存庫 + PineGen-AI 24 倉二次驗證）。所有檢索 repos 均已在 #106–#116 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 >
