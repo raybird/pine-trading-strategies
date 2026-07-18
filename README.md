@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0718.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0719.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0718.1830 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0719.0630 更新） |
 
+
+> **最新加入（v26.0719.0630）**: 獵頭審計 #121 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+21 個儲存庫）。新檢索 repos: jayadevrana/pinescript-fractal-memory-projection 為 library() 實體（FractalMemoryLib），無獨立 strategy() 實體無移植價值；jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy 含 Contra Pivot SuperTrend v6 strategy() 實體（Pivot Point Supertrend Fade + ORB/ADX/EMA 多層過濾 + 金字塔加倉 + ATR 風控），但其核心邏輯（Pivot Point Supertrend 反轉 fade）已由 TnSovereignReversalEngineV6、TnSovereignSupertrendV6、TnSovereignPDHPDLFadeV6 等策略全面覆蓋，無移植價值。所有其餘檢索 repos（jayadevrana/tradingview-pine-agent、piazzolimichele1/_04_Pinescript-V6、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、kierbica/pinescriptv6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert 等）均已在 #101–#120 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面僅列出 indicator() 實體（Account Guardian 為 indicator() 非 strategy），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0718.1830）**: 獵頭審計 #120 — GitHub 全數檢索（跨 2 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"strategy(" "pinescript" "v6"`，確認 66 個儲存庫）。新檢索 repos: damianpitt/capital41-indicators 含 Fusion_Core_Strategy_v3.pine/strategies/Capital41_Duo 等 strategy() 實體，但其邏輯（EMA + RSI + W%R + ATR 多因子匯流）已由 TnSovereignMultiConfluenceV6 等策略覆蓋；vuyiswah/trading-strategy 含 PMCS_v2.pine（Pro Multi-Confluence Strategy v2.0）同為多因子匯流已在現有策略集中覆蓋；QuantForgeHQ/pinescript-portfolio 先前已於 #109 審計覆蓋；jayadevrana/tradingview-pine-agent 含 strategy-clean.pine/strategy-webhook-alerts.pine 模板但為基礎教育樣板無移植價值；NerifTrade/pine-strategy-audit 為 Node.js 審計工具非策略實體；piazzolimichele1/_04_Pinescript-V6 之 Ichimoku 策略先前已於 #107 審計覆蓋；traderboj8-lang/pine-script-engines 僅 README 無 .pine 實體。TradingView 社群持續受 Cloudflare 阻擋無法直接存取；web search 顯示 pine-script-v6 頁面無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
