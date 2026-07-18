@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0718.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0718.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0718.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0718.1830 更新） |
 
+
+> **最新加入（v26.0718.1830）**: 獵頭審計 #120 — GitHub 全數檢索（跨 2 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"strategy(" "pinescript" "v6"`，確認 66 個儲存庫）。新檢索 repos: damianpitt/capital41-indicators 含 Fusion_Core_Strategy_v3.pine/strategies/Capital41_Duo 等 strategy() 實體，但其邏輯（EMA + RSI + W%R + ATR 多因子匯流）已由 TnSovereignMultiConfluenceV6 等策略覆蓋；vuyiswah/trading-strategy 含 PMCS_v2.pine（Pro Multi-Confluence Strategy v2.0）同為多因子匯流已在現有策略集中覆蓋；QuantForgeHQ/pinescript-portfolio 先前已於 #109 審計覆蓋；jayadevrana/tradingview-pine-agent 含 strategy-clean.pine/strategy-webhook-alerts.pine 模板但為基礎教育樣板無移植價值；NerifTrade/pine-strategy-audit 為 Node.js 審計工具非策略實體；piazzolimichele1/_04_Pinescript-V6 之 Ichimoku 策略先前已於 #107 審計覆蓋；traderboj8-lang/pine-script-engines 僅 README 無 .pine 實體。TradingView 社群持續受 Cloudflare 阻擋無法直接存取；web search 顯示 pine-script-v6 頁面無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0718.0630）**: 獵頭審計 #119 — GitHub 全數檢索（跨 2 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"`，確認 9+3 個儲存庫）。所有檢索 repos 均已在 #106–#118 審計中覆蓋，無全新 strategy() 實體。新出現 `jayadevrana/tradingview-pine-agent` 為 MCP agent engine（非策略實體，僅含基礎模板）。TradingView 社群 pine-script-v6 頁面仍為 2 枚指標（Account Guardian 為 indicator() 非 strategy 實體、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
