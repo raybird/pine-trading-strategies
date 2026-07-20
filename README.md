@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0719.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0720.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0719.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0720.1830 更新） |
 
+
+> **最新加入（v26.0720.1830）**: 獵頭審計 #122 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫）。所有檢索 repos（jayadevrana/pinescript-fractal-memory-projection、jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy、piazzolimichele1/_04_Pinescript-V6、jayadevrana/tradingview-pine-agent、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、kierbica/pinescriptv6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert 等）均已在 #101–#121 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面僅列出 2 枚 indicator() 實體（Account Guardian 為 indicator() 非 strategy、Smart Weekly Lines 為工具指標），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0719.0630）**: 獵頭審計 #121 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+21 個儲存庫）。新檢索 repos: jayadevrana/pinescript-fractal-memory-projection 為 library() 實體（FractalMemoryLib），無獨立 strategy() 實體無移植價值；jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy 含 Contra Pivot SuperTrend v6 strategy() 實體（Pivot Point Supertrend Fade + ORB/ADX/EMA 多層過濾 + 金字塔加倉 + ATR 風控），但其核心邏輯（Pivot Point Supertrend 反轉 fade）已由 TnSovereignReversalEngineV6、TnSovereignSupertrendV6、TnSovereignPDHPDLFadeV6 等策略全面覆蓋，無移植價值。所有其餘檢索 repos（jayadevrana/tradingview-pine-agent、piazzolimichele1/_04_Pinescript-V6、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、kierbica/pinescriptv6、AleeexTk/TradingView-SMC-EPOS、FaustoS88/Pydantic-AI-Pinescript-Expert 等）均已在 #101–#120 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面僅列出 indicator() 實體（Account Guardian 為 indicator() 非 strategy），無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
