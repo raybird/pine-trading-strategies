@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0721.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0721.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0721.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0721.1830 更新） |
 
+
+> **最新加入（v26.0721.1830）**: 獵頭審計 #124 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫，跨 3 頁檢索）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、jayadevrana/pinescript-fractal-memory-projection、jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy、piazzolimichele1/_04_Pinescript-V6、jayadevrana/tradingview-pine-agent、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、ggamer5555/Pinescript-v6-strategy-with-Json-Webhook-output-example、JoelPasapera/Strategies-in-Pine-Script-v6、kierbica/pinescriptv6、AleeexTk/TradingView-SMC-EPOS、jonathanpratt5564/crypto_darvas_pinescript、Capitalpro123/StrategyA_Marketstructure、Capitalpro123/StrategyA_ichimoku、Capitalpro123/StrategyA_Engulfing、sametbarbaros-dev/PineScript-Architect、JackSmack1971/traderjack-pinescript-v6-sripts、hamedator/advanced-pinescript-strategy-v6）均已在 #101–#123 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚 indicator() 實體（Account Guardian / Smart Weekly Lines）無 strategy() 實體。維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0721.0630）**: 獵頭審計 #123 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫，跨頁檢索）。新檢索 repos: JackSmack1971/traderjack-pinescript-v6-sripts 為 indicators 集合（Hidden Hand Pro + multi-symbol dashboard）無 strategy() 實體；hamedator/advanced-pinescript-strategy-v6 為 dummy demo（EMA+RSI+ATR 基礎邏輯）已由 TnSovereignMultiConfluenceV6 等策略覆蓋；sametbarbaros-dev/PineScript-Architect 為 AI Studio 工具（React/Gemini）非策略實體；Capitalpro123/StrategyA_Engulfing 為吞噬 K 線策略（Engulfing + EMA 100 + session/daylight）已由 TnSovereignReversalEngineV6 等策略覆蓋；Capitalpro123/StrategyA_Marketstructure 為 BOS/CHOC + Ichimoku + EMA 結構策略已由 tn_sovereign_ict_smc_v6、tn_sovereign_ichimoku_v6 等策略覆蓋。所有其餘檢索 repos 均已在 #101–#122 審計中覆蓋，無全新 strategy() 實體；維持 163 策略物理對位；Dashboard 同步更新
 
