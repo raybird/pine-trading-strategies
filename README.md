@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0722.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0722.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0722.0630 更新） |
+| **Total** | **163** | 主權策略矩陣（v26.0722.1830 更新） |
 
+
+> **最新加入（v26.0722.1830）**: 獵頭審計 #126 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、jayadevrana/pinescript-fractal-memory-projection、jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy、piazzolimichele1/_04_Pinescript-V6、jayadevrana/tradingview-pine-agent、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、AleeexTk/TradingView-SMC-EPOS 等）均已在 #101–#125 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚 indicator() 實體（Account Guardian / Smart Weekly Lines）無 strategy() 實體。維持 163 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0722.0630）**: 獵頭審計 #125 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫，跨頁檢索）。所有檢索 repos 均已在 #101–#124 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚 indicator() 實體（Account Guardian / Smart Weekly Lines）無 strategy() 實體。維持 163 策略物理對位；Dashboard 同步更新
 
