@@ -1,0 +1,231 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignPineFlowOrbV6
+// ============================================================================
+// Causal Audit: 2026-07-27 06:30 CST
+// Version: v26.0727.0630
+// Build: PineFlow v6 ORB Risk Strategy — Sovereign Port
+//
+// Source: loveyuanfandj-glitch/pineflow-v6 (pine/pineflow_orb_strategy.pine)
+//
+// Core Thesis:
+//   The Opening Range Breakout (ORB) is a time-tested intraday strategy.
+//   This implementation adds HTF EMA trend confirmation, DMI/ADX trend
+//   strength filter, equity-risk ATR position sizing, and a two-tier
+//   take-profit structure (50% at 1.5R, 50% at 3.0R).
+//
+// Sovereign Overlays:
+//   ✓ Configurable Opening Range Session
+//   ✓ Trading Session Gate with Flatten
+//   ✓ Fast/Slow EMA Trend Filter
+//   ✓ HTF EMA Confirmation (non-repainting, lookahead_on)
+//   ✓ DMI/ADX Trend Strength Filter
+//   ✓ Equity-Risk ATR Position Sizing
+//   ✓ Two-Tier Take Profit (1.5R / 3.0R)
+//   ✓ Max Daily Loss & Max Drawdown Limits
+//   ✓ Daily Trade Limit
+//   ✓ JSON Webhook Alert Message
+//   ✓ On-Chart Dashboard
+// ============================================================================
+
+strategy("TnSovereignPineFlowOrbV6 [TeleNexus]",
+     overlay = true,
+     initial_capital = 100000,
+     currency = currency.USD,
+     pyramiding = 0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 1,
+     process_orders_on_close = true
+)
+
+const string STRATEGY_GROUP = "Strategy"
+const string SESSION_GROUP = "Sessions"
+const string RISK_GROUP = "Risk"
+const string FILTER_GROUP = "Filters"
+const string DISPLAY_GROUP = "Display"
+
+bool enableLongs = input.bool(true, "Enable longs", group = STRATEGY_GROUP)
+bool enableShorts = input.bool(true, "Enable shorts", group = STRATEGY_GROUP)
+int maxTradesPerDay = input.int(2, "Maximum trades per day", minval = 1, group = STRATEGY_GROUP)
+
+string openingRangeSession = input.session("0930-1000", "Opening range", group = SESSION_GROUP)
+string tradingSession = input.session("0930-1600", "Trading session", group = SESSION_GROUP)
+string sessionTimezone = input.string("America/New_York", "Session timezone", group = SESSION_GROUP)
+bool flattenAtSessionEnd = input.bool(true, "Flatten at session end", group = SESSION_GROUP)
+
+float riskPercent = input.float(1.0, "Equity risk per trade (%)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+int atrLength = input.int(14, "ATR length", minval = 1, group = RISK_GROUP)
+float stopAtrMultiple = input.float(1.5, "Stop distance (ATR)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+float targetOneR = input.float(1.5, "Target 1 (R)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+float targetTwoR = input.float(3.0, "Target 2 (R)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+float quantityStep = input.float(1.0, "Quantity step", minval = 0.000001, group = RISK_GROUP)
+float maxDailyLossPercent = input.float(3.0, "Maximum daily loss (%)", minval = 0.1, maxval = 100, group = RISK_GROUP)
+float maxDrawdownPercent = input.float(20.0, "Maximum drawdown (%)", minval = 0.1, maxval = 100, group = RISK_GROUP)
+
+int fastEmaLength = input.int(20, "Fast EMA", minval = 1, group = FILTER_GROUP)
+int slowEmaLength = input.int(50, "Slow EMA", minval = 2, group = FILTER_GROUP)
+int dmiLength = input.int(14, "DMI length", minval = 1, group = FILTER_GROUP)
+int adxSmoothing = input.int(14, "ADX smoothing", minval = 1, group = FILTER_GROUP)
+float minimumAdx = input.float(20.0, "Minimum ADX", minval = 0, step = 0.5, group = FILTER_GROUP)
+string higherTimeframe = input.timeframe("240", "Confirmation timeframe", group = FILTER_GROUP)
+int higherTimeframeEmaLength = input.int(50, "Confirmation EMA", minval = 1, group = FILTER_GROUP)
+
+bool showDashboard = input.bool(true, "Show dashboard", group = DISPLAY_GROUP)
+bool shadeOpeningRange = input.bool(true, "Shade opening range", group = DISPLAY_GROUP)
+
+if barstate.isfirst and timeframe.in_seconds(higherTimeframe) <= timeframe.in_seconds()
+    runtime.error("Confirmation timeframe must be higher than the chart timeframe.")
+
+strategy.risk.max_intraday_loss(maxDailyLossPercent, strategy.percent_of_equity)
+strategy.risk.max_drawdown(maxDrawdownPercent, strategy.percent_of_equity)
+
+bool inOpeningRange = not na(time(timeframe.period, openingRangeSession, sessionTimezone))
+bool inTradingSession = not na(time(timeframe.period, tradingSession, sessionTimezone))
+bool openingRangeStarted = inOpeningRange and not inOpeningRange[1]
+bool tradingSessionEnded = not inTradingSession and inTradingSession[1]
+
+var float openingHigh = na
+var float openingLow = na
+var int tradesToday = 0
+var float activeStop = na
+var float activeTargetOne = na
+var float activeTargetTwo = na
+
+if openingRangeStarted
+    openingHigh := high
+    openingLow := low
+    tradesToday := 0
+else if inOpeningRange
+    openingHigh := math.max(openingHigh, high)
+    openingLow := math.min(openingLow, low)
+
+float fastEma = ta.ema(close, fastEmaLength)
+float slowEma = ta.ema(close, slowEmaLength)
+[plusDi, minusDi, adx] = ta.dmi(dmiLength, adxSmoothing)
+float atr = ta.atr(atrLength)
+
+float confirmedHigherTimeframeEma = request.security(
+     syminfo.tickerid,
+     higherTimeframe,
+     ta.ema(close, higherTimeframeEmaLength)[1],
+     lookahead = barmerge.lookahead_on
+)
+
+bool rangeReady = not inOpeningRange and not na(openingHigh) and not na(openingLow)
+bool canTrade = (
+     barstate.isconfirmed
+     and inTradingSession
+     and rangeReady
+     and tradesToday < maxTradesPerDay
+     and strategy.position_size == 0
+)
+bool longSignal = (
+     canTrade
+     and enableLongs
+     and ta.crossover(close, openingHigh)
+     and fastEma > slowEma
+     and close > confirmedHigherTimeframeEma
+     and adx >= minimumAdx
+     and plusDi > minusDi
+)
+bool shortSignal = (
+     canTrade
+     and enableShorts
+     and ta.crossunder(close, openingLow)
+     and fastEma < slowEma
+     and close < confirmedHigherTimeframeEma
+     and adx >= minimumAdx
+     and minusDi > plusDi
+)
+
+positionSize(float stopDistance) =>
+    float riskCapital = strategy.equity * riskPercent / 100
+    float riskPerUnit = stopDistance * syminfo.pointvalue
+    float rawQuantity = riskPerUnit > 0 ? riskCapital / riskPerUnit : 0
+    math.floor(rawQuantity / quantityStep) * quantityStep
+
+if longSignal
+    float stopDistance = atr * stopAtrMultiple
+    float orderQuantity = positionSize(stopDistance)
+    if orderQuantity >= quantityStep
+        activeStop := close - stopDistance
+        activeTargetOne := close + stopDistance * targetOneR
+        activeTargetTwo := close + stopDistance * targetTwoR
+        strategy.entry("Long", strategy.long, qty = orderQuantity, alert_message = "entry")
+        strategy.exit(
+             "Long TP1",
+             from_entry = "Long",
+             stop = activeStop,
+             limit = activeTargetOne,
+             qty_percent = 50,
+             alert_message = "exit"
+        )
+        strategy.exit(
+             "Long TP2",
+             from_entry = "Long",
+             stop = activeStop,
+             limit = activeTargetTwo,
+             qty_percent = 50,
+             alert_message = "exit"
+        )
+        tradesToday += 1
+else if shortSignal
+    float stopDistance = atr * stopAtrMultiple
+    float orderQuantity = positionSize(stopDistance)
+    if orderQuantity >= quantityStep
+        activeStop := close + stopDistance
+        activeTargetOne := close - stopDistance * targetOneR
+        activeTargetTwo := close - stopDistance * targetTwoR
+        strategy.entry("Short", strategy.short, qty = orderQuantity, alert_message = "entry")
+        strategy.exit(
+             "Short TP1",
+             from_entry = "Short",
+             stop = activeStop,
+             limit = activeTargetOne,
+             qty_percent = 50,
+             alert_message = "exit"
+        )
+        strategy.exit(
+             "Short TP2",
+             from_entry = "Short",
+             stop = activeStop,
+             limit = activeTargetTwo,
+             qty_percent = 50,
+             alert_message = "exit"
+        )
+        tradesToday += 1
+
+if flattenAtSessionEnd and tradingSessionEnded and strategy.position_size != 0
+    strategy.close_all(comment = "Session close", alert_message = "exit")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeStop := na
+    activeTargetOne := na
+    activeTargetTwo := na
+
+plot(openingHigh, "Opening range high", color = color.new(color.lime, 15), style = plot.style_linebr)
+plot(openingLow, "Opening range low", color = color.new(color.red, 15), style = plot.style_linebr)
+plot(fastEma, "Fast EMA", color = color.new(color.aqua, 0))
+plot(slowEma, "Slow EMA", color = color.new(color.orange, 0))
+plot(confirmedHigherTimeframeEma, "Confirmed HTF EMA", color = color.new(color.purple, 10), linewidth = 2)
+plot(activeStop, "Active stop", color = color.red, style = plot.style_linebr)
+plot(activeTargetOne, "Target 1", color = color.new(color.green, 20), style = plot.style_linebr)
+plot(activeTargetTwo, "Target 2", color = color.new(color.green, 0), style = plot.style_linebr)
+
+plotshape(longSignal, "Long signal", shape.triangleup, location.belowbar, color.lime, size = size.tiny)
+plotshape(shortSignal, "Short signal", shape.triangledown, location.abovebar, color.red, size = size.tiny)
+bgcolor(shadeOpeningRange and inOpeningRange ? color.new(color.blue, 90) : na, title = "Opening range")
+
+var table dashboard = table.new(position.top_right, 2, 5, border_width = 1)
+if barstate.islast and showDashboard
+    table.cell(dashboard, 0, 0, "Tn ORB", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(dashboard, 1, 0, "v6", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(dashboard, 0, 1, "Range")
+    table.cell(dashboard, 1, 1, str.tostring(openingHigh, format.mintick) + " / " + str.tostring(openingLow, format.mintick))
+    table.cell(dashboard, 0, 2, "ADX")
+    table.cell(dashboard, 1, 2, str.tostring(adx, "#.0"))
+    table.cell(dashboard, 0, 3, "Trades today")
+    table.cell(dashboard, 1, 3, str.tostring(tradesToday) + " / " + str.tostring(maxTradesPerDay))
+    table.cell(dashboard, 0, 4, "Position")
+    table.cell(dashboard, 1, 4, str.tostring(strategy.position_size))

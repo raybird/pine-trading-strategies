@@ -1,0 +1,345 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignPineFlowIctFvgV6
+// ============================================================================
+// Causal Audit: 2026-07-27 06:30 CST
+// Version: v26.0727.0630
+// Build: PineFlow v6 ICT FVG Liquidity Model — Sovereign Port
+//
+// Source: loveyuanfandj-glitch/pineflow-v6 (pine/pineflow_ict_fvg_strategy.pine)
+//
+// Core Thesis:
+//   A deterministic three-layer ICT execution model that operates on a
+//   hierarchical timeframe stack: 4H (context/bias/FVG) → 15m (setup/
+//   confirmation) → 1m (trigger/execution). Each layer must independently
+//   confirm before a signal fires.
+//
+// Sovereign Overlays:
+//   ✓ Layer 1 (4H): EMA bias + expansion/pullback phase + FVG detection
+//   ✓ Layer 2 (15m): FVG touch + sell-side/buy-side liquidity sweep + FVG
+//     formation + MSS/CISD confirmation
+//   ✓ Layer 3 (1m): Zone retrace, liquidity sweep, FVG, MSS/CISD
+//   ✓ Expiry System — setup & trigger candidates expire after N minutes
+//   ✓ Equity-Risk ATR Position Sizing
+//   ✓ Liquidity Sweep-Based or Fallback ATR Stop
+//   ✓ Swing High/Low or Fallback ATR Target
+//   ✓ Max Daily Loss & Max Drawdown Limits
+//   ✓ Daily Trade Limit
+//   ✓ Layer-State Dashboard
+// ============================================================================
+
+strategy("TnSovereignPineFlowIctFvgV6 [TeleNexus]",
+     overlay = true,
+     initial_capital = 100000,
+     currency = currency.USD,
+     pyramiding = 0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 1,
+     process_orders_on_close = true
+)
+
+const string CONTEXT_GROUP = "ICT context"
+const string TRIGGER_GROUP = "Entry model"
+const string RISK_GROUP = "Risk"
+const string SESSION_GROUP = "Session"
+const string DISPLAY_GROUP = "Display"
+
+string contextTimeframe = input.timeframe("240", "Context / FVG timeframe", group = CONTEXT_GROUP)
+string setupTimeframe = input.timeframe("15", "Setup timeframe", group = CONTEXT_GROUP)
+int contextEmaLength = input.int(50, "4H bias EMA", minval = 2, group = CONTEXT_GROUP)
+int setupPivotLength = input.int(3, "15m liquidity pivot strength", minval = 1, group = CONTEXT_GROUP)
+float displacementAtrMultiple = input.float(0.8, "Displacement body (ATR)", minval = 0.1, step = 0.1, group = CONTEXT_GROUP)
+int setupExpiryMinutes = input.int(240, "4H touch setup expiry (minutes)", minval = 15, group = CONTEXT_GROUP)
+
+bool enableLongs = input.bool(true, "Enable longs", group = TRIGGER_GROUP)
+bool enableShorts = input.bool(true, "Enable shorts", group = TRIGGER_GROUP)
+int triggerPivotLength = input.int(3, "1m liquidity pivot strength", minval = 1, group = TRIGGER_GROUP)
+int triggerExpiryMinutes = input.int(90, "15m confirmation expiry (minutes)", minval = 5, group = TRIGGER_GROUP)
+int maxTradesPerDay = input.int(2, "Maximum trades per day", minval = 1, group = TRIGGER_GROUP)
+
+float riskPercent = input.float(0.5, "Equity risk per trade (%)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+int atrLength = input.int(14, "ATR length", minval = 1, group = RISK_GROUP)
+float fallbackStopAtr = input.float(1.5, "Fallback stop (ATR)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+float fallbackTargetR = input.float(2.0, "Fallback target (R)", minval = 0.1, step = 0.1, group = RISK_GROUP)
+float quantityStep = input.float(0.001, "Quantity step", minval = 0.000001, group = RISK_GROUP)
+float maxDailyLossPercent = input.float(2.0, "Maximum daily loss (%)", minval = 0.1, maxval = 100, group = RISK_GROUP)
+float maxDrawdownPercent = input.float(15.0, "Maximum drawdown (%)", minval = 0.1, maxval = 100, group = RISK_GROUP)
+
+string tradingSession = input.session("0000-2359", "Trading session", group = SESSION_GROUP)
+string sessionTimezone = input.string("Etc/UTC", "Session timezone", group = SESSION_GROUP)
+bool flattenAtSessionEnd = input.bool(false, "Flatten at session end", group = SESSION_GROUP)
+
+bool showContextZones = input.bool(true, "Show 4H FVG", group = DISPLAY_GROUP)
+bool showSetupZone = input.bool(true, "Show confirmed 15m FVG", group = DISPLAY_GROUP)
+bool showDashboard = input.bool(true, "Show state dashboard", group = DISPLAY_GROUP)
+
+if barstate.isfirst and timeframe.in_seconds() != 60
+    runtime.error("Run the ICT execution model on a 1-minute chart.")
+if barstate.isfirst and timeframe.in_seconds(setupTimeframe) <= timeframe.in_seconds()
+    runtime.error("The setup timeframe must be higher than the chart timeframe.")
+if barstate.isfirst and timeframe.in_seconds(contextTimeframe) <= timeframe.in_seconds(setupTimeframe)
+    runtime.error("The context timeframe must be higher than the setup timeframe.")
+
+strategy.risk.max_intraday_loss(maxDailyLossPercent, strategy.percent_of_equity)
+strategy.risk.max_drawdown(maxDrawdownPercent, strategy.percent_of_equity)
+
+lastBullishFvgLower() =>
+    ta.valuewhen(low > high[2], high[2], 0)[1]
+
+lastBullishFvgUpper() =>
+    ta.valuewhen(low > high[2], low, 0)[1]
+
+lastBearishFvgLower() =>
+    ta.valuewhen(high < low[2], high, 0)[1]
+
+lastBearishFvgUpper() =>
+    ta.valuewhen(high < low[2], low[2], 0)[1]
+
+lastPivotHigh(int strength) =>
+    float pivot = ta.pivothigh(high, strength, strength)
+    ta.valuewhen(not na(pivot), pivot, 0)[1]
+
+lastPivotLow(int strength) =>
+    float pivot = ta.pivotlow(low, strength, strength)
+    ta.valuewhen(not na(pivot), pivot, 0)[1]
+
+lastBearishDisplacementOpen(float atrMultiple) =>
+    float body = math.abs(close - open)
+    ta.valuewhen(close < open and body >= ta.atr(14) * atrMultiple, open, 0)[1]
+
+lastBullishDisplacementOpen(float atrMultiple) =>
+    float body = math.abs(close - open)
+    ta.valuewhen(close > open and body >= ta.atr(14) * atrMultiple, open, 0)[1]
+
+float contextOpen = request.security(syminfo.tickerid, contextTimeframe, open[1], lookahead = barmerge.lookahead_on)
+float contextClose = request.security(syminfo.tickerid, contextTimeframe, close[1], lookahead = barmerge.lookahead_on)
+float contextPreviousHigh = request.security(syminfo.tickerid, contextTimeframe, high[2], lookahead = barmerge.lookahead_on)
+float contextPreviousLow = request.security(syminfo.tickerid, contextTimeframe, low[2], lookahead = barmerge.lookahead_on)
+float contextEma = request.security(syminfo.tickerid, contextTimeframe, ta.ema(close, contextEmaLength)[1], lookahead = barmerge.lookahead_on)
+float contextBullFvgLower = request.security(syminfo.tickerid, contextTimeframe, lastBullishFvgLower(), lookahead = barmerge.lookahead_on)
+float contextBullFvgUpper = request.security(syminfo.tickerid, contextTimeframe, lastBullishFvgUpper(), lookahead = barmerge.lookahead_on)
+float contextBearFvgLower = request.security(syminfo.tickerid, contextTimeframe, lastBearishFvgLower(), lookahead = barmerge.lookahead_on)
+float contextBearFvgUpper = request.security(syminfo.tickerid, contextTimeframe, lastBearishFvgUpper(), lookahead = barmerge.lookahead_on)
+
+bool bullishContext = contextClose > contextEma
+bool bearishContext = contextClose < contextEma
+bool bullishExpansion = bullishContext and contextClose > contextPreviousHigh
+bool bearishExpansion = bearishContext and contextClose < contextPreviousLow
+string contextPhase = bullishExpansion ? "Bull expansion" : bearishExpansion ? "Bear expansion" : contextClose >= contextOpen ? "Bull pullback" : "Bear pullback"
+
+bool newSetupBar = ta.change(time(setupTimeframe)) != 0
+float setupHigh = request.security(syminfo.tickerid, setupTimeframe, high[1], lookahead = barmerge.lookahead_on)
+float setupLow = request.security(syminfo.tickerid, setupTimeframe, low[1], lookahead = barmerge.lookahead_on)
+float setupClose = request.security(syminfo.tickerid, setupTimeframe, close[1], lookahead = barmerge.lookahead_on)
+float setupPreviousClose = request.security(syminfo.tickerid, setupTimeframe, close[2], lookahead = barmerge.lookahead_on)
+float setupSwingHigh = request.security(syminfo.tickerid, setupTimeframe, lastPivotHigh(setupPivotLength), lookahead = barmerge.lookahead_on)
+float setupSwingLow = request.security(syminfo.tickerid, setupTimeframe, lastPivotLow(setupPivotLength), lookahead = barmerge.lookahead_on)
+float setupBearishOpen = request.security(syminfo.tickerid, setupTimeframe, lastBearishDisplacementOpen(displacementAtrMultiple), lookahead = barmerge.lookahead_on)
+float setupBullishOpen = request.security(syminfo.tickerid, setupTimeframe, lastBullishDisplacementOpen(displacementAtrMultiple), lookahead = barmerge.lookahead_on)
+bool setupBullFvgFormed = request.security(syminfo.tickerid, setupTimeframe, low[1] > high[3], lookahead = barmerge.lookahead_on)
+bool setupBearFvgFormed = request.security(syminfo.tickerid, setupTimeframe, high[1] < low[3], lookahead = barmerge.lookahead_on)
+float newSetupBullFvgLower = request.security(syminfo.tickerid, setupTimeframe, high[3], lookahead = barmerge.lookahead_on)
+float newSetupBullFvgUpper = request.security(syminfo.tickerid, setupTimeframe, low[1], lookahead = barmerge.lookahead_on)
+float newSetupBearFvgLower = request.security(syminfo.tickerid, setupTimeframe, high[1], lookahead = barmerge.lookahead_on)
+float newSetupBearFvgUpper = request.security(syminfo.tickerid, setupTimeframe, low[3], lookahead = barmerge.lookahead_on)
+
+bool contextBullZoneTouched = setupLow <= contextBullFvgUpper and setupHigh >= contextBullFvgLower
+bool contextBearZoneTouched = setupHigh >= contextBearFvgLower and setupLow <= contextBearFvgUpper
+bool setupBullLiquiditySweep = setupLow < setupSwingLow and setupClose > setupSwingLow
+bool setupBearLiquiditySweep = setupHigh > setupSwingHigh and setupClose < setupSwingHigh
+bool setupBullMss = setupClose > setupSwingHigh and setupPreviousClose <= setupSwingHigh
+bool setupBearMss = setupClose < setupSwingLow and setupPreviousClose >= setupSwingLow
+bool setupBullCisd = setupClose > setupBearishOpen and setupPreviousClose <= setupBearishOpen
+bool setupBearCisd = setupClose < setupBullishOpen and setupPreviousClose >= setupBullishOpen
+
+var int setupDirection = 0
+var int setupArmedBar = na
+var int triggerDirection = 0
+var int triggerConfirmedBar = na
+var float confirmedSetupFvgLower = na
+var float confirmedSetupFvgUpper = na
+var bool triggerZoneTouched = false
+var bool triggerLiquiditySwept = false
+var float triggerSweepExtreme = na
+var int tradesToday = 0
+var float activeStop = na
+var float activeTarget = na
+
+bool setupTouchSweepLong = false
+bool setupTouchSweepShort = false
+bool setupConfirmedLong = false
+bool setupConfirmedShort = false
+
+if ta.change(time("D")) != 0
+    tradesToday := 0
+
+if not na(setupArmedBar) and bar_index - setupArmedBar > setupExpiryMinutes
+    setupDirection := 0
+    setupArmedBar := na
+
+if not na(triggerConfirmedBar) and bar_index - triggerConfirmedBar > triggerExpiryMinutes
+    triggerDirection := 0
+    triggerConfirmedBar := na
+    triggerZoneTouched := false
+    triggerLiquiditySwept := false
+    triggerSweepExtreme := na
+
+if newSetupBar
+    if bullishContext and contextBullZoneTouched and setupBullLiquiditySweep
+        setupDirection := 1
+        setupArmedBar := bar_index
+        setupTouchSweepLong := true
+    else if bearishContext and contextBearZoneTouched and setupBearLiquiditySweep
+        setupDirection := -1
+        setupArmedBar := bar_index
+        setupTouchSweepShort := true
+
+    if setupDirection == 1 and setupBullFvgFormed and (setupBullMss or setupBullCisd)
+        triggerDirection := 1
+        triggerConfirmedBar := bar_index
+        confirmedSetupFvgLower := newSetupBullFvgLower
+        confirmedSetupFvgUpper := newSetupBullFvgUpper
+        triggerZoneTouched := false
+        triggerLiquiditySwept := false
+        triggerSweepExtreme := na
+        setupDirection := 0
+        setupArmedBar := na
+        setupConfirmedLong := true
+    else if setupDirection == -1 and setupBearFvgFormed and (setupBearMss or setupBearCisd)
+        triggerDirection := -1
+        triggerConfirmedBar := bar_index
+        confirmedSetupFvgLower := newSetupBearFvgLower
+        confirmedSetupFvgUpper := newSetupBearFvgUpper
+        triggerZoneTouched := false
+        triggerLiquiditySwept := false
+        triggerSweepExtreme := na
+        setupDirection := 0
+        setupArmedBar := na
+        setupConfirmedShort := true
+
+float triggerAtr = ta.atr(atrLength)
+float triggerHighPivotValue = ta.pivothigh(high, triggerPivotLength, triggerPivotLength)
+float triggerLowPivotValue = ta.pivotlow(low, triggerPivotLength, triggerPivotLength)
+float triggerPivotHigh = ta.valuewhen(not na(triggerHighPivotValue), triggerHighPivotValue, 0)
+float triggerPivotLow = ta.valuewhen(not na(triggerLowPivotValue), triggerLowPivotValue, 0)
+float triggerBody = math.abs(close - open)
+float triggerBearishOpen = ta.valuewhen(close < open and triggerBody >= triggerAtr * displacementAtrMultiple, open, 0)
+float triggerBullishOpen = ta.valuewhen(close > open and triggerBody >= triggerAtr * displacementAtrMultiple, open, 0)
+bool triggerBullFvgFormed = low > high[2]
+bool triggerBearFvgFormed = high < low[2]
+bool triggerBullMss = ta.crossover(close, triggerPivotHigh)
+bool triggerBearMss = ta.crossunder(close, triggerPivotLow)
+bool triggerBullCisd = ta.crossover(close, triggerBearishOpen)
+bool triggerBearCisd = ta.crossunder(close, triggerBullishOpen)
+
+bool inTradingSession = not na(time(timeframe.period, tradingSession, sessionTimezone))
+bool tradingSessionEnded = not inTradingSession and inTradingSession[1]
+bool canTrade = barstate.isconfirmed and inTradingSession and tradesToday < maxTradesPerDay and strategy.position_size == 0
+bool longSignal = false
+bool shortSignal = false
+
+if triggerDirection == 1
+    if low <= confirmedSetupFvgUpper and high >= confirmedSetupFvgLower
+        triggerZoneTouched := true
+    if triggerZoneTouched and low < triggerPivotLow and close > triggerPivotLow
+        triggerLiquiditySwept := true
+        triggerSweepExtreme := na(triggerSweepExtreme) ? low : math.min(triggerSweepExtreme, low)
+    longSignal := canTrade and enableLongs and triggerLiquiditySwept and triggerBullFvgFormed and (triggerBullMss or triggerBullCisd)
+else if triggerDirection == -1
+    if high >= confirmedSetupFvgLower and low <= confirmedSetupFvgUpper
+        triggerZoneTouched := true
+    if triggerZoneTouched and high > triggerPivotHigh and close < triggerPivotHigh
+        triggerLiquiditySwept := true
+        triggerSweepExtreme := na(triggerSweepExtreme) ? high : math.max(triggerSweepExtreme, high)
+    shortSignal := canTrade and enableShorts and triggerLiquiditySwept and triggerBearFvgFormed and (triggerBearMss or triggerBearCisd)
+
+positionSize(float stopDistance) =>
+    float riskCapital = strategy.equity * riskPercent / 100
+    float riskPerUnit = stopDistance * syminfo.pointvalue
+    float rawQuantity = riskPerUnit > 0 ? riskCapital / riskPerUnit : 0
+    math.floor(rawQuantity / quantityStep) * quantityStep
+
+if longSignal
+    float fallbackStop = close - triggerAtr * fallbackStopAtr
+    activeStop := not na(triggerSweepExtreme) and triggerSweepExtreme < close ? triggerSweepExtreme : fallbackStop
+    float stopDistance = math.max(close - activeStop, syminfo.mintick)
+    activeTarget := setupSwingHigh > close ? setupSwingHigh : close + stopDistance * fallbackTargetR
+    float orderQuantity = positionSize(stopDistance)
+    if orderQuantity >= quantityStep
+        strategy.entry("ICT Long", strategy.long, qty = orderQuantity, alert_message = "entry")
+        strategy.exit("ICT Long Exit", from_entry = "ICT Long", stop = activeStop, limit = activeTarget, alert_message = "exit")
+        tradesToday += 1
+        triggerDirection := 0
+        triggerConfirmedBar := na
+        triggerZoneTouched := false
+        triggerLiquiditySwept := false
+        triggerSweepExtreme := na
+else if shortSignal
+    float fallbackStop = close + triggerAtr * fallbackStopAtr
+    activeStop := not na(triggerSweepExtreme) and triggerSweepExtreme > close ? triggerSweepExtreme : fallbackStop
+    float stopDistance = math.max(activeStop - close, syminfo.mintick)
+    activeTarget := setupSwingLow < close ? setupSwingLow : close - stopDistance * fallbackTargetR
+    float orderQuantity = positionSize(stopDistance)
+    if orderQuantity >= quantityStep
+        strategy.entry("ICT Short", strategy.short, qty = orderQuantity, alert_message = "entry")
+        strategy.exit("ICT Short Exit", from_entry = "ICT Short", stop = activeStop, limit = activeTarget, alert_message = "exit")
+        tradesToday += 1
+        triggerDirection := 0
+        triggerConfirmedBar := na
+        triggerZoneTouched := false
+        triggerLiquiditySwept := false
+        triggerSweepExtreme := na
+
+if flattenAtSessionEnd and tradingSessionEnded and strategy.position_size != 0
+    strategy.close_all(comment = "Session close", alert_message = "exit")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeStop := na
+    activeTarget := na
+
+if setupTouchSweepLong
+    alert("Tn ICT: bullish 4H FVG touch and 15m sell-side sweep", alert.freq_once_per_bar_close)
+if setupTouchSweepShort
+    alert("Tn ICT: bearish 4H FVG touch and 15m buy-side sweep", alert.freq_once_per_bar_close)
+if setupConfirmedLong
+    alert("Tn ICT: bullish 15m FVG with MSS/CISD", alert.freq_once_per_bar_close)
+if setupConfirmedShort
+    alert("Tn ICT: bearish 15m FVG with MSS/CISD", alert.freq_once_per_bar_close)
+
+contextBullLowerPlot = plot(showContextZones and bullishContext ? contextBullFvgLower : na, "4H bullish FVG lower", color = color.new(color.lime, 35), style = plot.style_linebr)
+contextBullUpperPlot = plot(showContextZones and bullishContext ? contextBullFvgUpper : na, "4H bullish FVG upper", color = color.new(color.lime, 35), style = plot.style_linebr)
+contextBearLowerPlot = plot(showContextZones and bearishContext ? contextBearFvgLower : na, "4H bearish FVG lower", color = color.new(color.red, 35), style = plot.style_linebr)
+contextBearUpperPlot = plot(showContextZones and bearishContext ? contextBearFvgUpper : na, "4H bearish FVG upper", color = color.new(color.red, 35), style = plot.style_linebr)
+fill(contextBullLowerPlot, contextBullUpperPlot, color.new(color.lime, 90), title = "4H bullish FVG")
+fill(contextBearLowerPlot, contextBearUpperPlot, color.new(color.red, 90), title = "4H bearish FVG")
+
+setupLowerPlot = plot(showSetupZone and triggerDirection != 0 ? confirmedSetupFvgLower : na, "15m confirmed FVG lower", color = color.new(color.aqua, 20), style = plot.style_linebr)
+setupUpperPlot = plot(showSetupZone and triggerDirection != 0 ? confirmedSetupFvgUpper : na, "15m confirmed FVG upper", color = color.new(color.aqua, 20), style = plot.style_linebr)
+fill(setupLowerPlot, setupUpperPlot, color.new(color.aqua, 88), title = "15m execution FVG")
+
+plot(activeStop, "Active stop", color = color.red, style = plot.style_linebr)
+plot(activeTarget, "Liquidity target", color = color.green, style = plot.style_linebr)
+plotshape(setupTouchSweepLong, "15m long setup armed", shape.circle, location.belowbar, color.yellow, size = size.tiny)
+plotshape(setupTouchSweepShort, "15m short setup armed", shape.circle, location.abovebar, color.yellow, size = size.tiny)
+plotshape(setupConfirmedLong, "15m long confirmation", shape.diamond, location.belowbar, color.aqua, size = size.tiny)
+plotshape(setupConfirmedShort, "15m short confirmation", shape.diamond, location.abovebar, color.aqua, size = size.tiny)
+plotshape(longSignal, "ICT long entry", shape.triangleup, location.belowbar, color.lime, size = size.small)
+plotshape(shortSignal, "ICT short entry", shape.triangledown, location.abovebar, color.red, size = size.small)
+
+string setupState = setupDirection == 1 ? "15m bull armed" : setupDirection == -1 ? "15m bear armed" : "Waiting 4H touch"
+string triggerState = triggerDirection == 1 ? "1m long watch" : triggerDirection == -1 ? "1m short watch" : "Waiting 15m confirm"
+var table dashboard = table.new(position.top_right, 2, 6, border_width = 1)
+if barstate.islast and showDashboard
+    table.cell(dashboard, 0, 0, "Tn ICT", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(dashboard, 1, 0, "v6", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(dashboard, 0, 1, "4H phase")
+    table.cell(dashboard, 1, 1, contextPhase)
+    table.cell(dashboard, 0, 2, "Setup")
+    table.cell(dashboard, 1, 2, setupState)
+    table.cell(dashboard, 0, 3, "Trigger")
+    table.cell(dashboard, 1, 3, triggerState)
+    table.cell(dashboard, 0, 4, "Zone / sweep")
+    table.cell(dashboard, 1, 4, str.tostring(triggerZoneTouched) + " / " + str.tostring(triggerLiquiditySwept))
+    table.cell(dashboard, 0, 5, "Trades")
+    table.cell(dashboard, 1, 5, str.tostring(tradesToday) + " / " + str.tostring(maxTradesPerDay))

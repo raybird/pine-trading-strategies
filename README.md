@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 163 個已實體化主權策略，分 14 大類（v26.0722.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 165 個已實體化主權策略，分 14 大類（v26.0727.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -45,8 +45,8 @@
 | **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 15 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4 |
 | **Mean Reversion & Oscillator** | 17 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸 |
-| **Volatility & Breakout** | 21 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破 |
-| **Market Structure & Price Action** | 32 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回 |
+| **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
+| **Market Structure & Price Action** | 33 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行 |
 | **Volume & Order Flow** | 15 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **163** | 主權策略矩陣（v26.0722.1830 更新） |
+| **Total** | **165** | 主權策略矩陣（v26.0727.0630 更新） |
 
+
+> **最新加入（v26.0727.0630）**: 獵頭審計 #127 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫）。新檢索 repos: loveyuanfandj-glitch/pineflow-v6 含 2 枚 strategy() 實體（ORB Risk Strategy + ICT FVG Liquidity Model），移植為 `TnSovereignPineFlowOrbV6`（ORB + HTF EMA + DMI/ADX + 權益風險 ATR 倉位 + 兩層獲利）與 `TnSovereignPineFlowIctFvgV6`（三層 ICT 執行模型 4H→15m→1m + FVG 階梯確認 + 流動性掃蕩 + MSS/CISD 狀態機）。所有其餘檢索 repos 均在 #101–#126 審計中覆蓋，無其餘全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍無全新 strategy() 實體。維持 165 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0722.1830）**: 獵頭審計 #126 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫）。所有檢索 repos（FaustoS88/Pydantic-AI-Pinescript-Expert、jayadevrana/pinescript-fractal-memory-projection、jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy、piazzolimichele1/_04_Pinescript-V6、jayadevrana/tradingview-pine-agent、monch1962/stratus、QuantForgeHQ/pinescript-portfolio、jayadevrana/pinescript-custom-confluence-futures-strategy-v6、thesenegalesehitch/Pine-Script、Viprasol-Tech/pine-script-strategy、AleeexTk/TradingView-SMC-EPOS 等）均已在 #101–#125 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍為 2 枚 indicator() 實體（Account Guardian / Smart Weekly Lines）無 strategy() 實體。維持 163 策略物理對位；Dashboard 同步更新
 
