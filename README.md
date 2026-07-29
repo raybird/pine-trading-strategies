@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 165 個已實體化主權策略，分 14 大類（v26.0727.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 165 個已實體化主權策略，分 14 大類（v26.0729.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 1 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構） |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **165** | 主權策略矩陣（v26.0727.0630 更新） |
+| **Total** | **165** | 主權策略矩陣（v26.0729.1830 更新） |
 
+
+> **最新加入（v26.0729.1830）**: 獵頭審計 #128 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 18+2+21 個儲存庫，跨頁確認）。新出現 repos: michelepiazzoli/pinescript-v6-strategies 為 piazzolimichele1/Pinescript-V6 之更名延續（含 8 策略：Ichimoku/Engulfing/Market Structure/BOL-BOH/Engulfing Quorters/Engulfing SMA/Ichimoku Quorters/Range Breakout，均已由現有策略集全面覆蓋）；alexhowa53/pinescript-v6-toolkit 已下架為 404 空倉。所有其餘檢索 repos（ggamer5555、JoelPasapera、kierbica、AleeexTk、jonathanpratt5564、sametbarbaros-dev、JackSmack1971、hamedator 等）均已在 #101–#127 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面無全新 strategy() 實體（Session ORBO 為基礎開盤區間突破已覆蓋、Liquidity Maxing 為 BOS/CHoCH/IDM SMC 策略已覆蓋）。維持 165 策略物理對位；Dashboard 同步更新
 
 > **最新加入（v26.0727.0630）**: 獵頭審計 #127 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 21+2+22 個儲存庫）。新檢索 repos: loveyuanfandj-glitch/pineflow-v6 含 2 枚 strategy() 實體（ORB Risk Strategy + ICT FVG Liquidity Model），移植為 `TnSovereignPineFlowOrbV6`（ORB + HTF EMA + DMI/ADX + 權益風險 ATR 倉位 + 兩層獲利）與 `TnSovereignPineFlowIctFvgV6`（三層 ICT 執行模型 4H→15m→1m + FVG 階梯確認 + 流動性掃蕩 + MSS/CISD 狀態機）。所有其餘檢索 repos 均在 #101–#126 審計中覆蓋，無其餘全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面仍無全新 strategy() 實體。維持 165 策略物理對位；Dashboard 同步更新
 
