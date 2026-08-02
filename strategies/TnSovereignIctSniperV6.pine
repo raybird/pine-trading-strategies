@@ -1,0 +1,180 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignIctSniperV6
+// ============================================================================
+// Causal Audit: 2026-08-02 18:30 CST
+// Version: v26.0802.1830
+// Build: Prop Firm ICT Sniper — Survival Mode — Sovereign Port
+//
+// Source: thesenegalesehitch/Pine-Script (pine-scripts/strategies/ict-sniper.pine)
+//
+// Core Thesis:
+//   A prop-firm survival-mode sniper strategy built on ICT concepts. Entries
+//   only fire after a Buy-Side / Sell-Side Liquidity Sweep confirms a
+//   displaced FVG (Fair Value Gap), and the position size is derived from a
+//   risk-first calculation so every trade risks a fixed fraction of equity.
+//
+// Sovereign Overlays:
+//   ✓ Phase-Based Risk Scaling (Phase 1 / Phase 2 tiered % risk)
+//   ✓ Daily Drawdown Protection (daily P&L reset at midnight)
+//   ✓ Equity-Risk Position Sizing (cash risk / stop distance)
+//   ✓ Sweep + FVG Sniper Confluence (BSL/SSL sweep + displaced FVG)
+//   ✓ Dynamic Stop/Target with R:R multiplier
+//   ✓ Survival Dashboard (phase, risk, daily P&L, limit, status)
+// ============================================================================
+
+strategy("TnSovereignIctSniperV6 [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.cash,
+     default_qty_value=1000,
+     currency=currency.USD,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=1,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     max_lines_count=150,
+     max_labels_count=150,
+     max_boxes_count=100,
+     process_orders_on_close=true)
+
+// ── PropFirm 風控參數 ────────────────────────────────────────────────────────
+grpRisk = "⚙️ PropFirm Risk Parameters"
+phase     = input.string("Phase 1", "Phase", options=["Phase 1", "Phase 2"], group=grpRisk)
+initCap   = input.float(1000, "Initial Capital ($)", group=grpRisk)
+riskPh1   = input.float(1.0, "Risk % Trade (Phase 1)", step=0.1, group=grpRisk)
+riskPh2   = input.float(0.5, "Risk % Trade (Phase 2)", step=0.1, group=grpRisk)
+rrRatio   = input.float(3.0, "RR Ratio", step=0.5, group=grpRisk)
+maxDailyLossPh1 = input.float(5.0, "Max Daily Loss % (Phase 1)", group=grpRisk)
+maxDailyLossPh2 = input.float(2.0, "Max Daily Loss % (Phase 2)", group=grpRisk)
+
+// ── Sniper Setup (ICT) ───────────────────────────────────────────────────────
+grpSetup = "🎯 Sniper Setup (ICT)"
+sensitivity = input.int(5, "Swing/Sweep Sensitivity", group=grpSetup)
+minFvgPips  = input.float(3.0, "Min FVG Size (Pips)", group=grpSetup)
+atrLen      = input.int(14, "ATR Length", group=grpSetup)
+dispMult    = input.float(1.5, "Displacement Body (xATR)", step=0.1, group=grpSetup)
+
+// ── 顯示 ─────────────────────────────────────────────────────────────────────
+grpDisp = "🎨 Display"
+showFVG  = input.bool(true, "Show FVG", group=grpDisp)
+showDash = input.bool(true, "Show Dashboard", group=grpDisp)
+
+// ── 動態風險計算 ─────────────────────────────────────────────────────────────
+currentRiskPct = phase == "Phase 1" ? riskPh1 : riskPh2
+maxDailyPct    = phase == "Phase 1" ? maxDailyLossPh1 : maxDailyLossPh2
+
+riskAmount = (strategy.equity * currentRiskPct) / 100
+dailyLossLimit = (initCap * maxDailyPct) / 100
+
+// 每日 P&L 累計（換日重置）
+var float dailyPnl = 0
+if dayofmonth != dayofmonth[1]
+    dailyPnl := 0
+dailyPnl := dailyPnl + (strategy.netprofit - strategy.netprofit[1])
+
+isDailyLimitHit = dailyPnl <= -dailyLossLimit
+
+// ── 市場結構與流動性 (Sweep) ─────────────────────────────────────────────────
+pivotH = ta.pivothigh(high, sensitivity, sensitivity)
+pivotL = ta.pivotlow(low, sensitivity, sensitivity)
+
+var string lastSweep = "NONE"
+
+if not na(pivotH)
+    line.new(bar_index[sensitivity], pivotH, bar_index, pivotH, color=color.new(color.red, 70), style=line.style_dotted)
+if not na(pivotL)
+    line.new(bar_index[sensitivity], pivotL, bar_index, pivotL, color=color.new(color.green, 70), style=line.style_dotted)
+
+if not na(pivotH) and high > pivotH and close < pivotH
+    lastSweep := "BSL"
+if not na(pivotL) and low < pivotL and close > pivotL
+    lastSweep := "SSL"
+
+// ── Displacement & Fair Value Gaps (FVG) ────────────────────────────────────
+atrVal = ta.atr(atrLen)
+
+fvgTop = low < high[2] ? high[2] : na
+fvgBot = high > low[2] ? low[2] : na
+fvgSize = na(fvgTop) or na(fvgBot) ? 0.0 : (fvgTop - fvgBot) / syminfo.mintick
+
+bodySize = math.abs(close - open)
+isFvgBull = close > open and bodySize > atrVal * dispMult and fvgSize > minFvgPips and not na(fvgTop) and not na(fvgBot)
+isFvgBear = close < open and bodySize > atrVal * dispMult and fvgSize > minFvgPips and not na(fvgTop) and not na(fvgBot)
+
+var float bullFvgTop = na
+var float bullFvgBot = na
+var float bearFvgTop = na
+var float bearFvgBot = na
+
+if barstate.isconfirmed and isFvgBull
+    bullFvgTop := fvgTop
+    bullFvgBot := fvgBot
+    if showFVG
+        box.new(bar_index[1], fvgTop, bar_index + 10, fvgBot, border_color=color.new(#089981, 50), bgcolor=color.new(#089981, 85))
+
+if barstate.isconfirmed and isFvgBear
+    bearFvgTop := fvgTop
+    bearFvgBot := fvgBot
+    if showFVG
+        box.new(bar_index[1], fvgTop, bar_index + 10, fvgBot, border_color=color.new(#f23645, 50), bgcolor=color.new(#f23645, 85))
+
+// ── Sniper Entry Logic ───────────────────────────────────────────────────────
+// Condition A+ : Sweep BSL + Bearish FVG => SELL (Risk First)
+condSell = lastSweep == "BSL" and isFvgBear and not na(bearFvgTop) and not na(bearFvgBot) and high <= bearFvgTop and high >= bearFvgBot
+
+// Condition A+ : Sweep SSL + Bullish FVG => BUY
+condBuy  = lastSweep == "SSL" and isFvgBull and not na(bullFvgTop) and not na(bullFvgBot) and low >= bullFvgBot and low <= bullFvgTop
+
+// ── Execution & Position Sizing ──────────────────────────────────────────────
+bool entryPlaced = false
+
+if not isDailyLimitHit and strategy.position_size == 0
+    if condBuy and not entryPlaced
+        slDist = close - bullFvgBot + syminfo.mintick * 5
+        tpDist = slDist * rrRatio
+        qty = slDist > 0 ? riskAmount / slDist : 0.0
+
+        if qty > 0
+            strategy.entry("ICT Long", strategy.long, qty=qty)
+            strategy.exit("Exit Long", "ICT Long", stop=close - slDist, limit=close + tpDist)
+            entryPlaced := true
+
+    if condSell and not entryPlaced
+        slDist = bearFvgTop - close + syminfo.mintick * 5
+        tpDist = slDist * rrRatio
+        qty = slDist > 0 ? riskAmount / slDist : 0.0
+
+        if qty > 0
+            strategy.entry("ICT Short", strategy.short, qty=qty)
+            strategy.exit("Exit Short", "ICT Short", stop=close + slDist, limit=close - tpDist)
+            entryPlaced := true
+
+// ── Alert ────────────────────────────────────────────────────────────────────
+alertcondition(condBuy, title="ICT Sniper BUY", message="Tn ICT Sniper: Buy-side sweep + Bullish FVG")
+alertcondition(condSell, title="ICT Sniper SELL", message="Tn ICT Sniper: Sell-side sweep + Bearish FVG")
+
+// ── Premium Survival Dashboard ───────────────────────────────────────────────
+if showDash and barstate.islast
+    var table dash = table.new(position.top_right, 2, 6, border_width=1, border_color=color.new(color.white, 80), frame_color=color.new(color.white, 80), frame_width=1)
+    bgDark = color.new(#131722, 10)
+    bgHead = color.new(#1e222d, 0)
+
+    table.cell(dash, 0, 0, "PROP FIRM SNIPER", text_color=color.white, bgcolor=bgHead, text_size=size.normal)
+    table.cell(dash, 1, 0, phase, text_color=phase == "Phase 1" ? #089981 : #f23645, bgcolor=bgHead, text_size=size.normal)
+
+    table.cell(dash, 0, 1, "Risk Trade", text_color=color.gray, bgcolor=bgDark, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(currentRiskPct) + "% ($" + str.tostring(riskAmount, "#.##") + ")", text_color=color.white, bgcolor=bgDark, text_size=size.small)
+
+    table.cell(dash, 0, 2, "Day P&L", text_color=color.gray, bgcolor=bgDark, text_size=size.small)
+    table.cell(dash, 1, 2, "$" + str.tostring(dailyPnl, "#.#"), text_color=dailyPnl < 0 ? color.red : #089981, bgcolor=bgDark, text_size=size.small)
+
+    table.cell(dash, 0, 3, "Day Limit", text_color=color.gray, bgcolor=bgDark, text_size=size.small)
+    table.cell(dash, 1, 3, "-$" + str.tostring(dailyLossLimit, "#.#"), text_color=color.red, bgcolor=bgDark, text_size=size.small)
+
+    table.cell(dash, 0, 4, "Status", text_color=color.gray, bgcolor=bgDark, text_size=size.small)
+    table.cell(dash, 1, 4, isDailyLimitHit ? "DAILY LIMIT HIT" : "ACTIVE", text_color=isDailyLimitHit ? color.red : #089981, bgcolor=bgDark, text_size=size.small)
+
+    table.cell(dash, 0, 5, "R:R Target", text_color=color.gray, bgcolor=bgDark, text_size=size.small)
+    table.cell(dash, 1, 5, "1:" + str.tostring(rrRatio), text_color=color.white, bgcolor=bgDark, text_size=size.small)

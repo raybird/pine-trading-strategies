@@ -1,0 +1,360 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignIctM1CrtSniperV6
+// ============================================================================
+// Causal Audit: 2026-08-02 18:30 CST
+// Version: v26.0802.1830
+// Build: ICT/SMC M1 Sniper — CRT + Structure + PI — Sovereign Port
+//
+// Source: thesenegalesehitch/Pine-Script (pine-scripts/strategies/ict-smc-sniper.pine)
+//
+// Core Thesis:
+//   A deterministic M1 sniper engine operating on a hierarchical ICT stack.
+//   CRT (Candle Range Theory) on the higher timeframe establishes the
+//   institutional range; M15 BOS/CHOCH confirms the directional bias; and the
+//   price-interest (PI) engine requires an unmitigated FVG or order block
+//   before the M1 trigger fires into premium/discount zones.
+//
+// Sovereign Overlays:
+//   ✓ CRT (Candle Range Theory) H1 range engine with target projection
+//   ✓ M15 Structure & Swing BOS/CHOCH bias engine
+//   ✓ PI Engine — unmitigated FVG & Order Block arrays
+//   ✓ Premium/Discount zone classification
+//   ✓ ATR volatility filter (displacement confirmation)
+//   ✓ Session gate (London / New York)
+//   ✓ Break-Even management (1R or Sweep trigger)
+//   ✓ State dashboard (CRT / Structure / Zone / Session / Volatility)
+// ============================================================================
+
+strategy("TnSovereignIctM1CrtSniperV6 [TeleNexus]",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=2,
+     currency=currency.USD,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=1,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     max_lines_count=500,
+     max_labels_count=500,
+     max_boxes_count=500,
+     process_orders_on_close=true)
+
+// ── 參數 ─────────────────────────────────────────────────────────────────────
+grpCRT = "1. CRT (Candle Range Theory)"
+tfCrt   = input.timeframe("60", "CRT Timeframe", group=grpCRT)
+showCRT = input.bool(true, "Show CRT Range", group=grpCRT)
+
+grpStr = "2. Structure & Swings"
+tfStr   = input.timeframe("15", "Structure Timeframe", group=grpStr)
+swLen   = input.int(5, "Swing Length", minval=1, group=grpStr)
+showStr = input.bool(true, "Show BOS/CHOCH", group=grpStr)
+
+grpPI = "3. Price Interest (PI) / FVG / OB"
+minFvg  = input.float(2.0, "Min FVG Size (Pips)", group=grpPI)
+showFVG = input.bool(true, "Show FVG", group=grpPI)
+showOB  = input.bool(true, "Show Order Blocks", group=grpPI)
+
+grpPD = "4. Premium / Discount"
+pdType = input.string("CRT Range", "P/D Base", options=["CRT Range", "Swing Range"], group=grpPD)
+showPD = input.bool(true, "Show Premium/Discount", group=grpPD)
+
+grpRisk = "5. Risk Management"
+riskPct = input.float(1.0, "Risk %", step=0.1, group=grpRisk)
+rrRatio = input.float(2.0, "RR Ratio (TP)", step=0.5, group=grpRisk)
+beType  = input.string("1R", "Break Even Trigger", options=["Off", "1R", "Sweep"], group=grpRisk)
+
+grpSess = "6. Sessions"
+useLond = input.bool(true, "London Session", group=grpSess)
+useNY   = input.bool(true, "New York Session", group=grpSess)
+
+grpUI = "7. Interface & Dashboard"
+showDash   = input.bool(true, "Show Dashboard", group=grpUI)
+showLabels = input.bool(true, "Show Entry/SL/TP Labels", group=grpUI)
+
+// ── UDT 記憶架構 ─────────────────────────────────────────────────────────────
+type FVG_BoxData
+    box bx
+    bool is_bull
+    float top
+    float bot
+    bool mitigated
+
+type OB_BoxData
+    box bx
+    bool is_bull
+    float top
+    float bot
+    bool mitigated
+
+type CRT_Data
+    bool is_valid
+    bool is_bull
+    float high
+    float low
+    float mid
+    float target
+
+var crt_state = CRT_Data.new(false, false, na, na, na, na)
+var string m15_bias = "NEUTRAL"
+var string setup_state = "NO_CRT"
+
+var array<FVG_BoxData> fvg_array = array.new<FVG_BoxData>()
+var array<OB_BoxData>  ob_array  = array.new<OB_BoxData>()
+
+// ── 工具函數 ─────────────────────────────────────────────────────────────────
+get_tf_data(tf) =>
+    [h, l, c, o] = request.security(syminfo.tickerid, tf, [high, low, close, open], barmerge.gaps_off, barmerge.lookahead_on)
+    [h[1], l[1], c[1], o[1]]
+
+is_session_active() =>
+    t = time(timeframe.period, "0800-1200:" + (useLond ? "1" : "0") + ";1300-1700:" + (useNY ? "1" : "0"))
+    not na(t)
+
+// ── H1 CRT (Candle Range Theory) ─────────────────────────────────────────────
+[h1_h, h1_l, h1_c, h1_o] = get_tf_data(tfCrt)
+
+if not na(h1_h) and barstate.isconfirmed
+    is_crt_bull = h1_c > h1_o and h1_h < h1_h[1] and h1_l > h1_l[1]
+    is_crt_bear = h1_c < h1_o and h1_h < h1_h[1] and h1_l > h1_l[1]
+
+    if is_crt_bull
+        crt_state := CRT_Data.new(true, true, h1_h[1], h1_l[1], math.avg(h1_h[1], h1_l[1]), h1_h[1] + (h1_h[1] - h1_l[1]))
+        setup_state := "CRT_VALID"
+    else if is_crt_bear
+        crt_state := CRT_Data.new(true, false, h1_h[1], h1_l[1], math.avg(h1_h[1], h1_l[1]), h1_l[1] - (h1_h[1] - h1_l[1]))
+        setup_state := "CRT_VALID"
+    else
+        crt_state := CRT_Data.new(false, false, na, na, na, na)
+        setup_state := "NO_CRT"
+
+if showCRT and crt_state.is_valid and not na(crt_state.high)
+    var box crt_box = na
+    if not na(crt_box)
+        box.delete(crt_box)
+    crt_box := box.new(bar_index - 1, crt_state.high, bar_index, crt_state.low, border_color=crt_state.is_bull ? color.new(#089981, 20) : color.new(#f23645, 20), bgcolor=crt_state.is_bull ? color.new(#089981, 85) : color.new(#f23645, 85))
+    line.new(bar_index - 1, crt_state.mid, bar_index, crt_state.mid, color=color.new(color.white, 50), style=line.style_dotted)
+
+// ── M15 結構與擺動 (BOS/CHOCH) ───────────────────────────────────────────────
+[h15_h, h15_l, h15_c, h15_o] = get_tf_data(tfStr)
+
+pivot_high = ta.pivothigh(h15_h, swLen, swLen)
+pivot_low  = ta.pivotlow(h15_l, swLen, swLen)
+
+var float last_swing_high = na
+var float last_swing_low  = na
+
+if not na(pivot_high)
+    last_swing_high := pivot_high
+if not na(pivot_low)
+    last_swing_low := pivot_low
+
+if not na(h15_c) and barstate.isconfirmed
+    if crt_state.is_valid
+        if crt_state.is_bull and not na(last_swing_high) and h15_c > last_swing_high
+            m15_bias := "BULL"
+            setup_state := "STRUCTURE_VALID"
+        else if not crt_state.is_bull and not na(last_swing_low) and h15_c < last_swing_low
+            m15_bias := "BEAR"
+            setup_state := "STRUCTURE_VALID"
+
+if showStr and not na(pivot_high)
+    label.new(bar_index - swLen, pivot_high, "SH", style=label.style_label_down, color=color.new(#f23645, 50), textcolor=color.white, size=size.tiny)
+if showStr and not na(pivot_low)
+    label.new(bar_index - swLen, pivot_low, "SL", style=label.style_label_up, color=color.new(#089981, 50), textcolor=color.white, size=size.tiny)
+
+// ── PI 引擎：FVG 與 Order Blocks ─────────────────────────────────────────────
+fvg_top    = low[0] < high[2] ? high[2] : na
+fvg_bot    = high[0] > low[2] ? low[2] : na
+fvg_size   = na(fvg_top) or na(fvg_bot) ? 0.0 : (fvg_top - fvg_bot) / syminfo.mintick
+is_fvg_bull = close > open and close[1] > open[1] and fvg_top > fvg_bot and fvg_size > minFvg
+is_fvg_bear = close < open and close[1] < open[1] and fvg_top > fvg_bot and fvg_size > minFvg
+
+var float lastFvgTop = na
+var float lastFvgBot = na
+var bool lastFvgBull = false
+
+if barstate.isconfirmed
+    if is_fvg_bull
+        lastFvgTop := fvg_top
+        lastFvgBot := fvg_bot
+        lastFvgBull := true
+        newFvg = FVG_BoxData.new(showFVG ? box.new(bar_index[1], fvg_top, bar_index + 30, fvg_bot, border_color=color.new(#089981, 40), bgcolor=color.new(#089981, 85)) : na, true, fvg_top, fvg_bot, false)
+        fvg_array.push(newFvg)
+    else if is_fvg_bear
+        lastFvgTop := fvg_top
+        lastFvgBot := fvg_bot
+        lastFvgBull := false
+        newFvg = FVG_BoxData.new(showFVG ? box.new(bar_index[1], fvg_top, bar_index + 30, fvg_bot, border_color=color.new(#f23645, 40), bgcolor=color.new(#f23645, 85)) : na, false, fvg_top, fvg_bot, false)
+        fvg_array.push(newFvg)
+
+// Order Blocks — 以位移 K 線 (impulse) 為基礎
+imp_bull = close > open and (close - open) > ta.atr(14) * 0.5
+imp_bear = close < open and (open - close) > ta.atr(14) * 0.5
+
+var float lastObTop = na
+var float lastObBot = na
+var bool lastObBull = false
+
+if barstate.isconfirmed and imp_bull and close > open and low > low[1]
+    lastObTop := open
+    lastObBot := low
+    lastObBull := true
+    newOb = OB_BoxData.new(showOB ? box.new(bar_index - 1, open, bar_index + 30, low, border_color=color.new(#089981, 40), bgcolor=color.new(#089981, 90)) : na, true, open, low, false)
+    ob_array.push(newOb)
+else if barstate.isconfirmed and imp_bear and close < open and high < high[1]
+    lastObTop := high
+    lastObBot := open
+    lastObBull := false
+    newOb = OB_BoxData.new(showOB ? box.new(bar_index - 1, high, bar_index + 30, open, border_color=color.new(#f23645, 40), bgcolor=color.new(#f23645, 90)) : na, false, high, open, false)
+    ob_array.push(newOb)
+
+// 未接合 (mitigation) 偵測
+for i = 0 to array.size(fvg_array) - 1
+    f = array.get(fvg_array, i)
+    if not f.mitigated and f.is_bull and close > f.top
+        f.mitigated := true
+        if not na(f.bx)
+            box.set_bgcolor(f.bx, color.new(color.gray, 95))
+    if not f.mitigated and not f.is_bull and close < f.bot
+        f.mitigated := true
+        if not na(f.bx)
+            box.set_bgcolor(f.bx, color.new(color.gray, 95))
+
+for i = 0 to array.size(ob_array) - 1
+    o = array.get(ob_array, i)
+    if not o.mitigated and o.is_bull and close < o.bot
+        o.mitigated := true
+        if not na(o.bx)
+            box.set_bgcolor(o.bx, color.new(color.gray, 95))
+    if not o.mitigated and not o.is_bull and close > o.top
+        o.mitigated := true
+        if not na(o.bx)
+            box.set_bgcolor(o.bx, color.new(color.gray, 95))
+
+// ── Premium & Discount ───────────────────────────────────────────────────────
+pd_high = pdType == "CRT Range" ? crt_state.high : last_swing_high
+pd_low  = pdType == "CRT Range" ? crt_state.low  : last_swing_low
+pd_mid  = na(pd_high) or na(pd_low) ? na : math.avg(pd_high, pd_low)
+
+is_discount = not na(pd_mid) ? close < pd_mid : false
+is_premium  = not na(pd_mid) ? close > pd_mid : false
+
+if showPD and not na(pd_mid) and crt_state.is_valid
+    bgcolor(is_discount ? color.new(#089981, 95) : is_premium ? color.new(#f23645, 95) : na)
+
+// ── 波動率過濾 ───────────────────────────────────────────────────────────────
+atrVal = ta.atr(14)
+volFilter = atrVal > ta.sma(atrVal, 50)
+
+// ── M1 狙擊入場邏輯 ─────────────────────────────────────────────────────────
+in_bull_pi() =>
+    res = false
+    if array.size(fvg_array) > 0
+        for i = array.size(fvg_array) - 1 to 0
+            f = array.get(fvg_array, i)
+            if f.is_bull and not f.mitigated and close >= f.bot and close <= f.top
+                res := true
+                break
+    if not res and array.size(ob_array) > 0
+        for i = array.size(ob_array) - 1 to 0
+            o = array.get(ob_array, i)
+            if o.is_bull and not o.mitigated and close >= o.bot and close <= o.top
+                res := true
+                break
+    res
+
+in_bear_pi() =>
+    res = false
+    if array.size(fvg_array) > 0
+        for i = array.size(fvg_array) - 1 to 0
+            f = array.get(fvg_array, i)
+            if not f.is_bull and not f.mitigated and close >= f.bot and close <= f.top
+                res := true
+                break
+    if not res and array.size(ob_array) > 0
+        for i = array.size(ob_array) - 1 to 0
+            o = array.get(ob_array, i)
+            if not o.is_bull and not o.mitigated and close >= o.bot and close <= o.top
+                res := true
+                break
+    res
+
+long_cond  = crt_state.is_valid and crt_state.is_bull and m15_bias == "BULL" and is_discount and in_bull_pi() and imp_bull and volFilter and is_session_active()
+short_cond = crt_state.is_valid and not crt_state.is_bull and m15_bias == "BEAR" and is_premium and in_bear_pi() and imp_bear and volFilter and is_session_active()
+
+// ── 執行、SL、TP 與 Break Even ───────────────────────────────────────────────
+var float active_sl_long = na
+var float active_sl_short = na
+
+if long_cond and strategy.position_size == 0
+    slLong = not na(crt_state.low) and close >= crt_state.low ? crt_state.low : close - atrVal
+    tpLong = close + ((close - slLong) * rrRatio)
+    active_sl_long := slLong
+    strategy.entry("CRT Long", strategy.long)
+    strategy.exit("Exit Long", "CRT Long", stop=slLong, limit=tpLong)
+    if showLabels
+        label.new(bar_index, close, "BUY", style=label.style_label_up, color=color.new(#089981, 0), textcolor=color.white, size=size.normal)
+        label.new(bar_index, slLong, "SL", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.tiny)
+        label.new(bar_index, tpLong, "TP", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.tiny)
+    setup_state := "IN_TRADE"
+
+if short_cond and strategy.position_size == 0
+    slShort = not na(crt_state.high) and close <= crt_state.high ? crt_state.high : close + atrVal
+    tpShort = close - ((slShort - close) * rrRatio)
+    active_sl_short := slShort
+    strategy.entry("CRT Short", strategy.short)
+    strategy.exit("Exit Short", "CRT Short", stop=slShort, limit=tpShort)
+    if showLabels
+        label.new(bar_index, close, "SELL", style=label.style_label_down, color=color.new(#f23645, 0), textcolor=color.white, size=size.normal)
+        label.new(bar_index, slShort, "SL", style=label.style_label_up, color=color.red, textcolor=color.white, size=size.tiny)
+        label.new(bar_index, tpShort, "TP", style=label.style_label_down, color=color.green, textcolor=color.white, size=size.tiny)
+    setup_state := "IN_TRADE"
+
+// Break Even
+if beType != "Off" and strategy.position_size > 0
+    float entry_p = strategy.position_avg_price
+    if not na(active_sl_long)
+        float risk_be = entry_p - active_sl_long
+        if (beType == "1R" and high >= entry_p + risk_be) or (beType == "Sweep" and not na(last_swing_high) and high >= last_swing_high)
+            strategy.exit("BE Long", "CRT Long", stop=entry_p + syminfo.mintick * 5)
+
+if beType != "Off" and strategy.position_size < 0
+    float entry_p = strategy.position_avg_price
+    if not na(active_sl_short)
+        float risk_be = active_sl_short - entry_p
+        if (beType == "1R" and low <= entry_p - risk_be) or (beType == "Sweep" and not na(last_swing_low) and low <= last_swing_low)
+            strategy.exit("BE Short", "CRT Short", stop=entry_p - syminfo.mintick * 5)
+
+// ── Alert ────────────────────────────────────────────────────────────────────
+alertcondition(long_cond, title="BUY SIGNAL", message="Tn CRT Sniper: BUY M1")
+alertcondition(short_cond, title="SELL SIGNAL", message="Tn CRT Sniper: SELL M1")
+alertcondition(crt_state.is_valid and setup_state == "CRT_VALID", title="CRT DETECTED", message="Tn CRT Sniper: New CRT Range")
+alertcondition(m15_bias != "NEUTRAL" and setup_state == "STRUCTURE_VALID", title="STRUCTURE CONFIRMED", message="Tn CRT Sniper: M15 Structure Confirmed")
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+if showDash and barstate.islast
+    var table dash = table.new(position.top_right, 2, 7, border_width=1, border_color=color.new(color.white, 80), frame_color=color.new(color.white, 80), frame_width=1)
+
+    table.cell(dash, 0, 0, "ICT M1 SNIPER", text_color=color.white, bgcolor=color.new(#1e222d, 10), text_size=size.normal)
+    table.cell(dash, 1, 0, setup_state, text_color=setup_state == "IN_TRADE" ? color.gold : color.white, bgcolor=color.new(#1e222d, 10), text_size=size.normal)
+
+    table.cell(dash, 0, 1, "CRT H1", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 1, crt_state.is_valid ? (crt_state.is_bull ? "BULL" : "BEAR") : "NONE", text_color=crt_state.is_valid ? color.white : color.red, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+
+    table.cell(dash, 0, 2, "STRUCT M15", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 2, m15_bias, text_color=m15_bias == "BULL" ? #089981 : m15_bias == "BEAR" ? #f23645 : color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+
+    table.cell(dash, 0, 3, "ZONE", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 3, is_discount ? "DISCOUNT" : is_premium ? "PREMIUM" : "EQUILIBRIUM", text_color=is_discount ? #089981 : is_premium ? #f23645 : color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+
+    table.cell(dash, 0, 4, "SESSION", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 4, is_session_active() ? "ACTIVE" : "OFF", text_color=is_session_active() ? #089981 : color.red, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+
+    table.cell(dash, 0, 5, "RR TARGET", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 5, "1:" + str.tostring(rrRatio), text_color=color.white, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+
+    table.cell(dash, 0, 6, "VOLATILITY", text_color=color.gray, bgcolor=color.new(#1e222d, 20), text_size=size.small)
+    table.cell(dash, 1, 6, volFilter ? "HIGH" : "LOW", text_color=volFilter ? #089981 : color.red, bgcolor=color.new(#1e222d, 20), text_size=size.small)

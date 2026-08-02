@@ -97,7 +97,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignNqOprBreakoutV6` | NQ NY 時段 OPR 突破策略（可配置區間 + RSI/EMA 選擇性過濾 + 擺動止損 + 每日一單止損紀律），移植自 jcornierfra/TradingView_Strategy_JCO_OPR_Breakout |
 | `TnSovereignPineFlowOrbV6` | HTF EMA + DMI/ADX 趨勢強度 ORB 突破（權益風險 ATR 倉位 + 兩層獲利 1.5R/3.0R + 風險限制），移植自 loveyuanfandj-glitch/pineflow-v6 |
 
-## Market Structure & Price Action（市場結構與價格行為，33）
+## Market Structure & Price Action（市場結構與價格行為，34）
 
 | 策略 | 說明 |
 |------|------|
@@ -134,6 +134,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignIBVWAPConfluenceV6` | IB+VWAP 品質評分匯流（10 分制 IB 寬度 + 延伸 + 拒絕 K 線 + VWAP 接近度 + 動態口數），移植自 Prat617/strategic |
 | `TnSovereignGoldIBRetracementV6` | 黃金 IB 突破拉回（IB 範圍 % 過濾 + 突破偵測 + 回撤入場 + 成交量確認），移植自 Prat617/strategic |
 | `TnSovereignPineFlowIctFvgV6` | 三層 ICT 執行模型（4H→15m→1m 確定性 FVG + 流動性掃蕩 + MSS/CISD 階梯確認），移植自 loveyuanfandj-glitch/pineflow-v6 |
+| `TnSovereignIctM1CrtSniperV6` | ICT/SMC M1 狙擊（CRT 範圍 + M15 BOS/CHOCH + 未接合 FVG/OB PI 引擎 + Premium/Discount + Break Even），移植自 thesenegalesehitch/Pine-Script |
 
 ## Volume & Order Flow（成交量與訂單流，15）
 
@@ -211,11 +212,12 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 |------|------|
 | `TnSovereignDcaWebhookV6` | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 輸出（獵取自 ggamer5555） |
 
-## PropFirm / Challenge（自營與挑戰賽，1）
+## PropFirm / Challenge（自營與挑戰賽，2）
 
 | 策略 | 說明 |
 |------|------|
 | `TnSovereignPropFirmUltraV6` | 三層風控自營防禦與完整 SMC 引擎 |
+| `TnSovereignIctSniperV6` | Prop Firm ICT 狙擊生存模式（BSL/SSL 掃蕩 + 位移 FVG + Phase 風險縮放 + 每日虧損保護 + 權益風險倉位），移植自 thesenegalesehitch/Pine-Script |
 
 ## Signal Quality & Fakeout Prevention（信號品質與假突破預防，7）
 
@@ -241,4 +243,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：165（v26.0729.1830 更新）*
+*策略總數：167（v26.0802.1830 更新）*
