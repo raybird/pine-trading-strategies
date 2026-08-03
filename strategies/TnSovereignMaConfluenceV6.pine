@@ -1,0 +1,319 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignMaConfluenceV6
+// ============================================================================
+// Causal Audit: 2026-08-03 19:22 CST
+// Version: v26.0803.1922
+// Build: MA Cross Confluence Edition — Sovereign Port
+//
+// Source: Viprasol-Tech/pine-script-strategy
+//         (src/viprasol_ma_cross_strategy.pine)
+//
+// Core Thesis:
+//   MA crossover core (EMA/SMA/WMA/RMA/HMA selectable) with stackable confluence
+//   filters — higher-timeframe trend EMA (no-lookahead), RSI, ADX, volume and
+//   trading session. Two risk engines (ATR or fixed-percent), an ATR trailing
+//   stop that only tightens, an on-chart stats dashboard and broker/webhook
+//   alert conditions.
+//
+// Sovereign Overlays:
+//   ✓ No-Lookahead HTF Trend EMA (barmerge.lookahead_off)
+//   ✓ Stackable Confluence Gates (Trend / RSI / ADX / Volume / Session)
+//   ✓ Dual Stop/Target Engine (ATR or Percent)
+//   ✓ ATR Trailing Stop (activation + trail, tightens only)
+//   ✓ Stats Dashboard + Full Alert Set
+// ============================================================================
+strategy("TeleNexus Sovereign MA Confluence V6",
+     overlay              = true,
+     initial_capital      = 10000,
+     default_qty_type     = strategy.percent_of_equity,
+     default_qty_value    = 100,
+     commission_type      = strategy.commission.percent,
+     commission_value     = 0.04,
+     slippage             = 1,
+     pyramiding           = 0,
+     calc_on_every_tick   = false,
+     process_orders_on_close = true)
+
+// ---------------------------------------------------------------------------
+// Viprasol palette
+// ---------------------------------------------------------------------------
+var color BULL_COL = color.new(#00ffaa, 0)
+var color BEAR_COL = color.new(#ff3d71, 0)
+var color INK_COL  = color.new(#0b1020, 0)
+var color MUTE_COL = color.new(#8892b0, 0)
+var color GOLD_COL = color.new(#ffd166, 0)
+
+// ---------------------------------------------------------------------------
+// Group labels
+// ---------------------------------------------------------------------------
+var string G_SIG  = "1 - Signal"
+var string G_TREND= "2 - Trend Filter"
+var string G_RSI  = "3 - RSI Filter"
+var string G_ADX  = "4 - ADX Filter"
+var string G_VOL  = "5 - Volume Filter"
+var string G_SESS = "6 - Session Filter"
+var string G_RISK = "7 - Risk / Exits"
+var string G_TRAIL= "8 - Trailing Stop"
+var string G_DIR  = "9 - Direction"
+var string G_UI   = "10 - Dashboard & Visuals"
+
+// ---------------------------------------------------------------------------
+// 1 - Signal inputs
+// ---------------------------------------------------------------------------
+fastLen   = input.int(12, "Fast EMA length", minval = 1, group = G_SIG, tooltip = "Period of the fast EMA used for the crossover trigger.")
+slowLen   = input.int(26, "Slow EMA length", minval = 2, group = G_SIG, tooltip = "Period of the slow EMA used for the crossover trigger.")
+maType    = input.string("EMA", "MA type", options = ["EMA", "SMA", "WMA", "RMA", "HMA"], group = G_SIG, tooltip = "Moving-average algorithm applied to both fast and slow lines.")
+srcInput  = input.source(close, "Signal source", group = G_SIG)
+
+// ---------------------------------------------------------------------------
+// 2 - Trend filter (higher timeframe)
+// ---------------------------------------------------------------------------
+useTrend  = input.bool(true, "Require HTF trend filter", group = G_TREND, tooltip = "Only allow longs above, and shorts below, the higher-timeframe trend EMA.")
+htfTf     = input.timeframe("D", "Higher timeframe", group = G_TREND)
+htfEmaLen = input.int(50, "HTF trend EMA length", minval = 1, group = G_TREND)
+
+// ---------------------------------------------------------------------------
+// 3 - RSI filter
+// ---------------------------------------------------------------------------
+useRsi    = input.bool(false, "Require RSI filter", group = G_RSI, tooltip = "Longs only when RSI is above the long threshold; shorts only when below the short threshold.")
+rsiLen    = input.int(14, "RSI length", minval = 1, group = G_RSI)
+rsiLong   = input.float(50.0, "RSI long threshold (>=)", minval = 0, maxval = 100, group = G_RSI)
+rsiShort  = input.float(50.0, "RSI short threshold (<=)", minval = 0, maxval = 100, group = G_RSI)
+
+// ---------------------------------------------------------------------------
+// 4 - ADX filter (trend strength)
+// ---------------------------------------------------------------------------
+useAdx    = input.bool(false, "Require ADX filter", group = G_ADX, tooltip = "Only trade when ADX (trend strength) is above the threshold.")
+adxLen    = input.int(14, "ADX/DI length", minval = 1, group = G_ADX)
+adxSmooth = input.int(14, "ADX smoothing", minval = 1, group = G_ADX)
+adxMin    = input.float(20.0, "ADX minimum", minval = 0, maxval = 100, group = G_ADX)
+
+// ---------------------------------------------------------------------------
+// 5 - Volume filter
+// ---------------------------------------------------------------------------
+useVol    = input.bool(false, "Require volume filter", group = G_VOL, tooltip = "Only trade when volume is above its moving average times the multiplier.")
+volLen    = input.int(20, "Volume MA length", minval = 1, group = G_VOL)
+volMult   = input.float(1.2, "Volume multiplier", minval = 0.1, step = 0.1, group = G_VOL)
+
+// ---------------------------------------------------------------------------
+// 6 - Session filter
+// ---------------------------------------------------------------------------
+useSess   = input.bool(false, "Restrict to a session", group = G_SESS, tooltip = "Only allow new entries inside the chosen session window.")
+sessSpec  = input.session("0930-1600", "Session window", group = G_SESS)
+sessTz    = input.string("America/New_York", "Session timezone", options = ["America/New_York", "Europe/London", "Asia/Kolkata", "Asia/Tokyo", "Australia/Sydney", "UTC"], group = G_SESS)
+closeEod  = input.bool(false, "Close positions at session end", group = G_SESS, tooltip = "Flatten any open position when the session window closes.")
+
+// ---------------------------------------------------------------------------
+// 7 - Risk / exit engine
+// ---------------------------------------------------------------------------
+slMode    = input.string("ATR", "Stop / target mode", options = ["ATR", "Percent"], group = G_RISK, tooltip = "ATR = volatility-scaled distances. Percent = fixed percent of entry price.")
+atrLen    = input.int(14, "ATR length", minval = 1, group = G_RISK)
+slAtr     = input.float(2.0, "Stop-loss (x ATR)", minval = 0.1, step = 0.1, group = G_RISK)
+tpAtr     = input.float(3.0, "Take-profit (x ATR)", minval = 0.1, step = 0.1, group = G_RISK)
+slPct     = input.float(1.5, "Stop-loss (%)", minval = 0.1, step = 0.1, group = G_RISK)
+tpPct     = input.float(3.0, "Take-profit (%)", minval = 0.1, step = 0.1, group = G_RISK)
+useTp     = input.bool(true, "Use take-profit", group = G_RISK)
+
+// ---------------------------------------------------------------------------
+// 8 - Trailing stop
+// ---------------------------------------------------------------------------
+useTrail  = input.bool(false, "Enable ATR trailing stop", group = G_TRAIL, tooltip = "Trails the stop by an ATR multiple once price moves in favour by the activation distance.")
+trailAtr  = input.float(2.0, "Trail distance (x ATR)", minval = 0.1, step = 0.1, group = G_TRAIL)
+trailAct  = input.float(1.0, "Trail activation (x ATR)", minval = 0.0, step = 0.1, group = G_TRAIL, tooltip = "Profit (in ATR) required before the trail begins to tighten.")
+
+// ---------------------------------------------------------------------------
+// 9 - Direction
+// ---------------------------------------------------------------------------
+allowLong  = input.bool(true, "Allow long trades",  group = G_DIR)
+allowShort = input.bool(true, "Allow short trades", group = G_DIR)
+
+// ---------------------------------------------------------------------------
+// 10 - Dashboard & visuals
+// ---------------------------------------------------------------------------
+showDash   = input.bool(true, "Show stats dashboard", group = G_UI)
+dashPos    = input.string("Top Right", "Dashboard position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_UI)
+showSignals= input.bool(true, "Show entry markers", group = G_UI)
+showHtf    = input.bool(true, "Plot HTF trend EMA", group = G_UI)
+shadeSess  = input.bool(true, "Shade session background", group = G_UI)
+
+// ---------------------------------------------------------------------------
+// Helper: moving-average selector
+// ---------------------------------------------------------------------------
+ma(_src, _len) =>
+    switch maType
+        "EMA" => ta.ema(_src, _len)
+        "SMA" => ta.sma(_src, _len)
+        "WMA" => ta.wma(_src, _len)
+        "RMA" => ta.rma(_src, _len)
+        "HMA" => ta.hma(_src, _len)
+        => ta.ema(_src, _len)
+
+// ---------------------------------------------------------------------------
+// Indicators
+// ---------------------------------------------------------------------------
+fast = ma(srcInput, fastLen)
+slow = ma(srcInput, slowLen)
+atr  = ta.atr(atrLen)
+rsi  = ta.rsi(srcInput, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxSmooth)
+volMa = ta.sma(volume, volLen)
+
+// Higher-timeframe trend EMA (no lookahead -> no repaint of confirmed bars)
+htfEma  = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfEmaLen), lookahead = barmerge.lookahead_off)
+trendUp = not useTrend or close >= htfEma
+trendDn = not useTrend or close <= htfEma
+
+// Filter gates ---------------------------------------------------------------
+rsiUpOk = not useRsi or rsi >= rsiLong
+rsiDnOk = not useRsi or rsi <= rsiShort
+adxOk   = not useAdx or adx >= adxMin
+volOk   = not useVol or volume >= volMa * volMult
+
+inSession = not useSess or not na(time(timeframe.period, sessSpec, sessTz))
+sessEnd   = useSess and not inSession and inSession[1]
+
+// ---------------------------------------------------------------------------
+// Signals (evaluated on confirmed bars)
+// ---------------------------------------------------------------------------
+rawUp   = ta.crossover(fast, slow)
+rawDn   = ta.crossunder(fast, slow)
+
+longCond  = rawUp and allowLong  and trendUp and rsiUpOk and adxOk and volOk and inSession
+shortCond = rawDn and allowShort and trendDn and rsiDnOk and adxOk and volOk and inSession
+
+// ---------------------------------------------------------------------------
+// Entries
+// ---------------------------------------------------------------------------
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+
+// ---------------------------------------------------------------------------
+// Exit distances (ATR or percent) computed from the average entry price
+// ---------------------------------------------------------------------------
+entryPx = strategy.position_avg_price
+
+longStopDist  = slMode == "ATR" ? slAtr * atr : entryPx * slPct / 100.0
+longTpDist    = slMode == "ATR" ? tpAtr * atr : entryPx * tpPct / 100.0
+shortStopDist = slMode == "ATR" ? slAtr * atr : entryPx * slPct / 100.0
+shortTpDist   = slMode == "ATR" ? tpAtr * atr : entryPx * tpPct / 100.0
+
+longSL  = entryPx - longStopDist
+longTP  = entryPx + longTpDist
+shortSL = entryPx + shortStopDist
+shortTP = entryPx - shortTpDist
+
+// ---------------------------------------------------------------------------
+// ATR trailing stop state (per open position)
+// ---------------------------------------------------------------------------
+var float trailStop = na
+
+if strategy.position_size == 0
+    trailStop := na
+
+if useTrail and strategy.position_size > 0
+    activated = (high - entryPx) >= trailAct * atr
+    candidate = close - trailAtr * atr
+    if activated
+        trailStop := na(trailStop) ? candidate : math.max(trailStop, candidate)
+else if useTrail and strategy.position_size < 0
+    activated = (entryPx - low) >= trailAct * atr
+    candidate = close + trailAtr * atr
+    if activated
+        trailStop := na(trailStop) ? candidate : math.min(trailStop, candidate)
+
+// Effective stop = tighter of the fixed stop and the trailing stop
+longStopEff  = useTrail and not na(trailStop) ? math.max(longSL, trailStop)  : longSL
+shortStopEff = useTrail and not na(trailStop) ? math.min(shortSL, trailStop) : shortSL
+
+// ---------------------------------------------------------------------------
+// Exits
+// ---------------------------------------------------------------------------
+if strategy.position_size > 0
+    strategy.exit("L-exit", from_entry = "Long", stop = longStopEff, limit = useTp ? longTP : na)
+if strategy.position_size < 0
+    strategy.exit("S-exit", from_entry = "Short", stop = shortStopEff, limit = useTp ? shortTP : na)
+
+// End-of-session flatten
+if closeEod and sessEnd and strategy.position_size != 0
+    strategy.close_all(comment = "EOD")
+
+// ---------------------------------------------------------------------------
+// Plots
+// ---------------------------------------------------------------------------
+plot(fast, "Fast MA", color = BULL_COL, linewidth = 2)
+plot(slow, "Slow MA", color = BEAR_COL, linewidth = 2)
+plot(showHtf and useTrend ? htfEma : na, "HTF Trend EMA", color = GOLD_COL, linewidth = 1, style = plot.style_line)
+
+plotStop = strategy.position_size != 0 and useTrail and not na(trailStop) ? trailStop : na
+plot(plotStop, "Trailing Stop", color = MUTE_COL, style = plot.style_linebr, linewidth = 1)
+
+plotshape(showSignals and longCond,  title = "Long",  style = shape.triangleup,   location = location.belowbar, color = BULL_COL, size = size.tiny)
+plotshape(showSignals and shortCond, title = "Short", style = shape.triangledown, location = location.abovebar, color = BEAR_COL, size = size.tiny)
+
+bgcolor(shadeSess and useSess and inSession ? color.new(BULL_COL, 94) : na, title = "Session shade")
+
+// ---------------------------------------------------------------------------
+// Alert conditions
+// ---------------------------------------------------------------------------
+alertcondition(longCond,  "Viprasol Long Entry",  "LONG entry on {{ticker}} @ {{close}}")
+alertcondition(shortCond, "Viprasol Short Entry", "SHORT entry on {{ticker}} @ {{close}}")
+alertcondition(longCond or shortCond, "Viprasol Any Entry", "Entry signal on {{ticker}} @ {{close}}")
+alertcondition(ta.cross(fast, slow), "Viprasol EMA Cross", "EMA cross on {{ticker}} @ {{close}}")
+alertcondition(strategy.position_size[1] != 0 and strategy.position_size == 0, "Viprasol Position Closed", "Position closed on {{ticker}} @ {{close}}")
+alertcondition(sessEnd, "Viprasol Session End", "Session window closed on {{ticker}}")
+
+// ---------------------------------------------------------------------------
+// Stats dashboard (table.new)
+// ---------------------------------------------------------------------------
+f_dashPos() =>
+    switch dashPos
+        "Top Right"    => position.top_right
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+var table dash = na
+if showDash
+    if na(dash)
+        dash := table.new(f_dashPos(), 2, 9, border_width = 1, frame_color = MUTE_COL, frame_width = 1)
+
+    if barstate.islast
+        netProfit = strategy.netprofit
+        pf        = strategy.grossloss != 0 ? strategy.grossprofit / strategy.grossloss : na
+        trades    = strategy.closedtrades
+        wins      = strategy.wintrades
+        winRate   = trades > 0 ? wins / trades * 100.0 : na
+        ddPct     = strategy.initial_capital != 0 ? strategy.max_drawdown / strategy.initial_capital * 100.0 : na
+        posTxt    = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+        posCol    = strategy.position_size > 0 ? BULL_COL : strategy.position_size < 0 ? BEAR_COL : MUTE_COL
+
+        table.cell(dash, 0, 0, "[TeleNexus] MA Confluence", text_color = INK_COL, bgcolor = GOLD_COL, text_size = size.small)
+        table.cell(dash, 1, 0, maType + " " + str.tostring(fastLen) + "/" + str.tostring(slowLen), text_color = INK_COL, bgcolor = GOLD_COL, text_size = size.small)
+
+        table.cell(dash, 0, 1, "Position", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 1, posTxt, text_color = posCol, text_size = size.small)
+
+        table.cell(dash, 0, 2, "Net Profit", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 2, str.tostring(netProfit, "#.##"), text_color = netProfit >= 0 ? BULL_COL : BEAR_COL, text_size = size.small)
+
+        table.cell(dash, 0, 3, "Win Rate", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 3, na(winRate) ? "-" : str.tostring(winRate, "#.#") + "%", text_color = INK_COL, bgcolor = color.new(#ffffff, 80), text_size = size.small)
+
+        table.cell(dash, 0, 4, "Profit Factor", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 4, na(pf) ? "-" : str.tostring(pf, "#.##"), text_color = INK_COL, bgcolor = color.new(#ffffff, 80), text_size = size.small)
+
+        table.cell(dash, 0, 5, "Trades", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 5, str.tostring(trades), text_color = INK_COL, bgcolor = color.new(#ffffff, 80), text_size = size.small)
+
+        table.cell(dash, 0, 6, "Max Drawdown", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 6, na(ddPct) ? "-" : str.tostring(ddPct, "#.#") + "%", text_color = BEAR_COL, text_size = size.small)
+
+        table.cell(dash, 0, 7, "Stop / Target", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 7, slMode == "ATR" ? str.tostring(slAtr, "#.#") + "x / " + str.tostring(tpAtr, "#.#") + "x ATR" : str.tostring(slPct, "#.#") + "% / " + str.tostring(tpPct, "#.#") + "%", text_color = INK_COL, bgcolor = color.new(#ffffff, 80), text_size = size.small)
+
+        table.cell(dash, 0, 8, "Filters", text_color = MUTE_COL, text_size = size.small)
+        table.cell(dash, 1, 8, (useTrend ? "T" : "-") + (useRsi ? "R" : "-") + (useAdx ? "A" : "-") + (useVol ? "V" : "-") + (useSess ? "S" : "-") + (useTrail ? "x" : "-"), text_color = INK_COL, bgcolor = color.new(#ffffff, 80), text_size = size.small)

@@ -1,0 +1,292 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignBtcMtfMeanRevV6
+// ============================================================================
+// Causal Audit: 2026-08-03 19:22 CST
+// Version: v26.0803.1922
+// Build: BTC 1m Ultra-Conservative Mean-Reversion — Sovereign Port
+//
+// Source: JusticeWiz/btc-mean-reversion-bot (strategy.pine)
+//
+// Core Thesis:
+//   An ultra-conservative mean-reversion engine for BTC on the 1m execution
+//   timeframe. Entries only fire at Bollinger extremes with an over-stretched
+//   RSI, gated by a multi-timeframe (1m + 5m) ADX ranging filter, 5m RSI neutral
+//   band, 5m flat-EMA slope, wick screening and volatility compression. A
+//   programmatic risk panel enforces daily loss limits, loss streaks and
+//   cooldowns with a live UI dashboard.
+//
+// Sovereign Overlays:
+//   ✓ Multi-Timeframe Regime Confirmation (1m/5m ADX ranging + 5m RSI + 5m slope)
+//   ✓ Dynamic Wick Screening (wick % of candle range)
+//   ✓ Programmatic Risk Guards (daily loss limit / loss streak / kill switch)
+//   ✓ Fixed-Dollar Risk Position Sizing
+//   ✓ NY Session Filter + Live Dashboard Table
+// ============================================================================
+strategy("TeleNexus Sovereign BTC MTF Mean-Reversion V6",
+     overlay = true,
+     initial_capital = 10000,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     calc_on_every_tick = true,
+     process_orders_on_close = true)
+
+// === INPUTS ===
+riskDollars     = input.float(50, "Risk per trade ($)", minval = 1)
+dailyLossLimit  = input.float(150, "Daily loss limit ($)", minval = 1)
+maxLossStreak   = input.int(3, "Max consecutive losses", minval = 1)
+
+bbLen           = input.int(20, "BB Length")
+bbMult          = input.float(2.5, "BB Multiplier")
+rsiLen          = input.int(2, "RSI Length")
+atrLen          = input.int(14, "ATR Length")
+atrMultSL       = input.float(0.5, "ATR Stop Multiplier")
+atrMultTP       = input.float(0.25, "ATR Take Profit Multiplier")
+wickLimit       = input.float(0.35, "Max Wick % of Candle")
+
+cooldownBars1   = input.int(5, "Cooldown after 1 loss")
+cooldownBars2   = input.int(10, "Cooldown after 2 losses")
+
+adxLen1m        = input.int(14, "ADX Length (1m)")
+adxThreshold1m  = input.float(20, "ADX Threshold 1m (Ranging < 20)")
+
+adxLen5m        = input.int(14, "ADX Length (5m)")
+adxThreshold5m  = input.float(20, "ADX Threshold 5m (Ranging < 20)")
+
+rsi5mLen        = input.int(14, "RSI Length (5m)")
+rsi5mLow        = input.float(40, "RSI 5m Lower")
+rsi5mHigh       = input.float(60, "RSI 5m Upper")
+
+ema5mLen        = input.int(50, "EMA 5m Length")
+emaSlopeThresh  = input.float(0.03, "EMA 5m Slope Threshold (%)")
+
+spreadThresh    = input.float(5.0, "Max Spread (USD)", minval = 0.5)
+
+// Custom function to get only the ADX value out of ta.dmi tuple
+get_adx(diLen, adxLen) =>
+    [_, _, adxValue] = ta.dmi(diLen, adxLen)
+    adxValue
+
+// === NY SESSION FILTER (UTC-4 → 13:30–20:00 UTC) ===
+nySession = time(timeframe.period, "1330-2000:1234567")
+inNY      = nySession != 0
+newNYSession = inNY and not inNY[1]
+
+// === 1m DATA ===
+basis = ta.sma(close, bbLen)
+dev   = bbMult * ta.stdev(close, bbLen)
+upper = basis + dev
+lower = basis - dev
+
+rsi1m = ta.rsi(close, rsiLen)
+atr   = ta.atr(atrLen)
+
+// Calculate 1m DMI components and pull ADX
+[_, _, adx1m] = ta.dmi(adxLen1m, adxLen1m)
+
+// === WICK FILTER (1m) ===
+candleRange = high - low
+upperWick   = high - math.max(open, close)
+lowerWick   = math.min(open, close) - low
+
+upperWickPct = candleRange > 0 ? upperWick / candleRange : 0.0
+lowerWickPct = candleRange > 0 ? lowerWick / candleRange : 0.0
+
+wickOK = upperWickPct < wickLimit and lowerWickPct < wickLimit
+
+// === VOLATILITY COMPRESSION FILTER (1m) ===
+atrFloor = atr < ta.sma(atr, 50) * 1.0
+
+// === MARKET REGIME FILTER (1m Ranging Only) ===
+ranging1m = adx1m < adxThreshold1m
+
+// === 5m DATA (MTF CONFIRMATION) ===
+rsi5m   = request.security(syminfo.tickerid, "5", ta.rsi(close, rsi5mLen))
+adx5m   = request.security(syminfo.tickerid, "5", get_adx(adxLen5m, adxLen5m))
+ema5m   = request.security(syminfo.tickerid, "5", ta.ema(close, ema5mLen))
+ema5mPrev = request.security(syminfo.tickerid, "5", ta.ema(close[1], ema5mLen))
+
+ema5mSlope = ema5mPrev != 0 ? (ema5m - ema5mPrev) / ema5mPrev * 100.0 : 0.0
+
+rsi5mNeutral = rsi5m > rsi5mLow and rsi5m < rsi5mHigh
+adx5mRanging = adx5m < adxThreshold5m
+ema5mFlat    = math.abs(ema5mSlope) < emaSlopeThresh
+
+mtfOK = rsi5mNeutral and adx5mRanging and ema5mFlat
+
+// === MEAN-REVERSION SIGNALS ===
+longCond  = close < lower and rsi1m < 10 and wickOK and atrFloor and ranging1m and mtfOK
+exitLong  = close > basis or rsi1m > 60
+
+shortCond = close > upper and rsi1m > 90 and wickOK and atrFloor and ranging1m and mtfOK
+exitShort = close < basis or rsi1m < 40
+
+// === STOP & TARGET ===
+stopDist = atr * atrMultSL
+tpDist   = atr * atrMultTP
+
+longSL = close - stopDist
+longTP = close + tpDist
+
+shortSL = close + stopDist
+shortTP = close - tpDist
+
+// === POSITION SIZING ===
+qty = stopDist > 0 ? riskDollars / stopDist : 0.0
+
+// === RISK GUARDS ===
+var float dailyPnL   = 0.0
+var int   lossStreak = 0
+var bool  killSwitch = false
+var int   cooldown   = 0
+
+if newNYSession
+    dailyPnL   := 0.0
+    lossStreak := 0
+    killSwitch := false
+    cooldown   := 0
+
+if strategy.closedtrades > strategy.closedtrades[1]
+    lastProfit = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    dailyPnL += lastProfit
+
+    if lastProfit < 0
+        lossStreak += 1
+        cooldown := (lossStreak >= 2 ? cooldownBars2 : cooldownBars1)
+    else
+        lossStreak := 0
+
+if dailyPnL <= -dailyLossLimit or lossStreak >= maxLossStreak
+    killSwitch := true
+
+if cooldown > 0
+    cooldown -= 1
+
+// === SPREAD FILTER (approx, using high-low of current bar as proxy) ===
+// For real spread you'd need bid/ask feed; here we approximate with bar micro-range.
+spreadApprox = (high - low)
+spreadOK     = spreadApprox <= spreadThresh
+
+// === FINAL TRADING PERMISSION ===
+canTrade = inNY and not killSwitch and cooldown == 0 and spreadOK
+
+// === EXECUTION ===
+if (canTrade and longCond and strategy.position_size <= 0 and qty > 0)
+    strategy.entry("Long", strategy.long, qty)
+    strategy.exit("Long Exit", "Long", stop = longSL, limit = longTP)
+
+if (exitLong and strategy.position_size > 0)
+    strategy.close("Long")
+
+if (canTrade and shortCond and strategy.position_size >= 0 and qty > 0)
+    strategy.entry("Short", strategy.short, qty)
+    strategy.exit("Short Exit", "Short", stop = shortSL, limit = shortTP)
+
+if (exitShort and strategy.position_size < 0)
+    strategy.close("Short")
+
+// === ALERTS ===
+alertcondition(canTrade and longCond, "BTC LONG ENTRY",
+     '{"type":"entry","side":"long","symbol":"BTCUSDT","risk":50}')
+
+alertcondition(canTrade and shortCond, "BTC SHORT ENTRY",
+     '{"type":"entry","side":"short","symbol":"BTCUSDT","risk":50}')
+
+alertcondition(exitLong, "BTC LONG EXIT",
+     '{"type":"exit","side":"long","symbol":"BTCUSDT"}')
+
+alertcondition(exitShort, "BTC SHORT EXIT",
+     '{"type":"exit","side":"short","symbol":"BTCUSDT"}')
+
+alertcondition(killSwitch, "BTC KILL SWITCH",
+     '{"type":"kill","symbol":"BTCUSDT"}')
+
+// === TRADE COUNTER ===
+var int tradesToday   = 0
+var int winsToday     = 0
+var int lossesToday   = 0
+
+if strategy.closedtrades > strategy.closedtrades[1]
+    tradesToday += 1
+    lastProfit2 = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    if lastProfit2 > 0
+        winsToday += 1
+    else
+        lossesToday += 1
+
+winRateToday = tradesToday > 0 ? (winsToday * 100.0) / tradesToday : 0.0
+
+// === REGIME CLASSIFICATION (1m) ===
+regimeRanging    = ranging1m and atrFloor
+regimeTrending   = adx1m >= adxThreshold1m
+regimeVolatile   = atr > ta.sma(atr, 50) * 1.5
+regimeCompress   = atrFloor and not regimeTrending
+
+// === 5m TREND METER ===
+trendUp5m    = ema5mSlope > emaSlopeThresh and rsi5m > rsi5mHigh
+trendDown5m  = ema5mSlope < -emaSlopeThresh and rsi5m < rsi5mLow
+trendNeutral5m = ema5mFlat and rsi5mNeutral
+trendUnsafe5m  = not trendNeutral5m and (trendUp5m or trendDown5m)
+
+// === DASHBOARD (BOTTOM-LEFT, MEDIUM SIZE, HYBRID COLORS) ===
+dashBgColor = color.new(color.black, 70)
+
+regimeText = regimeRanging ? "Regime: Ranging" :
+     regimeTrending ? "Regime: Trending" :
+     regimeVolatile ? "Regime: Volatile" :
+     regimeCompress ? "Regime: Compressing" :
+     "Regime: Unknown"
+
+regimeColor = regimeRanging ? color.new(color.green, 0) :
+     regimeTrending ? color.new(color.red, 0) :
+     regimeVolatile ? color.new(color.yellow, 0) :
+     regimeCompress ? color.new(color.blue, 0) :
+     color.new(color.gray, 0)
+
+trendText = trendNeutral5m ? "5m Trend: Neutral" :
+     trendUp5m ? "5m Trend: Up" :
+     trendDown5m ? "5m Trend: Down" :
+     trendUnsafe5m ? "5m Trend: Unsafe" :
+     "5m Trend: Unknown"
+
+trendColor = trendNeutral5m ? color.new(color.blue, 0) :
+     trendUp5m ? color.new(color.green, 0) :
+     trendDown5m ? color.new(color.red, 0) :
+     trendUnsafe5m ? color.new(color.orange, 0) :
+     color.new(color.gray, 0)
+
+spreadText = spreadOK ? "Spread: OK" : "Spread: Wide"
+spreadColor = spreadOK ? color.new(color.green, 0) : color.new(color.red, 0)
+
+sessionText   = inNY ? "Session: NY Active" : "Session: NY Closed"
+cooldownText  = cooldown > 0 ? "Cooldown: Active" : "Cooldown: Off"
+killText      = killSwitch ? "Kill-Switch: ACTIVE" : "Kill-Switch: Off"
+mtfText       = mtfOK ? "MTF: OK" : "MTF: Blocked"
+
+tradesText    = "Trades: " + str.tostring(tradesToday) +
+     "  W: " + str.tostring(winsToday) +
+     "  L: " + str.tostring(lossesToday) +
+     "  Win%: " + str.tostring(math.round(winRateToday * 10.0) / 10.0)
+
+// === DRAW DASHBOARD (TABLE BASED) ===
+var table dash = na
+
+if barstate.islast
+    dash := table.new(position = position.top_right, columns = 1, rows = 8,
+                       bgcolor = dashBgColor, border_width = 1, border_color = color.gray)
+
+    table.cell(dash, 0, 0, regimeText,    text_color = regimeColor,  text_size = size.normal)
+    table.cell(dash, 0, 1, trendText,     text_color = trendColor,   text_size = size.normal)
+    table.cell(dash, 0, 2, spreadText,    text_color = spreadColor,  text_size = size.normal)
+    table.cell(dash, 0, 3, sessionText,   text_color = color.white,  text_size = size.normal)
+    table.cell(dash, 0, 4, cooldownText,  text_color = color.orange, text_size = size.normal)
+    table.cell(dash, 0, 5, killText,      text_color = color.red,    text_size = size.normal)
+    table.cell(dash, 0, 6, mtfText,       text_color = color.white,  text_size = size.normal)
+    table.cell(dash, 0, 7, tradesText,    text_color = color.white,  text_size = size.normal)
+
+// === PLOTS ===
+plot(upper, "Upper BB", color=color.red)
+plot(basis, "Basis BB", color=color.blue)
+plot(lower, "Lower BB", color=color.green)
+
+bgcolor(killSwitch ? color.new(color.red, 85) : na)

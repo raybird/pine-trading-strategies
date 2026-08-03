@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 167 個已實體化主權策略，分 14 大類（v26.0802.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 171 個已實體化主權策略，分 14 大類（v26.0803.1922 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -42,9 +42,9 @@
 
 | 分類 | 數量 | 說明 |
 |------|------|------|
-| **Sovereign Core** | 12 | 基礎主權框架與多時框日內系統 |
-| **Trend & Momentum** | 15 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4 |
-| **Mean Reversion & Oscillator** | 17 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸 |
+| **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
+| **Trend & Momentum** | 18 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流 |
+| **Mean Reversion & Oscillator** | 20 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸 |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 34 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊 |
 | **Volume & Order Flow** | 15 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破 |
@@ -56,10 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **167** | 主權策略矩陣（v26.0802.1830 更新） |
+| **Total** | **171** | 主權策略矩陣（v26.0803.1922 更新） |
 
 
-> **最新加入（v26.0802.1830）**: 獵頭審計 #129 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，跨頁確認）。新檢索 repos（FaustoS88、JoelPasapera、thesenegalesehitch、JackSmack1971、hamedator、QuantForgeHQ、kierbica、jayadevrana 系列、ggamer5555、AleeexTk、monch1962、jonathanpratt5564、Viprasol-Tech、SimoneGitter、sametbarbaros-dev）均已在 #101–#128 審計中覆蓋；AleeexTk/TradingView-SMC-EPOS 確認為空倉。深入掃描 thesenegalesehitch/Pine-Script 的 `pine-scripts/strategies/` 發現 2 枚先前未覆蓋 strategy() 實體：`ict-sniper.pine`（Prop Firm ICT Sniper — BSL/SSL 流動性掃蕩 + 位移 FVG + Phase 風險縮放 + 每日虧損硬限制 + 權益風險倉位，移植為 `TnSovereignIctSniperV6`）與 `ict-smc-sniper.pine`（ICT/SMC M1 Sniper — CRT 範圍理論 + M15 BOS/CHOCH 結構 + 未接合 FVG/OB PI 引擎 + Premium/Discount + Break Even，移植為 `TnSovereignIctM1CrtSniperV6`）。新增 2 策略（165→167）：PropFirm/Challenge 1→2、Market Structure 33→34。TradingView 社群 pine-script-v6 頁面仍為 2 枚 indicator() 實體（Account Guardian / Smart Weekly Lines）無 strategy() 實體。Dashboard 同步更新
+> **最新加入（v26.0803.1922）**: 獵頭審計 #130 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy "strategy("` + `tradingview strategy pine v6`，確認 64 個儲存庫，跨頁確認）。新檢索 repos 逐一深掃：jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy 含 **Contra Pivot SuperTrend v6 strategy() 實體**（樞軸 PP SuperTrend band + Touch/Reversal/Both 觸發 + ORB/ADX/ATR/EMA 過濾 + 金字塔加倉 + 追蹤止損，移植為 `TnSovereignContraPivotStFadeV6`）；Paulaustin3977/OANDA-XAUUSD-Optimized-5m 含 **OANDA XAUUSD 5m research strategy() 實體**（EMA 9/18 交叉 + BB 中線/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold，移植為 `TnSovereignXauUsdOpt5mV6`）；JusticeWiz/btc-mean-reversion-bot 含 **BTC 1m MTF strategy() 實體**（BB+RSI(2) 極端 + 1m/5m ADX 區間 + 5m RSI/EMA 中性帶 + 影線/波動壓縮篩選 + 每日虧損護欄 + Dashboard，移植為 `TnSovereignBtcMtfMeanRevV6`）；Viprasol-Tech/pine-script-strategy 含 **MA Cross Confluence strategy() 實體**（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎 + 追蹤止損，移植為 `TnSovereignMaConfluenceV6`）。其餘候選排除理由：casoon/pine-scripts 為 30+ indicator() 實體無 strategy()；natebking/345-strategies 之 TheStratSuite v3 為 indicator()（MPL-2.0）；traderboj8-lang/pine-script-engines 僅 README 無 .pine 實體；Astakhov-crypto/pine-trend-atr-example 為 indicator()；ggamer5555 之 DCA Webhook 已由 TnSovereignDcaWebhookV6 覆蓋。新增 4 策略（167→171）：Trend & Momentum 16→18、Mean Reversion & Oscillator 18→20。TradingView 社群 pine-script-v6 頁面持續為 indicator() 實體無 strategy()。Dashboard/README 完全對位。
 
 > **最新加入（v26.0729.1830）**: 獵頭審計 #128 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`"strategy(" v6 pinescript` + `"pinescript v6 strategy"` + `"strategy" "pinescript" v6`，確認 18+2+21 個儲存庫，跨頁確認）。新出現 repos: michelepiazzoli/pinescript-v6-strategies 為 piazzolimichele1/Pinescript-V6 之更名延續（含 8 策略：Ichimoku/Engulfing/Market Structure/BOL-BOH/Engulfing Quorters/Engulfing SMA/Ichimoku Quorters/Range Breakout，均已由現有策略集全面覆蓋）；alexhowa53/pinescript-v6-toolkit 已下架為 404 空倉。所有其餘檢索 repos（ggamer5555、JoelPasapera、kierbica、AleeexTk、jonathanpratt5564、sametbarbaros-dev、JackSmack1971、hamedator 等）均已在 #101–#127 審計中覆蓋，無全新 strategy() 實體。TradingView 社群 pine-script-v6 頁面無全新 strategy() 實體（Session ORBO 為基礎開盤區間突破已覆蓋、Liquidity Maxing 為 BOS/CHoCH/IDM SMC 策略已覆蓋）。維持 165 策略物理對位；Dashboard 同步更新
 

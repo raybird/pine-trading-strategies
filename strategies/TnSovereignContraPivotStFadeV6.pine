@@ -1,0 +1,274 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignContraPivotStFadeV6
+// ============================================================================
+// Causal Audit: 2026-08-03 19:22 CST
+// Version: v26.0803.1922
+// Build: Contra Pivot SuperTrend Fade — Sovereign Port
+//
+// Source: jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy
+//         (contra-pivot-supertrend-v6.pine)
+//
+// Core Thesis:
+//   A contrarian fade engine that trades AGAINST reaching moves at the Pivot
+//   Point SuperTrend band. SELL when price stretches UP into the band, BUY when
+//   price stretches DOWN into the band. Trigger supports Touch / Reversal /
+//   Both modes, with pyramiding and trailing management.
+//
+// Sovereign Overlays:
+//   ✓ Re-Entry State Isolation (pyramid counters seeded from actual fills)
+//   ✓ Session-Anchor ORB Fade Filter (fade only outside opening range)
+//   ✓ ADX / ATR / EMA Confluence Gates
+//   ✓ Diagnostic Condition Table (ST regime / ORB / ADX / ATR / EMA / entry)
+// ============================================================================
+strategy("TeleNexus Sovereign Contra Pivot SuperTrend Fade V6",
+     shorttitle = "Contra Pivot ST Fade V6",
+     overlay = true,
+     pyramiding = 50,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     calc_on_every_tick = false,
+     process_orders_on_close = true,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.03,
+     slippage = 1)
+
+// 1. INPUTS
+grpDir   = "Direction"
+enLong   = input.bool(true, "Enable BUY (long fade)",   group = grpDir)
+enShort  = input.bool(true, "Enable SELL (short fade)", group = grpDir)
+
+grpSig   = "Signal trigger"
+trigMode = input.string("Both", "Fire signal on", options = ["Touch", "Reversal", "Both"], group = grpSig, tooltip = "Touch = price tags the Pivot SuperTrend band. Reversal = the SuperTrend regime flips (price breaks through the band). Both = either one.")
+
+grpQty   = "Position sizing"
+baseQty  = input.float(1.0, "Qty per entry (first + each pyramid)", minval = 0.0, step = 1.0, group = grpQty)
+
+grpPPS   = "Pivot Point SuperTrend (touch level)"
+ppPrd    = input.int(2,    "Pivot point period", minval = 1, group = grpPPS)
+ppFactor = input.float(3., "ATR factor",         minval = 0.1, step = 0.1, group = grpPPS)
+ppAtrLen = input.int(10,   "ATR period",         minval = 1, group = grpPPS)
+
+grpOrb   = "ORB (opening range - fade outside)"
+useOrb   = input.bool(true, "Use ORB filter", group = grpOrb)
+orbBars  = input.int(3, "ORB length (first N candles of session)", minval = 1, group = grpOrb)
+
+grpAdx   = "ADX filter"
+diLen    = input.int(14,  "DI length",       minval = 1, group = grpAdx)
+adxSm    = input.int(14,  "ADX smoothing",   minval = 1, group = grpAdx)
+minAdx   = input.float(20, "Min ADX to enter", group = grpAdx)
+
+grpAtr   = "ATR filter"
+useAtr   = input.bool(false, "Use ATR filter", group = grpAtr)
+atrLen   = input.int(14,  "ATR length",       minval = 1, group = grpAtr)
+atrThr   = input.float(10, "ATR must be greater than", group = grpAtr)
+
+grpEma   = "EMA filter"
+useEma   = input.bool(true, "Use EMA filter", group = grpEma)
+emaLen   = input.int(50, "EMA length", minval = 1, group = grpEma)
+
+grpPyr   = "Pyramiding (profit direction)"
+numPyr   = input.int(2, "Number of pyramids after first entry", minval = 0, maxval = 49, group = grpPyr)
+pyrType  = input.string("Points", "Pyramid step type", options = ["Points", "Percent", "ATR"], group = grpPyr)
+pyrVal   = input.float(20, "Pyramid step (in unit above)", minval = 0.0, step = 0.1, group = grpPyr)
+
+grpTgt   = "Target"
+tgtMode  = input.string("Points", "Target type", options = ["Off", "Points", "Percent"], group = grpTgt)
+tgtVal   = input.float(60, "Target value", minval = 0.0, step = 0.1, group = grpTgt)
+
+grpSL    = "Stop loss"
+slMode   = input.string("Points", "SL type", options = ["Off", "Points", "Percent"], group = grpSL)
+slVal    = input.float(40, "SL value", minval = 0.0, step = 0.1, group = grpSL)
+
+grpTrl   = "Trailing stop"
+trlMode  = input.string("Off", "Trailing type", options = ["Off", "Points", "Percent"], group = grpTrl)
+trlVal   = input.float(30, "Trailing distance", minval = 0.0, step = 0.1, group = grpTrl)
+
+grpPlot  = "Lower-pane plots"
+showAtrP = input.bool(false, "Plot ATR (own scale)", group = grpPlot)
+
+// 2. PIVOT POINT SUPERTREND
+ph = ta.pivothigh(ppPrd, ppPrd)
+pl = ta.pivotlow(ppPrd, ppPrd)
+var float center = na
+float lastpp = not na(ph) ? ph : not na(pl) ? pl : na
+if not na(lastpp)
+    center := na(center) ? lastpp : (center * 2.0 + lastpp) / 3.0
+atrPP = ta.atr(ppAtrLen)
+up = center - ppFactor * atrPP
+dn = center + ppFactor * atrPP
+var float tup   = na
+var float tdown = na
+var int   trend = 0
+tup   := na(center) ? na : (na(tup[1])   ? up : (close[1] > tup[1]   ? math.max(up, tup[1])   : up))
+tdown := na(center) ? na : (na(tdown[1]) ? dn : (close[1] < tdown[1] ? math.min(dn, tdown[1]) : dn))
+trend := na(center) ? 0  : (na(tup[1]) or na(tdown[1]) ? 1 : (close > tdown[1] ? 1 : close < tup[1] ? -1 : nz(trend[1], 1)))
+pps = trend == 1 ? tup : tdown
+
+// --- Touch events (price tags the band from the correct side) ---
+sellTouch = trend == -1 and not na(tdown) and high >= tdown and high[1] < tdown
+buyTouch  = trend ==  1 and not na(tup)   and low  <= tup   and low[1]  > tup
+
+// --- Reversal events (ST regime flips = price broke THROUGH the band) ---
+// Bullish flip (down -> up)  = broke UP through band   -> FADE = SELL
+// Bearish flip (up   -> down) = broke DOWN through band -> FADE = BUY
+bullFlip  = trend ==  1 and trend[1] == -1
+bearFlip  = trend == -1 and trend[1] ==  1
+sellRev   = bullFlip
+buyRev    = bearFlip
+
+// --- Combined trigger per side, gated by the trigger-mode selector ---
+buySig  = (trigMode == "Touch"    and buyTouch)  or (trigMode == "Reversal" and buyRev)  or (trigMode == "Both" and (buyTouch  or buyRev))
+sellSig = (trigMode == "Touch"    and sellTouch) or (trigMode == "Reversal" and sellRev) or (trigMode == "Both" and (sellTouch or sellRev))
+
+// 3. ORB (fade outside)
+newDay = ta.change(time("D")) != 0
+var int   barInDay = 0
+var float orbHigh  = na
+var float orbLow   = na
+if newDay
+    barInDay := 0
+    orbHigh  := na
+    orbLow   := na
+barInDay += 1
+if barInDay <= orbBars
+    orbHigh := na(orbHigh) ? high : math.max(orbHigh, high)
+    orbLow  := na(orbLow)  ? low  : math.min(orbLow,  low)
+orbReady  = barInDay > orbBars and not na(orbHigh) and not na(orbLow)
+orbOkSell = not useOrb or (orbReady and close > orbHigh)
+orbOkBuy  = not useOrb or (orbReady and close < orbLow)
+
+// 4. ADX / ATR / EMA FILTERS
+[diP, diM, adxVal] = ta.dmi(diLen, adxSm)
+adxOk = adxVal >= minAdx
+atrVal = ta.atr(atrLen)
+atrOk  = not useAtr or atrVal > atrThr
+emaFilt   = ta.ema(close, emaLen)
+emaOkSell = not useEma or close > emaFilt
+emaOkBuy  = not useEma or close < emaFilt
+
+// 5. ENTRY SIGNALS
+flat = strategy.position_size == 0
+goLong  = enLong  and flat and buySig  and orbOkBuy  and adxOk and atrOk and emaOkBuy
+goShort = enShort and flat and sellSig and orbOkSell and adxOk and atrOk and emaOkSell
+
+// 6. ORDERS + PYRAMIDS + EXITS
+var float lastAdd   = na
+var int   addCnt    = 0
+var float trailStop = na
+
+// Clear all per-trade state while flat so nothing survives into the next trade.
+if flat
+    lastAdd   := na
+    addCnt    := 0
+    trailStop := na
+
+longPyr  = false
+shortPyr = false
+if goLong
+    strategy.entry("Long", strategy.long, qty = baseQty, comment = "BUY")
+else if goShort
+    strategy.entry("Short", strategy.short, qty = baseQty, comment = "SELL")
+
+// RE-ENTRY FIX: on the exact bar a new position first appears, (re)seed the
+// pyramid anchor from the REAL average fill and reset counters/trail.
+justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justOpened
+    lastAdd   := strategy.position_avg_price
+    addCnt    := 0
+    trailStop := na
+
+pyrStep = pyrType == "Points"  ? pyrVal :
+          pyrType == "Percent" ? nz(strategy.position_avg_price) * pyrVal / 100.0 :
+          pyrVal * atrVal
+
+if strategy.position_size > 0 and addCnt < numPyr and not na(lastAdd) and pyrStep > 0
+    if close >= lastAdd + pyrStep
+        strategy.entry("Long", strategy.long, qty = baseQty, comment = "BUY pyr")
+        lastAdd := lastAdd + pyrStep
+        addCnt  += 1
+        longPyr := true
+if strategy.position_size < 0 and addCnt < numPyr and not na(lastAdd) and pyrStep > 0
+    if close <= lastAdd - pyrStep
+        strategy.entry("Short", strategy.short, qty = baseQty, comment = "SELL pyr")
+        lastAdd := lastAdd - pyrStep
+        addCnt  += 1
+        shortPyr := true
+
+avg    = strategy.position_avg_price
+tgtPts = tgtMode == "Points"  ? tgtVal : tgtMode == "Percent" ? avg * tgtVal / 100.0 : na
+slPts  = slMode  == "Points"  ? slVal  : slMode  == "Percent" ? avg * slVal  / 100.0 : na
+trlPts = trlMode == "Points"  ? trlVal : trlMode == "Percent" ? avg * trlVal / 100.0 : na
+
+if strategy.position_size > 0 and not na(trlPts)
+    cand = high - trlPts
+    trailStop := na(trailStop) ? cand : math.max(trailStop, cand)
+if strategy.position_size < 0 and not na(trlPts)
+    cand = low + trlPts
+    trailStop := na(trailStop) ? cand : math.min(trailStop, cand)
+
+if strategy.position_size > 0
+    fixedSL  = na(slPts) ? na : avg - slPts
+    longStop = na(fixedSL) ? trailStop : na(trailStop) ? fixedSL : math.max(fixedSL, trailStop)
+    longTgt  = na(tgtPts) ? na : avg + tgtPts
+    if not na(longStop) or not na(longTgt)
+        strategy.exit("L-exit", from_entry = "Long", stop = longStop, limit = longTgt)
+if strategy.position_size < 0
+    fixedSL   = na(slPts) ? na : avg + slPts
+    shortStop = na(fixedSL) ? trailStop : na(trailStop) ? fixedSL : math.min(fixedSL, trailStop)
+    shortTgt  = na(tgtPts) ? na : avg - tgtPts
+    if not na(shortStop) or not na(shortTgt)
+        strategy.exit("S-exit", from_entry = "Short", stop = shortStop, limit = shortTgt)
+
+// 7. PLOTS
+plot(pps, "Pivot SuperTrend", color = trend == 1 ? color.new(color.green, 0) : color.new(color.red, 0), linewidth = 2, style = plot.style_linebr, force_overlay = true)
+plot(useEma ? emaFilt : na, "EMA filter", color = color.new(color.orange, 0), force_overlay = true)
+plot(useOrb ? orbHigh : na, "ORB High", color = color.new(color.blue, 0), style = plot.style_linebr, force_overlay = true)
+plot(useOrb ? orbLow  : na, "ORB Low",  color = color.new(color.blue, 0), style = plot.style_linebr, force_overlay = true)
+plotshape(goLong,   "BUY",      shape.triangleup,   location.belowbar, color.new(color.lime, 0), size = size.small, text = "BUY",  force_overlay = true)
+plotshape(goShort,  "SELL",     shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.small, text = "SELL", force_overlay = true)
+plotshape(longPyr,  "BUY pyr",  shape.arrowup,      location.belowbar, color.new(color.green, 0),  size = size.tiny, force_overlay = true)
+plotshape(shortPyr, "SELL pyr", shape.arrowdown,    location.abovebar, color.new(color.maroon, 0), size = size.tiny, force_overlay = true)
+plot(adxVal, "ADX", color = color.new(color.yellow, 0))
+plot(showAtrP ? atrVal : na, "ATR", color = color.new(color.teal, 0))
+hline(minAdx, "Min ADX", color = color.new(color.yellow, 60), linestyle = hline.style_dotted)
+
+// 8. DIAGNOSTICS TABLE
+f_yn(b) => b ? "YES" : "no"
+f_col(b) => b ? color.new(color.lime, 0) : color.new(color.red, 0)
+var table dbg = table.new(position.top_right, 3, 11, frame_color = color.gray, border_color = color.gray, border_width = 1, force_overlay = true)
+if barstate.islast
+    table.cell(dbg, 0, 0, "Condition", text_color = color.white, bgcolor = color.new(color.gray, 30))
+    table.cell(dbg, 1, 0, "BUY",       text_color = color.white, bgcolor = color.new(color.gray, 30))
+    table.cell(dbg, 2, 0, "SELL",      text_color = color.white, bgcolor = color.new(color.gray, 30))
+    table.cell(dbg, 0, 1, "ST regime", text_color = color.white)
+    table.cell(dbg, 1, 1, trend == 1 ? "UP" : trend == -1 ? "down" : "-", text_color = trend == 1 ? color.lime : color.red)
+    table.cell(dbg, 2, 1, trend == 1 ? "UP" : trend == -1 ? "down" : "-", text_color = trend == 1 ? color.lime : color.red)
+    table.cell(dbg, 0, 2, "ST touch/rev", text_color = color.white)
+    table.cell(dbg, 1, 2, f_yn(buyTouch  or buyRev),  text_color = f_col(buyTouch  or buyRev))
+    table.cell(dbg, 2, 2, f_yn(sellTouch or sellRev), text_color = f_col(sellTouch or sellRev))
+    table.cell(dbg, 0, 3, "Outside ORB", text_color = color.white)
+    table.cell(dbg, 1, 3, f_yn(orbOkBuy),  text_color = f_col(orbOkBuy))
+    table.cell(dbg, 2, 3, f_yn(orbOkSell), text_color = f_col(orbOkSell))
+    table.cell(dbg, 0, 4, "ADX>=min", text_color = color.white)
+    table.cell(dbg, 1, 4, f_yn(adxOk), text_color = f_col(adxOk))
+    table.cell(dbg, 2, 4, f_yn(adxOk), text_color = f_col(adxOk))
+    table.cell(dbg, 0, 5, "ATR>thr", text_color = color.white)
+    table.cell(dbg, 1, 5, f_yn(atrOk), text_color = f_col(atrOk))
+    table.cell(dbg, 2, 5, f_yn(atrOk), text_color = f_col(atrOk))
+    table.cell(dbg, 0, 6, "EMA filter", text_color = color.white)
+    table.cell(dbg, 1, 6, f_yn(emaOkBuy),  text_color = f_col(emaOkBuy))
+    table.cell(dbg, 2, 6, f_yn(emaOkSell), text_color = f_col(emaOkSell))
+    table.cell(dbg, 0, 7, "ENTRY signal", text_color = color.yellow)
+    table.cell(dbg, 1, 7, f_yn(goLong),  text_color = f_col(goLong))
+    table.cell(dbg, 2, 7, f_yn(goShort), text_color = f_col(goShort))
+    table.cell(dbg, 0, 8, "Position", text_color = color.yellow)
+    table.cell(dbg, 1, 8, str.tostring(strategy.position_size), text_color = color.white)
+    table.cell(dbg, 2, 8, "avg " + str.tostring(avg, "#.##"),   text_color = color.white)
+    table.cell(dbg, 0, 9, "Pyramids", text_color = color.yellow)
+    table.cell(dbg, 1, 9, str.tostring(addCnt) + "/" + str.tostring(numPyr), text_color = color.white)
+    table.cell(dbg, 2, 9, "ADX " + str.tostring(adxVal, "#.#"), text_color = color.white)
+    table.cell(dbg, 0, 10, "ORB H / L", text_color = color.yellow)
+    table.cell(dbg, 1, 10, str.tostring(orbHigh, "#.#"), text_color = color.white)
+    table.cell(dbg, 2, 10, str.tostring(orbLow,  "#.#"), text_color = color.white)

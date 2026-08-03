@@ -22,7 +22,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
 | `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，16）
+## Trend & Momentum（趨勢與動量，18）
 
 | 策略 | 說明 |
 |------|------|
@@ -42,8 +42,10 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignVortexV6` | 渦流極性審計 + 200 EMA 過濾 |
 | `tn_wavetrend_v4_v6` | WaveTrend v4 波動交易策略 |
 | `tn_smooth_trend_radar_v6` | 雙平滑超級趨勢 + 樞軸拒絕雷達 |
+| `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
+| `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，18）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，20）
 
 | 策略 | 說明 |
 |------|------|
@@ -65,6 +67,8 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignZScoreReversionV6` | Z-Score 波動率反轉（Session VWAP + 耗竭 K 線 + ATR 百分位體制），移植自 Prat617/strategic |
 | `TnSovereignPDHPDLFadeV6` | 前日高/低均值回歸反轉（PDH/PDL + VWAP 偏見 + Swing Stop），移植自 Prat617/strategic |
 | `TnSovereignIBMeanReversionV6` | IB 均值回歸反轉（日型分類 + 延伸區 Fade + MA 濾網），移植自 Prat617/strategic |
+| `TnSovereignContraPivotStFadeV6` | 樞軸 SuperTrend 反向（Fade）策略（Pivot PP ST band + Touch/Reversal/Both 觸發 + ORB/ADX/ATR/EMA 過濾 + 金字塔），移植自 jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy |
+| `TnSovereignBtcMtfMeanRevV6` | BTC 多時框超保守均值回歸（1m/5m ADX 區間 + 5m RSI/EMA 中性帶 + 影線篩選 + 每日虧損護欄 + Dashboard），移植自 JusticeWiz/btc-mean-reversion-bot |
 
 ## Volatility & Breakout（波動率與突破，26）
 
@@ -243,4 +247,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：167（v26.0802.1830 更新）*
+*策略總數：171（v26.0803.1922 更新）*

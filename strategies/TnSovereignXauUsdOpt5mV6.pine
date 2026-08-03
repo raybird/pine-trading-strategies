@@ -1,0 +1,116 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignXauUsdOpt5mV6
+// ============================================================================
+// Causal Audit: 2026-08-03 19:22 CST
+// Version: v26.0803.1922
+// Build: OANDA XAUUSD Optimized 5m — Research Port
+//
+// Source: Paulaustin3977/OANDA-XAUUSD-Optimized-5m
+//         (pine/development/OANDA_XAUUSD_Optimized_5m_Current.pine)
+//
+// Core Thesis:
+//   A frozen research-parameter strategy for XAU/USD on the 5-minute chart.
+//   Entry fires on EMA fast/slow crossover with a Bollinger-mid confluence gate,
+//   restricted to select UTC hours that survived a 60-day OANDA practice-data
+//   optimization. Exits are an ATR-scaled bracket plus a hard max-hold rule.
+//
+// Sovereign Overlays:
+//   ✓ Selective UTC Session Window (hours that passed the optimization scan)
+//   ✓ Cooldown Bar Gate after every closed trade
+//   ✓ Max-Hold Rule (bracket closes after N completed bars)
+//   ✓ ATR Bracket Risk (SL 2.0x ATR / TP 2.5x ATR, frozen)
+// ============================================================================
+strategy("TeleNexus Sovereign XAUUSD Optimized 5m V6",
+     overlay = true,
+     pyramiding = 0,
+     process_orders_on_close = false,
+     calc_on_order_fills = true,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 10,
+     commission_type = strategy.commission.cash_per_contract,
+     commission_value = 0)
+
+// Frozen parameters.
+fastLen = 9
+slowLen = 18
+rsiLen = 14
+bbLen = 20
+atrLen = 14
+rsiOverbought = 70.0
+rsiOversold = 30.0
+slMult = 2.0
+tpMult = 2.5
+maxHoldBars = 3
+cooldownBars = 1
+units = 10
+
+// The research scan selected these UTC hours only.
+allowedHours = hour(time, "UTC") == 2 or
+     hour(time, "UTC") == 8 or
+     hour(time, "UTC") == 15 or
+     hour(time, "UTC") == 18 or
+     hour(time, "UTC") == 19 or
+     hour(time, "UTC") == 21
+
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+rsiValue = ta.rsi(close, rsiLen)
+bbMiddle = ta.sma(close, bbLen)
+atrValue = ta.atr(atrLen)
+
+bullSignal = (emaFast[1] <= emaSlow[1] and emaFast > emaSlow) or
+     (emaFast > emaSlow and close > emaFast and close > bbMiddle and rsiValue > 45 and rsiValue < rsiOverbought)
+bearSignal = (emaFast[1] >= emaSlow[1] and emaFast < emaSlow) or
+     (emaFast < emaSlow and close < emaFast and close < bbMiddle and rsiValue > rsiOversold and rsiValue < 55)
+
+var int cooldown = 0
+var int entryBar = na
+var float activeStop = na
+var float activeTarget = na
+
+// Cooldown is measured in completed chart bars after a closed trade.
+if cooldown > 0 and strategy.position_size == 0
+    cooldown -= 1
+
+// Store the frozen ATR bracket when the signal is generated. With
+// process_orders_on_close=false, the market order fills on the next bar.
+canEnter = barstate.isconfirmed and strategy.position_size == 0 and cooldown == 0 and allowedHours and not na(atrValue) and atrValue > 0
+if canEnter and bullSignal
+    activeStop := close - atrValue * slMult
+    activeTarget := close + atrValue * tpMult
+    strategy.entry("Long", strategy.long, qty = units)
+    entryBar := bar_index
+else if canEnter and bearSignal
+    activeStop := close + atrValue * slMult
+    activeTarget := close - atrValue * tpMult
+    strategy.entry("Short", strategy.short, qty = units)
+    entryBar := bar_index
+
+// Bracket exits are active while the position is open.
+if strategy.position_size > 0 and not na(activeStop)
+    strategy.exit("Long bracket", from_entry = "Long", stop = activeStop, limit = activeTarget)
+if strategy.position_size < 0 and not na(activeStop)
+    strategy.exit("Short bracket", from_entry = "Short", stop = activeStop, limit = activeTarget)
+
+// Match the research engine's max-hold rule: close after three completed
+// 5-minute bars, unless the stop/target has already filled.
+if strategy.position_size != 0 and not na(entryBar) and bar_index - entryBar >= maxHoldBars
+    strategy.close(strategy.position_size > 0 ? "Long" : "Short", comment = "Max hold")
+
+// Arm the one-bar cooldown after a position closes.
+justClosed = strategy.position_size == 0 and strategy.position_size[1] != 0
+if justClosed
+    cooldown := cooldownBars
+    entryBar := na
+    activeStop := na
+    activeTarget := na
+
+plot(emaFast, "EMA 9", color = color.orange, linewidth = 2)
+plot(emaSlow, "EMA 18", color = color.blue, linewidth = 2)
+plot(bbMiddle, "BB middle 20", color = color.gray)
+plot(strategy.position_size != 0 ? activeStop : na, "Active stop", color = color.red, style = plot.style_linebr)
+plot(strategy.position_size != 0 ? activeTarget : na, "Active target", color = color.green, style = plot.style_linebr)
+
+bgcolor(allowedHours ? color.new(color.teal, 93) : na, title = "Selected UTC hours")
