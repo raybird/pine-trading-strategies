@@ -1,0 +1,109 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignCalendarSwingV6
+// ============================================================================
+// Causal Audit: 2026-08-14 18:30 CST
+// Version: v26.0814.1830
+// Build: Calendar Day-Of-Week Swing — Sovereign Port
+//
+// Source: JoelPasapera/Strategies-in-Pine-Script-v6
+//         (Simple Swing Strategy / Ultra simple strategy.pine)
+//
+// Core Thesis:
+//   A calendar-driven (temporal) swing engine that trades purely on the day of
+//   the week: it opens a directional position on a chosen entry weekday and
+//   flattens it on a chosen exit weekday, so the only "edge" invoked is the
+//   calendar seasonality of accumulating a multi-day swing hold. No indicator
+//   is consulted — the position is scheduled by time, not by price.
+//
+// Sovereign Overlays:
+//   ✓ Direction switch (long-only / short-only) with re-schedule safety
+//   ✓ Exit-day must differ from entry-day (no zero-day flipping)
+//   ✓ Optional ATR bracket attached to the scheduled hold
+//   ✓ Multi-entry re-arm (position fully scheduled on the entry weekday only)
+// ============================================================================
+strategy("TeleNexus Sovereign Calendar Swing V6",
+     shorttitle = "Calendar Swing V6",
+     overlay = true,
+     fill_orders_on_standard_ohlc = true,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.03,
+     slippage = 1)
+
+// 1. INPUTS
+grpDir  = "Direction"
+enLong  = input.bool(true, "Enable scheduled LONG",  group = grpDir)
+enShort = input.bool(false, "Enable scheduled SHORT", group = grpDir)
+
+grpCal  = "Calendar schedule"
+entryDay = input.int(dayofweek.thursday, "Entry weekday", minval = 1, maxval = 7, group = grpCal,
+     tooltip = "Position is opened (if flat) every time this weekday is reached.\n1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri 7=Sat.")
+exitDay  = input.int(dayofweek.monday, "Exit weekday", minval = 1, maxval = 7, group = grpCal,
+     tooltip = "Any open position is flattened when this weekday is reached.\n1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri 7=Sat.")
+
+grpQty  = "Position sizing"
+lotSize = input.float(1.0, "Lot size", minval = 0.1, step = 0.1, group = grpQty)
+
+grpRisk = "Risk management"
+useBracket = input.bool(false, "Attach ATR bracket to scheduled hold", group = grpRisk)
+atrLen     = input.int(14, "ATR length", minval = 1, group = grpRisk)
+slAtr      = input.float(1.5, "Stop-loss (x ATR)", minval = 0.1, step = 0.1, group = grpRisk)
+tpAtr      = input.float(2.0, "Take-profit (x ATR)", minval = 0.1, step = 0.1, group = grpRisk)
+
+// 2. CALCULATIONS
+atr = ta.atr(atrLen)
+
+// Guard: exit weekday must differ from entry weekday to avoid intra-week flips.
+stable = entryDay != exitDay
+
+// Scheduled calendars.
+canEnterLong  = enLong  and dayofweek(time) == entryDay and stable
+canEnterShort = enShort and dayofweek(time) == entryDay and stable
+isExitDay      = dayofweek(time) == exitDay
+
+flat      = strategy.position_size == 0
+longOpen  = strategy.position_size > 0
+shortOpen = strategy.position_size < 0
+
+// 3. EXECUTION
+// Open the scheduled leg only once, only while flat, on the entry weekday.
+if canEnterLong and flat
+    strategy.entry("CLSW Long", strategy.long, qty = lotSize, comment = "Calendar swing open (long)")
+if canEnterShort and flat
+    strategy.entry("CLSW Short", strategy.short, qty = lotSize, comment = "Calendar swing open (short)")
+
+// Flatten on the exit weekday (closes any scheduled leg).
+if isExitDay
+    if longOpen
+        strategy.close("CLSW Long", comment = "Calendar swing close (long)")
+    if shortOpen
+        strategy.close("CLSW Short", comment = "Calendar swing close (short)")
+
+// Optional ATR bracket while the scheduled leg is open.
+if useBracket and longOpen
+    strategy.exit("Bracket Long", "CLSW Long",
+         stop = strategy.position_avg_price - slAtr * atr,
+         limit = strategy.position_avg_price + tpAtr * atr,
+         comment = "ATR bracket long")
+if useBracket and shortOpen
+    strategy.exit("Bracket Short", "CLSW Short",
+         stop = strategy.position_avg_price + slAtr * atr,
+         limit = strategy.position_avg_price - tpAtr * atr,
+         comment = "ATR bracket short")
+
+// 4. VISUALISATION
+bgcolor(isExitDay ? color.new(color.red, 90) : na, title = "Exit weekday")
+plotshape(canEnterLong and flat, "Scheduled long", shape.triangleup, location.belowbar,
+     color = color.new(color.green, 0), text = "CAL-L", textcolor = color.white, size = size.small)
+plotshape(canEnterShort and flat, "Scheduled short", shape.triangledown, location.abovebar,
+     color = color.new(color.red, 0), text = "CAL-S", textcolor = color.white, size = size.small)
+plotshape(isExitDay and (longOpen or shortOpen), "Scheduled close", shape.xcross,
+     longOpen ? location.abovebar : location.belowbar,
+     color = color.new(color.orange, 0), text = "CAL-X", textcolor = color.white, size = size.small)
+
+alertcondition(canEnterLong and flat, "Calendar Swing Long", "Scheduled calendar long opened")
+alertcondition(canEnterShort and flat, "Calendar Swing Short", "Scheduled calendar short opened")
+alertcondition(isExitDay and not flat, "Calendar Swing Close", "Scheduled calendar position closed")

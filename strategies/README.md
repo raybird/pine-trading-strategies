@@ -22,11 +22,13 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
 | `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，18）
+## Trend & Momentum（趨勢與動量，20）
 
 | 策略 | 說明 |
 |------|------|
 | `MtfTrendSovereignV6` | 多時框趨勢主權 |
+| `TnSovereignIndiaCcfNiftyV6` | 印度 NSE 客製匯流期貨（RS 相對強度 + SuperTrend/EMA/MACD/RSI/ADX 匯流 + 選擇權 OI 確認 + 兩段式 50/50 金字塔 + CE/PE 模擬對沖），移植自 jayadevrana/pinescript-custom-confluence-futures-strategy-v6 |
+| `TnSovereignCalendarSwingV6` | 日曆（星期）排程擺盪策略（進場日/出場日曆法驅動 + 方向開關 + 選配 ATR Bracket），移植自 JoelPasapera/Strategies-in-Pine-Script-v6 |
 | `tn_sovereign_katana_flow_v6` | 雙平滑範圍濾波器 (Twin Range Filter) 趨勢策略 |
 | `tn_sovereign_vamo_v6` | VAMO 波動調整動量振盪器 |
 | `tn_triple_momentum_sovereign_v6` | 三重動量主權策略 |

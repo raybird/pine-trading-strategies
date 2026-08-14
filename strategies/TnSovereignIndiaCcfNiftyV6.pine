@@ -1,0 +1,385 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignIndiaCcfNiftyV6
+// ============================================================================
+// Causal Audit: 2026-08-14 18:30 CST
+// Version: v26.0814.1830
+// Build: Custom Confluence Futures (CCF) — India NSE / NIFTY Sovereign Port
+//
+// Source: jayadevrana/pinescript-custom-confluence-futures-strategy-v6
+//         (pinescript_custom_confluence_futures_strategy_v6.txt)
+//
+// Core Thesis:
+//   A multi-confluence NSE India futures engine that fuses relative-strength
+//   (chart vs benchmark), SuperTrend, dual-EMA cross, MACD, RSI, ADX and
+//   volume-EMA into a two-stage 50/50 pyramided entry, with option OI
+//   confirmation (condition 9) and simulated ATM CE/PE hedge signals.
+//
+// Sovereign Overlays:
+//   ✓ Relative Strength vs configurable benchmark (RS 21 / RS 55 zero-line)
+//   ✓ Core / Full / Half / Add setup ladder (RS55 gates the second leg)
+//   ✓ Heikin-Ashi solid-candle exit confirmation
+//   ✓ Optional options OI confirmation (futures OI + CE OI + PE OI condition)
+//   ✓ Simulated CE/PE hedge orders via alert webhook when divergence fires
+//   ✓ Close-on-candle % stop (gap-through protection)
+// ============================================================================
+strategy("TeleNexus Sovereign India CCF Nifty V6",
+     shorttitle = "India CCF V6",
+     overlay = true,
+     pyramiding = 4,
+     process_orders_on_close = true,
+     calc_on_order_fills = true,
+     initial_capital = 1000000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 50,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     slippage = 1)
+
+// ---------------------------------------------------------------------------
+// 0. SYMBOLS & EXECUTION CONTROLS
+// Note: backtest runs on the chart symbol; CE/PE logic is emitted as
+// signals/alerts because Pine cannot place real orders on other option symbols.
+// ---------------------------------------------------------------------------
+grpSym      = "0. Symbols"
+benchmarkTk = input.symbol("NSE:NIFTY", "RS Benchmark Ticker", group = grpSym)
+ceSymbol    = input.symbol("NSE:NIFTY", "ATM CE Symbol", group = grpSym)
+peSymbol    = input.symbol("NSE:NIFTY", "ATM PE Symbol", group = grpSym)
+futOiSym    = input.symbol("NSE:NIFTY", "Futures OI Data Symbol", group = grpSym)
+ceOiSym     = input.symbol("NSE:NIFTY", "ATM CE OI Data Symbol", group = grpSym)
+peOiSym     = input.symbol("NSE:NIFTY", "ATM PE OI Data Symbol", group = grpSym)
+reqOptOi    = input.bool(false, "Require condition 9 option/OI confirmation", group = grpSym)
+strictRs    = input.bool(false, "Require RS 21 and RS 55 same-bar zero cross", group = grpSym)
+showSig     = input.bool(true, "Show entry/exit/hedge markers", group = grpSym)
+simHedge    = input.bool(false, "Simulate CE/PE hedge orders on chart symbol", group = grpSym)
+showChk     = input.bool(false, "Show condition check marks", group = grpSym)
+
+// ---------------------------------------------------------------------------
+// 1. SUPERTREND
+// ---------------------------------------------------------------------------
+stAtrLen = input.int(2, "ST ATR Length", minval = 1, group = "1. SuperTrend")
+stFactor = input.float(1.0, "ST Factor", minval = 0.1, step = 0.1, group = "1. SuperTrend")
+
+// ---------------------------------------------------------------------------
+// 2. EMA CROSS
+// ---------------------------------------------------------------------------
+emaFastLen  = input.int(3, "EMA Fast Length", minval = 1, group = "2. EMA Cross")
+emaSlowLen  = input.int(13, "EMA Slow Length", minval = 1, group = "2. EMA Cross")
+emaTrendLen = input.int(21, "EMA Trend Length", minval = 1, group = "2. EMA Cross")
+
+// ---------------------------------------------------------------------------
+// 3. MACD
+// ---------------------------------------------------------------------------
+macdFastLen   = input.int(12, "MACD Fast Length", minval = 1, group = "3. MACD")
+macdSlowLen   = input.int(13, "MACD Slow Length", minval = 1, group = "3. MACD")
+macdSigLen    = input.int(12, "MACD Signal Smoothing", minval = 1, group = "3. MACD")
+
+// ---------------------------------------------------------------------------
+// 4. RSI
+// ---------------------------------------------------------------------------
+rsiLen = input.int(14, "RSI Length", minval = 1, group = "4. RSI")
+
+// ---------------------------------------------------------------------------
+// 5 & 6. RELATIVE STRENGTH vs BENCHMARK
+// ---------------------------------------------------------------------------
+rs21Len = input.int(21, "RS 21 Period", minval = 1, group = "5 & 6. Relative Strength")
+rs55Len = input.int(55, "RS 55 Period", minval = 1, group = "5 & 6. Relative Strength")
+
+// ---------------------------------------------------------------------------
+// 7. ADX & VOLUME
+// ---------------------------------------------------------------------------
+diLen         = input.int(14, "DI Length", minval = 1, group = "7. ADX and Volume")
+adxSm         = input.int(14, "ADX Smoothing", minval = 1, group = "7. ADX and Volume")
+adxThr        = input.float(21.0, "ADX Threshold", minval = 1, step = 0.5, group = "7. ADX and Volume")
+volEmaLen     = input.int(20, "Volume EMA Length", minval = 1, group = "7. ADX and Volume")
+
+// ---------------------------------------------------------------------------
+// 8. DIVERGENCE & HEDGE
+// ---------------------------------------------------------------------------
+divLook    = input.int(10, "Divergence Lookback", minval = 2, group = "8. Divergence and Hedge")
+hedgeQty   = input.float(50, "Hedge Signal Quantity %", minval = 1, maxval = 100, step = 1, group = "8. Divergence and Hedge")
+
+// ---------------------------------------------------------------------------
+// 9. TRADE MANAGEMENT
+// ---------------------------------------------------------------------------
+enStop  = input.bool(false, "Enable close-on-candle stop", group = "9. Trade Management")
+stopPct = input.float(1.0, "Stop Loss %", minval = 0.1, step = 0.1, group = "9. Trade Management")
+
+// Relative strength of a source against the benchmark over _len bars.
+f_rs(_src, _bench, _len) =>
+    _isNa   = na(_src[_len]) or na(_bench[_len])
+    _srcRoc = _src / _src[_len]
+    _bnRoc  = _bench / _bench[_len]
+    _isNa ? na : (_srcRoc / _bnRoc - 1.0)
+
+f_macd(_src) =>
+    _macd   = ta.ema(_src, macdFastLen) - ta.ema(_src, macdSlowLen)
+    _signal = ta.ema(_macd, macdSigLen)
+    [_macd, _signal]
+
+// Chart-symbol core calculations
+[stLine, stDir] = ta.supertrend(stFactor, stAtrLen)
+emaFast   = ta.ema(close, emaFastLen)
+emaSlow   = ta.ema(close, emaSlowLen)
+emaTrend  = ta.ema(close, emaTrendLen)
+[macdLine, macdSignal] = f_macd(close)
+rsiValue  = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adxValue] = ta.dmi(diLen, adxSm)
+volEma    = ta.ema(volume, volEmaLen)
+
+benchmarkClose = request.security(benchmarkTk, timeframe.period, close)
+rs21 = f_rs(close, benchmarkClose, rs21Len)
+rs55 = f_rs(close, benchmarkClose, rs55Len)
+
+[haOp, haHi, haLo, haCl] = request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, [open, high, low, close])
+solidGreenHa = haCl > haOp and haLo == math.min(haOp, haCl)
+solidRedHa   = haCl < haOp and haHi == math.max(haOp, haCl)
+
+// External CE / PE data (condition 9 + hedge signals)
+ceCl  = request.security(ceSymbol, timeframe.period, close)
+ceHi  = request.security(ceSymbol, timeframe.period, high)
+ceLo  = request.security(ceSymbol, timeframe.period, low)
+peCl  = request.security(peSymbol, timeframe.period, close)
+peHi  = request.security(peSymbol, timeframe.period, high)
+peLo  = request.security(peSymbol, timeframe.period, low)
+futOi = request.security(futOiSym, timeframe.period, close, ignore_invalid_symbol = true)
+ceOi  = request.security(ceOiSym, timeframe.period, close, ignore_invalid_symbol = true)
+peOi  = request.security(peOiSym, timeframe.period, close, ignore_invalid_symbol = true)
+
+[ceHaOp, ceHaHi, ceHaLo, ceHaCl] = request.security(ticker.heikinashi(ceSymbol), timeframe.period, [open, high, low, close])
+[peHaOp, peHaHi, peHaLo, peHaCl] = request.security(ticker.heikinashi(peSymbol), timeframe.period, [open, high, low, close])
+ceSolidGreen = ceHaCl > ceHaOp and ceHaLo == math.min(ceHaOp, ceHaCl)
+ceSolidRed   = ceHaCl < ceHaOp and ceHaHi == math.max(ceHaOp, ceHaCl)
+peSolidGreen = peHaCl > peHaOp and peHaLo == math.min(peHaOp, peHaCl)
+peSolidRed   = peHaCl < peHaOp and peHaHi == math.max(peHaOp, peHaCl)
+
+[ceMacd, ceSig] = f_macd(ceCl)
+[peMacd, peSig] = f_macd(peCl)
+ceEmaFast  = ta.ema(ceCl, emaFastLen)
+ceEmaSlow  = ta.ema(ceCl, emaSlowLen)
+ceEmaTrend = ta.ema(ceCl, emaTrendLen)
+peEmaFast  = ta.ema(peCl, emaFastLen)
+peEmaSlow  = ta.ema(peCl, emaSlowLen)
+peEmaTrend = ta.ema(peCl, emaTrendLen)
+ceRsi = ta.rsi(ceCl, rsiLen)
+peRsi = ta.rsi(peCl, rsiLen)
+
+// ---------------------------------------------------------------------------
+// BUY CONDITIONS (LONG)
+// ---------------------------------------------------------------------------
+adxRise  = adxValue > adxThr and adxValue > adxValue[1]
+emaBull  = emaFast > emaSlow
+macdBull = macdLine > macdSignal and macdLine > 0
+rsiBull  = rsiValue > 50
+rs21Bull = rs21 > 0
+rs55Bull = rs55 > 0
+rsBothUp = ta.crossover(rs21, 0) and ta.crossover(rs55, 0)
+volBull  = volume > volEma
+
+validC9 = ceSymbol != peSymbol and ceSymbol != syminfo.tickerid and peSymbol != syminfo.tickerid
+useC9   = reqOptOi and validC9
+
+futOiLong = close > close[1] and (na(futOi) or futOi > futOi[1])
+ceOiLong  = ceCl > ceCl[1] and (na(ceOi) or ceOi < ceOi[1])
+peOiLong  = peCl < peCl[1] and (na(peOi) or peOi > peOi[1])
+cond9Long = useC9 ? futOiLong and ceOiLong and peOiLong : true
+
+longCore  = adxRise and emaBull and macdBull and rsiBull and rs21Bull and volBull and cond9Long
+longRsOk  = strictRs ? rsBothUp : rs55Bull
+longFull  = longCore and longRsOk
+longHalf  = longCore and not longRsOk
+longAdd   = strategy.position_size > 0 and longCore and rs55Bull
+
+// ---------------------------------------------------------------------------
+// SELL CONDITIONS (SHORT)
+// ---------------------------------------------------------------------------
+emaBear  = emaFast < emaSlow
+macdBear = macdLine < macdSignal and macdLine < 0
+rsiBear  = rsiValue < 50
+rs21Bear = rs21 < 0
+rs55Bear = rs55 < 0
+rsBothDn = ta.crossunder(rs21, 0) and ta.crossunder(rs55, 0)
+
+futOiShort = close < close[1] and (na(futOi) or futOi > futOi[1])
+ceOiShort  = ceCl < ceCl[1] and (na(ceOi) or ceOi > ceOi[1])
+peOiShort  = peCl > peCl[1] and (na(peOi) or peOi < peOi[1])
+cond9Short = useC9 ? futOiShort and ceOiShort and peOiShort : true
+
+shortCore = adxRise and emaBear and macdBear and rsiBear and rs21Bear and volBull and cond9Short
+shortRsOk = strictRs ? rsBothDn : rs55Bear
+shortFull = shortCore and shortRsOk
+shortHalf = shortCore and not shortRsOk
+shortAdd  = strategy.position_size < 0 and shortCore and rs55Bear
+
+// ---------------------------------------------------------------------------
+// TWO-STAGE (50/50) ENTRY / EXIT STATE MACHINE
+// ---------------------------------------------------------------------------
+var bool longLeg1  = false
+var bool longLeg2  = false
+var bool shortLeg1 = false
+var bool shortLeg2 = false
+
+flat      = strategy.position_size == 0
+longOpen  = strategy.position_size > 0
+shortOpen = strategy.position_size < 0
+
+if flat
+    longLeg1  := false
+    longLeg2  := false
+    shortLeg1 := false
+    shortLeg2 := false
+
+// Flip: a buy setup closes open shorts; a sell setup closes open longs.
+if shortOpen and (longFull or longHalf)
+    strategy.close("SHORT-1", comment = "Close short for buy setup", alert_message = "Close short: buy setup appeared")
+    strategy.close("SHORT-2", comment = "Close short for buy setup", alert_message = "Close short: buy setup appeared")
+    shortLeg1 := false
+    shortLeg2 := false
+
+if longOpen and (shortFull or shortHalf)
+    strategy.close("LONG-1", comment = "Close long for sell setup", alert_message = "Close long: sell setup appeared")
+    strategy.close("LONG-2", comment = "Close long for sell setup", alert_message = "Close long: sell setup appeared")
+    longLeg1 := false
+    longLeg2 := false
+
+// Long entries (full = both legs, half = leg 1 only, add = leg 2 while open).
+if flat and longFull
+    strategy.entry("LONG-1", strategy.long, comment = "Buy futures 50%", alert_message = "Buy futures first 50%")
+    strategy.entry("LONG-2", strategy.long, comment = "Buy futures remaining 50%", alert_message = "Buy futures remaining 50%; all conditions including RS55 met")
+    longLeg1 := true
+    longLeg2 := true
+else if flat and longHalf
+    strategy.entry("LONG-1", strategy.long, comment = "Buy futures 50%", alert_message = "Buy futures 50%; waiting for RS55 condition")
+    longLeg1 := true
+
+if longOpen and longLeg1 and not longLeg2 and longAdd
+    strategy.entry("LONG-2", strategy.long, comment = "Add futures 50%", alert_message = "Buy futures remaining 50%; RS55 condition met")
+    longLeg2 := true
+
+// Short entries.
+if flat and shortFull
+    strategy.entry("SHORT-1", strategy.short, comment = "Sell futures 50%", alert_message = "Sell futures first 50%")
+    strategy.entry("SHORT-2", strategy.short, comment = "Sell futures remaining 50%", alert_message = "Sell futures remaining 50%; all conditions including RS55 met")
+    shortLeg1 := true
+    shortLeg2 := true
+else if flat and shortHalf
+    strategy.entry("SHORT-1", strategy.short, comment = "Sell futures 50%", alert_message = "Sell futures 50%; waiting for RS55 condition")
+    shortLeg1 := true
+
+if shortOpen and shortLeg1 and not shortLeg2 and shortAdd
+    strategy.entry("SHORT-2", strategy.short, comment = "Add futures 50%", alert_message = "Sell futures remaining 50%; RS55 condition met")
+    shortLeg2 := true
+
+// Futures exits (half = EMA+MACD flip; full = EMA+MACD+RSI+trend EMA+HA close).
+longExitHalf  = longOpen and emaBear and macdBear
+longExitFull  = longOpen and emaBear and macdBear and rsiBear and close < emaTrend and solidRedHa
+shortExitHalf = shortOpen and emaBull and macdBull
+shortExitFull = shortOpen and emaBull and macdBull and rsiBull and close > emaTrend and solidGreenHa
+
+if longExitHalf and longLeg1 and longLeg2
+    strategy.close("LONG-1", comment = "Exit long 50%", alert_message = "Exit 50% long futures: EMA and MACD turned bearish")
+    longLeg1 := false
+
+if longExitFull
+    strategy.close("LONG-1", comment = "Exit long full", alert_message = "Exit full long futures: all exit conditions matched")
+    strategy.close("LONG-2", comment = "Exit long full", alert_message = "Exit full long futures: all exit conditions matched")
+    longLeg1 := false
+    longLeg2 := false
+
+if shortExitHalf and shortLeg1 and shortLeg2
+    strategy.close("SHORT-1", comment = "Exit short 50%", alert_message = "Exit 50% short futures: EMA and MACD turned bullish")
+    shortLeg1 := false
+
+if shortExitFull
+    strategy.close("SHORT-1", comment = "Exit short full", alert_message = "Exit full short futures: all exit conditions matched")
+    strategy.close("SHORT-2", comment = "Exit short full", alert_message = "Exit full short futures: all exit conditions matched")
+    shortLeg1 := false
+    shortLeg2 := false
+
+// Gap-through % stop, intentionally closed at candle close.
+longStopHit  = enStop and longOpen and close <= strategy.position_avg_price * (1 - stopPct / 100)
+shortStopHit = enStop and shortOpen and close >= strategy.position_avg_price * (1 + stopPct / 100)
+
+if longStopHit
+    strategy.close("LONG-1", comment = "Long stop close", alert_message = "Long stop hit; close at candle close")
+    strategy.close("LONG-2", comment = "Long stop close", alert_message = "Long stop hit; close at candle close")
+    longLeg1 := false
+    longLeg2 := false
+
+if shortStopHit
+    strategy.close("SHORT-1", comment = "Short stop close", alert_message = "Short stop hit; close at candle close")
+    strategy.close("SHORT-2", comment = "Short stop close", alert_message = "Short stop hit; close at candle close")
+    shortLeg1 := false
+    shortLeg2 := false
+
+// ---------------------------------------------------------------------------
+// CE / PE HEDGE & DIVERGENCE SIGNALS
+// ---------------------------------------------------------------------------
+futHHigher = high >= ta.highest(high[1], divLook)
+futLLower  = low  <= ta.lowest(low[1],  divLook)
+ceLowerHi  = ceHi < ta.highest(ceHi[1], divLook)
+ceLowerLoE = ceLo <= ta.lowest(ceLo[1], divLook)
+peLowerLoE = peLo <= ta.lowest(peLo[1], divLook)
+peLowerHi  = peHi < ta.highest(peHi[1], divLook)
+
+longDiv    = futHHigher and ceLowerHi and peLowerLoE
+shortDiv   = futLLower  and ceLowerLoE and peLowerHi
+
+sellCeH = longDiv  and ceHaCl < ceHaOp and ceHaCl[1] > ceHaOp[1] and ceSolidRed
+buyPeH  = longDiv  and peHaCl > peHaOp and peHaCl[1] < peHaOp[1] and peSolidGreen
+sellPeH = shortDiv and peHaCl < peHaOp and peHaCl[1] > peHaOp[1] and peSolidRed
+buyCeH  = shortDiv and ceHaCl > ceHaOp and ceHaCl[1] < ceHaOp[1] and ceSolidGreen
+
+if simHedge and sellCeH
+    strategy.order("SIM SELL CE", strategy.short, qty = hedgeQty, comment = "Sim sell CE hedge", alert_message = "Sell CE hedge signal")
+if simHedge and buyPeH
+    strategy.order("SIM BUY PE", strategy.long, qty = hedgeQty, comment = "Sim buy PE hedge", alert_message = "Buy PE hedge signal")
+if simHedge and sellPeH
+    strategy.order("SIM SELL PE", strategy.short, qty = hedgeQty, comment = "Sim sell PE hedge", alert_message = "Sell PE hedge signal")
+if simHedge and buyCeH
+    strategy.order("SIM BUY CE", strategy.long, qty = hedgeQty, comment = "Sim buy CE hedge", alert_message = "Buy CE hedge signal")
+
+// ---------------------------------------------------------------------------
+// VISUALISATION
+// ---------------------------------------------------------------------------
+plot(emaFast, "EMA Fast", color = color.new(color.teal, 0))
+plot(emaSlow, "EMA Slow", color = color.new(color.orange, 0))
+plot(emaTrend, "EMA 21", color = color.new(color.gray, 0))
+plot(stLine, "SuperTrend", color = close >= stLine ? color.new(color.green, 0) : color.new(color.red, 0), style = plot.style_linebr)
+
+plotshape(showSig and longHalf and flat, "Buy 50%", shape.triangleup, location.belowbar, color = color.new(color.green, 0), text = "B50", textcolor = color.white, size = size.tiny)
+plotshape(showSig and longFull and flat, "Buy 100%", shape.triangleup, location.belowbar, color = color.new(color.lime, 0), text = "B100", textcolor = color.black, size = size.tiny)
+plotshape(showSig and shortHalf and flat, "Sell 50%", shape.triangledown, location.abovebar, color = color.new(color.red, 0), text = "S50", textcolor = color.white, size = size.tiny)
+plotshape(showSig and shortFull and flat, "Sell 100%", shape.triangledown, location.abovebar, color = color.new(color.maroon, 0), text = "S100", textcolor = color.white, size = size.tiny)
+plotshape(showSig and longExitHalf, "Long Exit 50%", shape.xcross, location.abovebar, color = color.new(color.orange, 0), text = "LX50", textcolor = color.black, size = size.tiny)
+plotshape(showSig and longExitFull, "Long Exit Full", shape.xcross, location.abovebar, color = color.new(color.red, 0), text = "LX", textcolor = color.white, size = size.tiny)
+plotshape(showSig and shortExitHalf, "Short Exit 50%", shape.xcross, location.belowbar, color = color.new(color.orange, 0), text = "SX50", textcolor = color.black, size = size.tiny)
+plotshape(showSig and shortExitFull, "Short Exit Full", shape.xcross, location.belowbar, color = color.new(color.green, 0), text = "SX", textcolor = color.white, size = size.tiny)
+plotshape(showSig and sellCeH, "Sell CE Hedge", shape.diamond, location.abovebar, color = color.new(color.red, 0), text = "Sell CE", textcolor = color.white, size = size.tiny)
+plotshape(showSig and buyPeH, "Buy PE Hedge", shape.diamond, location.belowbar, color = color.new(color.green, 0), text = "Buy PE", textcolor = color.white, size = size.tiny)
+plotshape(showSig and sellPeH, "Sell PE Hedge", shape.diamond, location.abovebar, color = color.new(color.red, 0), text = "Sell PE", textcolor = color.white, size = size.tiny)
+plotshape(showSig and buyCeH, "Buy CE Hedge", shape.diamond, location.belowbar, color = color.new(color.green, 0), text = "Buy CE", textcolor = color.white, size = size.tiny)
+
+plotchar(showChk and adxRise, "C1 ADX rising above threshold", "1", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (emaBull or emaBear), "C2 EMA direction", "2", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (macdBull or macdBear), "C3 MACD direction and zero line", "3", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (rsiBull or rsiBear), "C4 RSI 50 filter", "4", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (rs21Bull or rs21Bear), "C5 RS 21 zero line", "5", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (rs55Bull or rs55Bear), "C6 RS 55 zero line", "6", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and volBull, "C8 Volume greater than EMA", "8", location.top, color = color.new(color.blue, 0), size = size.tiny)
+plotchar(showChk and (cond9Long or cond9Short), "C9 Option/OI confirmation", "9", location.top, color = color.new(color.blue, 0), size = size.tiny)
+
+alertcondition(longHalf and flat, "Buy Futures 50%", "Buy futures 50%; core conditions met, RS55 not complete")
+alertcondition(longFull and flat, "Buy Futures 100%", "Buy futures 100%; all conditions met")
+alertcondition(longAdd, "Add Buy Futures 50%", "Buy remaining 50%; RS55 condition met")
+alertcondition(shortHalf and flat, "Sell Futures 50%", "Sell futures 50%; core conditions met, RS55 not complete")
+alertcondition(shortFull and flat, "Sell Futures 100%", "Sell futures 100%; all conditions met")
+alertcondition(shortAdd, "Add Sell Futures 50%", "Sell remaining 50%; RS55 condition met")
+alertcondition(longExitHalf, "Exit Long 50%", "Exit 50% long futures")
+alertcondition(longExitFull, "Exit Long Full", "Exit full long futures")
+alertcondition(shortExitHalf, "Exit Short 50%", "Exit 50% short futures")
+alertcondition(shortExitFull, "Exit Short Full", "Exit full short futures")
+alertcondition(sellCeH, "Sell CE Hedge", "Sell CE hedge signal")
+alertcondition(buyPeH, "Buy PE Hedge", "Buy PE hedge signal")
+alertcondition(sellPeH, "Sell PE Hedge", "Sell PE hedge signal")
+alertcondition(buyCeH, "Buy CE Hedge", "Buy CE hedge signal")
