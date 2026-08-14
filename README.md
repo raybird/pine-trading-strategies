@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 171 個已實體化主權策略，分 14 大類（v26.0803.1922 更新）
+- **[`/strategies`](./strategies/README.md)** — 174 個已實體化主權策略，分 14 大類（v26.0814.1839 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -44,7 +44,7 @@
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 20 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪 |
-| **Mean Reversion & Oscillator** | 20 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸 |
+| **Mean Reversion & Oscillator** | 21 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 34 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊 |
 | **Volume & Order Flow** | 15 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破 |
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **173** | 主權策略矩陣（v26.0814.1830 更新） |
+| **Total** | **174** | 主權策略矩陣（v26.0814.1839 更新） |
 
+
+> **最新加入（v26.0814.1839）**: 獵頭審計 #132 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy` + `tradingview pine v6 strategy`，確認 19+2 個儲存庫。新檢索 repos 逐一深掃：**jchi18/ote-tradingview** 含 **VWAP Pullback v6 strategy() 實體**（Session-RTH 錨定 VWAP 公平值線 + 1H EMA 快慢趨勢偏見 + VWAP 斜率方向閘門 + A+ 品質過濾【強趨勢 + 最小 ATR 拉伸】+ 可選交易時窗 09:30-11:00 ET + 掛單限價買入 + 穿越停損取消掛單狀態機 + 可選每日一單 + 固定/風險% 倉位 + 0.5×ATR 停損/R:R bracket，移植為 `TnSovereignVwapPullbackV6`；真實 MNQ 驗證 A+ 子集 74% 勝率/PF 3.48 @RR1.25）；pineforge-4pass/pineforge-engine 為 C++ 回溯運行時（非策略實體），SimoneGitter/AdvancedMA-Toolkit 為 MA 工具庫（先前已覆蓋），FRX132/Trading_View_Indicator 為 Session Sweeps 已於 #113 覆蓋，jayadevrana/pinescript-adaptive-market-suite 具商業授權（含 AI 訓練/改作明確禁止之法律聲明）不予移植；其餘 repos 均已在 #101–#131 審計覆蓋。TradingView 社群 pine-script-v6 頁面僅 3 枚非 strategy() 實體（KF_ANALYTICS library / Account Guardian indicator / Smart Weekly Lines indicator）。新增 1 策略（173→174）：Mean Reversion & Oscillator 20→21。Dashboard/README 完全對位。
 
 > **最新加入（v26.0814.1830）**: 獵頭審計 #131 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy` + `tradingview pine v6 strategy`，確認 19+9 個儲存庫，跨頁確認）。新檢索 repos 逐一深掃：jayadevrana/pinescript-custom-confluence-futures-strategy-v6 含 **Custom Confluence Futures v6 strategy() 實體**（RS 相對強度 vs 基準 + SuperTrend + 雙 EMA 交叉 + MACD/RSI/ADX/量能 EMA 匯流 + 選擇權 OI 確認條件 9 + 50/50 兩段式金字塔 + CE/PE 模擬對沖，移植為 `TnSovereignIndiaCcfNiftyV6`）；JoelPasapera/Strategies-in-Pine-Script-v6 重新深掃發現 **Calendar Day-Of-Week Swing v6 strategy() 實體**（Ultra simple strategy.pine，進場/出場星期曆法驅動之時間編排擺盪，此前審計未覆蓋，移植為 `TnSovereignCalendarSwingV6`）。其餘候選排除理由：JoelPasapera 其餘 5 枚（Breakout Strategy / Donchian Time / EMA and BARS / Fibonacci / Time&Schedule）已由 TnSovereignDonchianBreakoutV6、tn_sovereign_fibonacci_v6、v6_stochastic_divergence 與現有 session/breakout 策略覆蓋；hamedator/advanced-pinescript-strategy-v6 為 dummy demo（EMA+RSI+HTF 基礎邏輯）已由 TnSovereignMultiConfluenceV6 等覆蓋；Viprasol-Tech/pine-script-strategy 之 MA Cross Confluence 已於 #130 移植為 TnSovereignMaConfluenceV6；jonathanpratt5564/crypto_darvas_pinescript 為 indicator() alerts-only 實體無 strategy()；ggamer5555 之 MT5 Live Alerts 已由 TnSovereignDcaWebhookV6 覆蓋；kierbica/pinescriptv6 為 v6 知識庫/docs 倉；JackSmack1971 為 indicators 集合；sametbarbaros-dev/PineScript-Architect 為 AI Studio 工具；AleeexTk/TradingView-SMC-EPOS 為空/結構倉；FaustoS88/Pydantic-AI-Pinescript-Expert 與 monch1962/stratus 為非策略實體。TradingView 社群今日僅 1 枚 strategy()（rukabjustin 8AM H/L STRATEGY，開盤區間突破已由 TnSovereignOrbMultiSessionV6 等覆蓋），餘為 indicator() 實體。新增 2 策略（171→173）：Trend & Momentum 18→20。Dashboard/README 完全對位。
 

@@ -1,0 +1,209 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignVwapPullbackV6
+// ============================================================================
+// Causal Audit: 2026-08-14 18:39 CST
+// Version: v26.0814.1839
+// Build: OTE VWAP Pullback Strategy — Sovereign Port
+//
+// Source: jchi18/ote-tradingview (VWAP_Pullback_Strategy.pine)
+//
+// Core Thesis:
+//   The "VWAP Pullback" is a dip-buy edge, NOT momentum. In a confirmed
+//   uptrend (1H EMA fast > slow), with rising VWAP and price above VWAP,
+//   a resting LIMIT BUY is placed at the VWAP line; it fills when price
+//   pulls back to fair value. Stop is 0.5x ATR beyond VWAP, target is a
+//   configurable R:R. The resting order is cancelled if price closes
+//   through the stop before filling. Reset each session. Mirror for shorts.
+//
+//   Real-contract validation (MNQ): the A+ subset (strong trend + stretched)
+//   reaches 74% win / PF 3.48 @ RR 1.25 — vs PF ~1 for plain momentum.
+//
+// Sovereign Overlays:
+//   ✓ Session-RTH Anchored VWAP (cumulative TPV/Vol) or 24h Daily Reset
+//   ✓ HTF EMA Trend Bias (request.security, non-repainting)
+//   ✓ VWAP Slope Direction Gate
+//   ✓ A+ Quality Filter (strong trend + min stretch from VWAP in ATR)
+//   ✓ Optional Trade Time Window (MNQ edge 09:30-11:00 ET)
+//   ✓ Resting Limit Entry with Cancel-on-Stop-Close-Through
+//   ✓ Optional Max-One-Trade-Per-Day
+//   ✓ Fixed Contracts or Risk-% of Equity Sizing
+//   ✓ ATR Stop (0.5x) + R:R Target Bracket
+//   ✓ On-Chart VWAP/Stop/Target Visualization
+// ============================================================================
+
+strategy("TnSovereignVwapPullbackV6 [TeleNexus]",
+     "VWAP Pullback",
+     overlay = true,
+     initial_capital       = 50000,
+     currency              = currency.USD,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     pyramiding            = 0,
+     commission_type       = strategy.commission.cash_per_contract,
+     commission_value      = 0.62,
+     slippage              = 1,
+     calc_on_every_tick    = false,
+     max_lines_count       = 50
+)
+
+// ────────────────────────────────────────────────────────── Trend bias ────
+const string GRP_BIAS = "Trend bias (higher timeframe)"
+string htfRes     = input.timeframe("60", "Bias timeframe", group = GRP_BIAS, tooltip = "60 = 1H.")
+int    emaFastLen = input.int(50,  "Fast EMA", minval = 1, group = GRP_BIAS)
+int    emaSlowLen = input.int(100, "Slow EMA", minval = 1, group = GRP_BIAS)
+
+// ──────────────────────────────────────────────────────────────── VWAP ────
+const string GRP_VWAP = "VWAP"
+string vwapReset = input.string("Regular session (RTH)", "VWAP resets", options = ["Each day", "Regular session (RTH)"], group = GRP_VWAP, tooltip = "For index futures use RTH — the anchor the edge was validated on. Each day = standard 24h reset (crypto).")
+string rthSess   = input.session("0930-1600", "Regular session (for RTH mode)", group = GRP_VWAP)
+string sessTz    = input.string("America/New_York", "Session timezone", group = GRP_VWAP)
+
+// ────────────────────────────────────────────────────────────── Signals ────
+const string GRP_SIG = "Signals (VWAP pullback / dip-buy)"
+int    slopeLen   = input.int(5, "VWAP slope length (bars)", minval = 1, group = GRP_SIG)
+bool   useWindow  = input.bool(true, "Only trade during a time window", group = GRP_SIG, tooltip = "Index edge is strongest 09:30-11:00 ET. ON by default.")
+string winSess    = input.session("0930-1100", "Trade window", group = GRP_SIG)
+bool   oncePerDay = input.bool(false, "Max one trade per day", group = GRP_SIG, tooltip = "OFF = re-arm allowed after a trade closes. ON = at most one trade/day.")
+bool   onlyAplus  = input.bool(true, "Only take A+ (strong trend + stretched) trades", group = GRP_SIG, tooltip = "ON = only the highest-conviction subset (real NQ: PF 3.48 vs 1.46 for all dips).")
+float  stretchMin = input.float(1.0, "A+: min stretch from VWAP (ATR)", minval = 0, step = 0.1, group = GRP_SIG)
+
+// ──────────────────────────────────────────────────────── Risk / targets ──
+const string GRP_RISK = "Risk / targets"
+int    atrLen    = input.int(14, "ATR length", minval = 1, group = GRP_RISK)
+float  stopMult  = input.float(0.5, "Stop = ATR x", minval = 0.1, step = 0.1, group = GRP_RISK)
+float  rr        = input.float(1.25, "Target R:R", minval = 0.5, step = 0.1, group = GRP_RISK, tooltip = "1.25 = highest win rate (A+ dip-buy: 74% win / PF 3.48). Raise to 2.0-2.5 for max profit per trade.")
+
+// ──────────────────────────────────────────────────────── Position size ──
+const string GRP_POS = "Position size"
+string sizeMode = input.string("Fixed contracts", "Sizing", options = ["Fixed contracts", "Risk % of equity"], group = GRP_POS, tooltip = "Fixed = clean R-multiples in the tester. Risk % = size each trade to risk a fixed %.")
+int    fixedQty = input.int(1, "Fixed contracts", minval = 1, group = GRP_POS)
+float  riskPct  = input.float(1.0, "Risk per trade (%)", minval = 0.1, step = 0.1, group = GRP_POS)
+float  pointVal = input.float(2.0, "$ per point (MNQ=2, NQ=20, MES=5, ES=50)", minval = 0.01, group = GRP_POS)
+
+// ═══════════════════════════════════════════════════════════│ VWAP core │══
+bool useRth      = vwapReset == "Regular session (RTH)"
+bool inRth       = not na(time(timeframe.period, rthSess, sessTz))
+bool newDay      = timeframe.change("D")
+bool anchorReset = useRth ? (inRth and not inRth[1]) : newDay
+bool accumulate  = useRth ? inRth : true
+
+var float cumPV = 0.0
+var float cumV  = 0.0
+var float cumTP = 0.0
+var int   cumN  = 0
+
+if anchorReset
+    cumPV := 0.0
+    cumV  := 0.0
+    cumTP := 0.0
+    cumN  := 0
+
+if accumulate
+    float vv = na(volume) ? 0.0 : volume
+    cumPV += hlc3 * vv
+    cumV  += vv
+    cumTP += hlc3
+    cumN  += 1
+
+float vwap = cumV > 0 ? cumPV / cumV : (cumN > 0 ? cumTP / cumN : hlc3)
+float atr  = ta.atr(atrLen)
+
+// Session stretch from VWAP (for A+ filter)
+var float maxUpATR = 0.0
+var float maxDnATR = 0.0
+if anchorReset
+    maxUpATR := 0.0
+    maxDnATR := 0.0
+
+float stretchNow = atr > 0 ? (close - vwap) / atr : 0.0
+maxUpATR := math.max(maxUpATR, stretchNow)
+maxDnATR := math.max(maxDnATR, -stretchNow)
+
+// ═══════════════════════════════════════════════════════════│ Trend bias │══
+float emaFast = request.security(syminfo.tickerid, htfRes, ta.ema(close, emaFastLen), barmerge.gaps_off, barmerge.lookahead_off)
+float emaSlow = request.security(syminfo.tickerid, htfRes, ta.ema(close, emaSlowLen), barmerge.gaps_off, barmerge.lookahead_off)
+
+bool biasBull = emaFast > emaSlow
+bool biasBear = emaFast < emaSlow
+bool slopeUp  = vwap > vwap[slopeLen]
+bool slopeDn  = vwap < vwap[slopeLen]
+bool strongUp = close > emaFast and emaFast > emaSlow and emaFast > emaFast[10]
+bool strongDn = close < emaFast and emaFast < emaSlow and emaFast < emaFast[10]
+bool inWin    = useWindow ? not na(time(timeframe.period, winSess, sessTz)) : true
+
+// ═══════════════════════════════════════════════════════│ Trade state │═══
+var bool  armedL = false
+var bool  deadL  = false
+var bool  armedS = false
+var bool  deadS  = false
+var float eL  = na
+var float sL  = na
+var float tL  = na
+var float eS  = na
+var float ssS = na
+var float tS  = na
+var bool  tradedToday = false
+
+if newDay
+    strategy.cancel("L")
+    strategy.cancel("S")
+    armedL := false
+    armedS := false
+    deadL  := false
+    deadS  := false
+    tradedToday := false
+
+bool flat     = strategy.position_size == 0
+bool canTrade = not oncePerDay or not tradedToday
+
+f_qty(entry, stop) =>
+    float rp = math.abs(entry - stop)
+    sizeMode == "Risk % of equity" and rp > 0 ? math.max(1, math.floor((strategy.equity * riskPct / 100.0) / (rp * pointVal))) : fixedQty
+
+// ── Arm LONG ──
+bool aOkL = not onlyAplus or (strongUp and maxUpATR >= stretchMin)
+if flat and not armedL and not deadL and not armedS and canTrade and inWin and biasBull and slopeUp and close > vwap and aOkL and atr > 0
+    eL := vwap
+    sL := vwap - stopMult * atr
+    tL := eL + rr * (eL - sL)
+    if eL > sL
+        strategy.entry("L", strategy.long, qty = f_qty(eL, sL), limit = eL)
+        armedL := true
+
+// Cancel unfilled long if price closes through the stop
+if armedL and flat and close < sL
+    strategy.cancel("L")
+    armedL := false
+    deadL  := true
+
+// ── Arm SHORT ──
+bool aOkS = not onlyAplus or (strongDn and maxDnATR >= stretchMin)
+if flat and not armedS and not deadS and not armedL and canTrade and inWin and biasBear and slopeDn and close < vwap and aOkS and atr > 0
+    eS  := vwap
+    ssS := vwap + stopMult * atr
+    tS  := eS - rr * (ssS - eS)
+    if ssS > eS
+        strategy.entry("S", strategy.short, qty = f_qty(eS, ssS), limit = eS)
+        armedS := true
+
+if armedS and flat and close > ssS
+    strategy.cancel("S")
+    armedS := false
+    deadS  := true
+
+// ── Manage open positions: attach bracket exits ──
+if strategy.position_size > 0
+    armedL := false
+    tradedToday := true
+    strategy.exit("xL", "L", stop = sL, limit = tL)
+
+if strategy.position_size < 0
+    armedS := false
+    tradedToday := true
+    strategy.exit("xS", "S", stop = ssS, limit = tS)
+
+// ═══════════════════════════════════════════════════════════│ Visuals │═══
+plot(vwap, "VWAP", color.new(color.blue, 0), 2)
+plot(strategy.position_size != 0 ? (strategy.position_size > 0 ? sL : ssS) : na, "Stop",   color.new(color.red, 0),   style = plot.style_linebr)
+plot(strategy.position_size != 0 ? (strategy.position_size > 0 ? tL : tS)  : na, "Target", color.new(color.green, 0), style = plot.style_linebr)
