@@ -43,7 +43,7 @@
 | 分類 | 數量 | 說明 |
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
-| **Trend & Momentum** | 20 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪 |
+| **Trend & Momentum** | 21 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎 |
 | **Mean Reversion & Oscillator** | 21 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 34 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊 |
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **174** | 主權策略矩陣（v26.0814.1839 更新） |
+| **Total** | **175** | 主權策略矩陣（v26.0815.1830 更新） |
 
+
+> **最新加入（v26.0815.1830）**: 獵頭審計 #133 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy` + `tradingview pine v6 strategy`，確認 19+19 個儲存庫，跨頁確認）。新檢索 repos 逐一深掃：**casoon/pine-scripts (WavesUnchained)** 冰山深掃發現 **Market-Average Relationship Engine v1.2.0 strategy() 實體**（2026-08-12 新增，六維 MA 關係診斷引擎【Trend/Respect/Extension/Compression/Acceleration/Exhaustion，單一市場參考 MA 十型可選】+ 歷史 Respect 互動品質統計【勝率/outcome 品質/樣本信賴度】+ 關係振盪器 -100..+100 + 11 態狀態引擎 + 七家族事件【Pullback 順勢拉回 / Compression Release 壓縮釋放 / Do-Not-Chase / Exhaustion / Break / Divergence / Turn】+ 僅順勢入場【拉回 + 動量釋放】+ MA 錨定 ATR 停損 2.5× + 波動尖峰平倉 + Break-Even + Session/Date/MaxDD/Loss-Streak 完整濾網，移植為 `TnSovereignMaRelationshipV6`）；印證本次為冰山深掃──casoon 其餘 7 枚 strategy()（Chandelier / Smooth Trend / Oscillator Divergence / WaveTrend / Commodity Pulse / Reversal Engine / Vein Reversal）已由現有庫覆蓋（tn_chandelier_flip_radar_v6 / tn_smooth_trend_radar_v6 / TnSovereignWaveTrendV20 / TnSovereignReversalEngineV6 / TnSovereignVeinReversalV6 等）；Corbanistan/Trading-Pinescript-v6 為 3 枚 indicator() 實體（TrendHorizon Suite / Range Indicator / Anchored VWAP）無 strategy()；pineforge corpus/codegen/mcp 系列為回溯運行時與工具（非策略實體）；s4mn0v/pinescript、suyons/tradingview-indicators、Alorse/pinescript-strategies 之策略為 v2-v5 基礎教育實作或已覆蓋；其餘 repos 均已在 #101–#132 審計覆蓋。TradingView 社群 pine-script-v6 頁面仍僅 3 枚非 strategy() 實體（KF_ANALYTICS library / Account Guardian indicator / Smart Weekly Lines indicator）。新增 1 策略（174→175）：Trend & Momentum 20→21。Dashboard/README 完全對位。
 
 > **最新加入（v26.0814.1839）**: 獵頭審計 #132 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy` + `tradingview pine v6 strategy`，確認 19+2 個儲存庫。新檢索 repos 逐一深掃：**jchi18/ote-tradingview** 含 **VWAP Pullback v6 strategy() 實體**（Session-RTH 錨定 VWAP 公平值線 + 1H EMA 快慢趨勢偏見 + VWAP 斜率方向閘門 + A+ 品質過濾【強趨勢 + 最小 ATR 拉伸】+ 可選交易時窗 09:30-11:00 ET + 掛單限價買入 + 穿越停損取消掛單狀態機 + 可選每日一單 + 固定/風險% 倉位 + 0.5×ATR 停損/R:R bracket，移植為 `TnSovereignVwapPullbackV6`；真實 MNQ 驗證 A+ 子集 74% 勝率/PF 3.48 @RR1.25）；pineforge-4pass/pineforge-engine 為 C++ 回溯運行時（非策略實體），SimoneGitter/AdvancedMA-Toolkit 為 MA 工具庫（先前已覆蓋），FRX132/Trading_View_Indicator 為 Session Sweeps 已於 #113 覆蓋，jayadevrana/pinescript-adaptive-market-suite 具商業授權（含 AI 訓練/改作明確禁止之法律聲明）不予移植；其餘 repos 均已在 #101–#131 審計覆蓋。TradingView 社群 pine-script-v6 頁面僅 3 枚非 strategy() 實體（KF_ANALYTICS library / Account Guardian indicator / Smart Weekly Lines indicator）。新增 1 策略（173→174）：Mean Reversion & Oscillator 20→21。Dashboard/README 完全對位。
 

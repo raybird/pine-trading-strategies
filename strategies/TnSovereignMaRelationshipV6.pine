@@ -1,0 +1,716 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignMaRelationshipV6
+// ============================================================================
+// Causal Audit: 2026-08-15 18:30 CST
+// Version: v26.0815.1830
+// Build: MA Relationship Engine Edition — Sovereign Port
+//
+// Source: casoon/pine-scripts (WavesUnchained)
+//         strategies/market_average_relationship_engine/market_average_relationship_engine_strategy.pine
+//         v1.2.0 (2026-08-12)
+//
+// Core Thesis:
+//   A six-dimension diagnostic engine that evaluates price's relationship to a
+//   single, consistently-selected moving-average family (the "market reference"),
+//   instead of chasing MA crossovers. Six dimensions are scored 0..100:
+//   Trend / Respect / Extension / Compression / Acceleration / Exhaustion.
+//   A Relationship Oscillator (-100..+100) blends signed trend quality with
+//   quality penalties, and a state engine classifies the market regime. Two
+//   trend-following event families (Pullback Dip-Buy and Compression Release)
+//   drive entries — both gated on an established, quality-checked trend.
+//   Divergence and Turn-From-Extreme remain diagnostic. Risk: ATR trailing
+//   stop anchored to the reference MA, volatility-spike exit, break-even,
+//   session/date/drawdown/loss-streak filters.
+//
+// Sovereign Overlays:
+//   ✓ Single Reference MA family (EMA/SMA/WMA/HMA/VWMA/RMA/DEMA/TEMA/ALMA)
+//   ✓ Six-Dimension Relationship Diagnostic (0..100 each)
+//   ✓ Historical Respect Statistics (MA touch hit-rate + outcome quality)
+//   ✓ Relationship Oscillator + State Engine (11 regimes)
+//   ✓ Event Engine: Pullback / Compression Release / Do-Not-Chase /
+//     Exhaustion / Break / Divergence / Turn (bar-confirmed, cooldown-gated)
+//   ✓ Trend-Following Entry Model (Pullback + Momentum Release only)
+//   ✓ ATR Anchored Stop / Volatility Exit / Break-Even / Full Filter Stack
+// ============================================================================
+strategy("TeleNexus Sovereign MA Relationship V6",
+     overlay              = false,
+     precision            = 1,
+     max_lines_count      = 50,
+     max_labels_count     = 500,
+     max_bars_back        = 500,
+     initial_capital      = 10000,
+     default_qty_type     = strategy.percent_of_equity,
+     default_qty_value    = 100,
+     commission_type      = strategy.commission.percent,
+     commission_value     = 0.04,
+     slippage             = 1,
+     pyramiding           = 0,
+     calc_on_every_tick   = false,
+     process_orders_on_close = true)
+
+// ---------------------------------------------------------------------------
+// WavesUnchained palette
+// ---------------------------------------------------------------------------
+var color BULL_COL   = color.rgb(46, 160, 100)
+var color BEAR_COL   = color.rgb(214, 78, 78)
+var color NEU_COL    = color.rgb(135, 140, 150)
+var color WARN_COL   = color.rgb(229, 168, 55)
+var color COMP_COL   = color.rgb(110, 105, 180)
+var color INK_COL    = color.new(#0b1020, 0)
+var color GOLD_COL   = color.new(#ffd166, 0)
+
+// ---------------------------------------------------------------------------
+// Group labels
+// ---------------------------------------------------------------------------
+var string G_MA      = "01 · Moving Average"
+var string G_NORM    = "02 · Normalization"
+var string G_SCORES  = "03 · Score Model"
+var string G_EVENTS  = "04 · Event Logic"
+var string G_DIVERGE = "05 · Divergence & Extremes"
+var string G_VIS     = "06 · Visuals"
+var string G_ALR     = "07 · Alerts"
+var string G_STR     = "08 · Strategy"
+var string G_EXIT    = "09 · Advanced Exits"
+
+// ---------------------------------------------------------------------------
+// Inputs — Reference MA
+// ---------------------------------------------------------------------------
+string maTypeInput = input.string("EMA", "MA family",
+     options = ["EMA", "SMA", "WMA", "HMA", "VWMA", "RMA", "DEMA", "TEMA", "ALMA"],
+     group = G_MA)
+int maLengthInput = input.int(50, "MA length", minval = 2, maxval = 1000, group = G_MA)
+sourceInput = input.source(close, "Source", group = G_MA)
+float almaOffsetInput = input.float(0.85, "ALMA offset", minval = 0.0, maxval = 1.0, step = 0.05, group = G_MA, inline = "alma")
+float almaSigmaInput = input.float(6.0, "Sigma", minval = 0.5, maxval = 20.0, step = 0.5, group = G_MA, inline = "alma")
+
+// ---------------------------------------------------------------------------
+// Inputs — Normalization
+// ---------------------------------------------------------------------------
+int atrLengthInput = input.int(14, "ATR length", minval = 2, maxval = 200, group = G_NORM)
+int slopeLengthInput = input.int(10, "MA slope lookback", minval = 1, maxval = 100, group = G_NORM)
+float fullSlopeAtrInput = input.float(0.50, "Full slope strength (ATR)", minval = 0.05, maxval = 5.0, step = 0.05, group = G_NORM,
+     tooltip = "MA movement across the slope lookback that counts as full slope strength.")
+int persistenceLengthInput = input.int(20, "Direction persistence", minval = 3, maxval = 200, group = G_NORM)
+int efficiencyLengthInput = input.int(14, "Price efficiency lookback", minval = 3, maxval = 100, group = G_NORM)
+int statisticsLengthInput = input.int(100, "Statistical reference", minval = 20, maxval = 500, group = G_NORM,
+     tooltip = "Historical reference for unusual extension and volatility contraction.")
+
+// ---------------------------------------------------------------------------
+// Inputs — Score model
+// ---------------------------------------------------------------------------
+float extensionNormalAtrInput = input.float(0.75, "Normal extension (ATR)", minval = 0.05, maxval = 10.0, step = 0.05, group = G_SCORES, inline = "ext")
+float extensionExtremeAtrInput = input.float(2.50, "Extreme", minval = 0.10, maxval = 20.0, step = 0.10, group = G_SCORES, inline = "ext")
+float proximityAtrInput = input.float(0.35, "MA interaction zone (ATR)", minval = 0.05, maxval = 3.0, step = 0.05, group = G_SCORES)
+int respectLookbackInput = input.int(80, "Respect sample lookback", minval = 20, maxval = 250, group = G_SCORES, inline = "respect")
+int respectResponseBarsInput = input.int(4, "Outcome bars", minval = 1, maxval = 20, group = G_SCORES, inline = "respect")
+int compressionLengthInput = input.int(20, "Compression lookback", minval = 5, maxval = 100, group = G_SCORES, inline = "comp")
+float compressionBandAtrInput = input.float(0.45, "Band (ATR)", minval = 0.05, maxval = 3.0, step = 0.05, group = G_SCORES, inline = "comp")
+int accelerationLengthInput = input.int(5, "Acceleration lookback", minval = 1, maxval = 50, group = G_SCORES)
+int exhaustionLengthInput = input.int(8, "Exhaustion lookback", minval = 2, maxval = 50, group = G_SCORES)
+
+// ---------------------------------------------------------------------------
+// Inputs — Event logic
+// ---------------------------------------------------------------------------
+bool confirmedOnlyInput = input.bool(true, "Only confirm events on closed bars", group = G_EVENTS)
+int signalCooldownInput = input.int(8, "Signal cooldown", minval = 0, maxval = 100, group = G_EVENTS)
+float minimumTrendInput = input.float(55.0, "Minimum trend quality", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "quality")
+float minimumRespectInput = input.float(55.0, "Minimum respect", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "quality")
+float pullbackPriorExtensionInput = input.float(0.70, "Pullback prior extension (ATR)", minval = 0.0, maxval = 10.0, step = 0.05, group = G_EVENTS)
+float maximumPullbackExhaustionInput = input.float(65.0, "Maximum pullback exhaustion", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS)
+float accelerationThresholdInput = input.float(60.0, "Momentum acceleration threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "momentum")
+float compressionThresholdInput = input.float(65.0, "Compression threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "momentum")
+float chaseExtensionThresholdInput = input.float(75.0, "Do-not-chase extension", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "risk")
+float exhaustionThresholdInput = input.float(68.0, "Exhaustion warning", minval = 0.0, maxval = 100.0, step = 1.0, group = G_EVENTS, inline = "risk")
+int breakConfirmationInput = input.int(3, "Relationship-break confirmation", minval = 1, maxval = 20, group = G_EVENTS)
+
+// ---------------------------------------------------------------------------
+// Inputs — Divergence & extremes
+// ---------------------------------------------------------------------------
+int divergencePivotLeftInput = input.int(5, "Divergence pivot bars (left)", minval = 2, maxval = 30, group = G_DIVERGE, inline = "divpiv")
+int divergencePivotRightInput = input.int(5, "Right", minval = 2, maxval = 30, group = G_DIVERGE, inline = "divpiv")
+int turnLookbackInput = input.int(30, "Extreme lookback", minval = 5, maxval = 150, group = G_DIVERGE, inline = "turn")
+float turnExtremeLevelInput = input.float(55.0, "Extreme level", minval = 10.0, maxval = 100.0, step = 1.0, group = G_DIVERGE, inline = "turn")
+int turnConfirmBarsInput = input.int(3, "Turn confirmation bars", minval = 2, maxval = 15, group = G_DIVERGE)
+
+// ---------------------------------------------------------------------------
+// Inputs — Visuals
+// ---------------------------------------------------------------------------
+bool showMaInput = input.bool(true, "Show selected MA in price chart", group = G_VIS)
+bool showPriceMarkersInput = input.bool(true, "Show event markers in price chart", group = G_VIS)
+bool showPaneMarkersInput = input.bool(true, "Show event markers in oscillator", group = G_VIS)
+bool showEventTooltipsInput = input.bool(true, "Create event tooltip labels", group = G_VIS)
+bool showStateBackgroundInput = input.bool(true, "Shade oscillator state", group = G_VIS)
+bool showRelationshipFillInput = input.bool(true, "Fill relationship to zero", group = G_VIS)
+bool colorBarsInput = input.bool(false, "Color price bars by relationship", group = G_VIS)
+int visualTransparencyInput = input.int(78, "Background transparency", minval = 0, maxval = 100, group = G_VIS)
+
+// ---------------------------------------------------------------------------
+// Inputs — Alerts
+// ---------------------------------------------------------------------------
+bool enablePullbackAlertsInput = input.bool(true, "Pullback confirmations", group = G_ALR)
+bool enableMomentumAlertsInput = input.bool(true, "Compression releases", group = G_ALR)
+bool enableRiskAlertsInput = input.bool(true, "Do-not-chase / exhaustion", group = G_ALR)
+bool enableBreakAlertsInput = input.bool(true, "Relationship breaks", group = G_ALR)
+bool enableDivergenceAlertsInput = input.bool(true, "Price/relationship divergence", group = G_ALR)
+bool enableTurnAlertsInput = input.bool(true, "Turn from extreme", group = G_ALR)
+
+// ---------------------------------------------------------------------------
+// Inputs — Strategy / Advanced exits
+// ---------------------------------------------------------------------------
+float stopAtrMultInput = input.float(2.5, "Stop distance from reference MA (ATR×)", minval = 0.5, maxval = 10.0, step = 0.1, group = G_STR)
+string tradeDirInput = input.string("Both", "Trade Direction", options = ["Both", "Long Only", "Short Only"], group = G_STR)
+bool confirmClose = input.bool(true, "Entries on Confirmed Bar Only", group = G_STR)
+int cooldownBars = input.int(0, "Cooldown Bars After Exit", minval = 0, group = G_STR)
+bool enableBE = input.bool(false, "Break-Even Stop", group = G_STR)
+float beATRInput = input.float(1.0, "Break-Even Trigger (ATR×)", minval = 0.1, step = 0.1, group = G_STR)
+bool useSession = input.bool(false, "Session Filter", group = G_STR)
+string sessionInput = input.session("0000-2345", "Session", group = G_STR)
+bool useDateRange = input.bool(false, "Date Range", group = G_STR)
+input.time dateFromVal = input.time(timestamp("01 Jan 2020 00:00 +0000"), "From", group = G_STR)
+input.time dateToVal = input.time(timestamp("31 Dec 2030 23:59 +0000"), "To", group = G_STR)
+bool useMaxDD = input.bool(false, "Max Drawdown", group = G_STR)
+float maxDD = input.float(20.0, "Max Drawdown (%)", minval = 1, step = 1, group = G_STR)
+bool useMaxIntraDD = input.bool(false, "Max Intraday Loss", group = G_STR)
+float maxIntraDD = input.float(5.0, "Max Intraday Loss (%)", minval = 1, step = 1, group = G_STR)
+bool useLossStreak = input.bool(false, "Losing Streak Limit", group = G_STR)
+int maxLossStreak = input.int(5, "Max Consecutive Losses", minval = 1, group = G_STR)
+bool enableVolExit = input.bool(true, "Volatility Exit (ATR spike)", group = G_EXIT)
+float volExitRatio = input.float(1.6, "  Volatility Spike Ratio", minval = 1.2, maxval = 5.0, step = 0.1, group = G_EXIT)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+clamp(float value, float minimum, float maximum) =>
+    math.max(minimum, math.min(maximum, value))
+
+safeDiv(float numerator, float denominator, float fallback = 0.0) =>
+    math.abs(denominator) > 1e-10 ? numerator / denominator : fallback
+
+normalize(float value, float low, float high) =>
+    high > low ? clamp((value - low) / (high - low), 0.0, 1.0) : 0.0
+
+signedDirection(float value, float deadZone = 0.0) =>
+    value > deadZone ? 1.0 : value < -deadZone ? -1.0 : 0.0
+
+barsSinceEvent(bool condition) =>
+    nz(ta.barssince(condition), 100000)
+
+formatScore(float value) =>
+    str.tostring(value, "#.0")
+
+formatSigned(float value) =>
+    str.tostring(value, value >= 0.0 ? "+#.00" : "#.00")
+
+movingAverage(float src, int length, string averageType) =>
+    float ema1 = ta.ema(src, length)
+    float ema2 = ta.ema(ema1, length)
+    float ema3 = ta.ema(ema2, length)
+    switch averageType
+        "EMA"  => ema1
+        "SMA"  => ta.sma(src, length)
+        "WMA"  => ta.wma(src, length)
+        "HMA"  => ta.hma(src, length)
+        "VWMA" => ta.vwma(src, length)
+        "RMA"  => ta.rma(src, length)
+        "DEMA" => 2.0 * ema1 - ema2
+        "TEMA" => 3.0 * ema1 - 3.0 * ema2 + ema3
+        "ALMA" => ta.alma(src, length, almaOffsetInput, almaSigmaInput)
+        => ema1
+
+// Historical interaction quality — a touch is evaluated only after enough bars
+// have elapsed, so no future information leaks into the currently executing bar.
+respectStatistics(float average, float atrValue, int lookback, int responseBars, float proximityAtr) =>
+    float successes = 0.0
+    float failures = 0.0
+    float weightedOutcome = 0.0
+    for i = responseBars to lookback
+        float atrAtTouch = atrValue[i]
+        float maAtTouch = average[i]
+        float distanceAtTouch = math.abs(close[i] - maAtTouch)
+        bool valid = not na(atrAtTouch) and not na(maAtTouch)
+        bool touched = valid and distanceAtTouch <= atrAtTouch * proximityAtr
+        if touched
+            float localSlope = maAtTouch - average[i + 1]
+            float trendSide = localSlope >= 0.0 ? 1.0 : -1.0
+            float outcomeClose = close[i - responseBars]
+            float outcomeMa = average[i - responseBars]
+            float outcomeAtr = atrValue[i - responseBars]
+            float progress = safeDiv((outcomeClose - close[i]) * trendSide, outcomeAtr, 0.0)
+            bool heldCorrectSide = (outcomeClose - outcomeMa) * trendSide > 0.0
+            bool succeeded = heldCorrectSide and progress > 0.0
+            successes += succeeded ? 1.0 : 0.0
+            failures += succeeded ? 0.0 : 1.0
+            weightedOutcome += clamp(progress, -1.0, 1.0)
+    float samples = successes + failures
+    float hitRate = samples > 0.0 ? successes / samples : 0.5
+    float outcomeQuality = samples > 0.0 ? normalize(weightedOutcome / samples, -0.35, 0.50) : 0.5
+    float confidence = normalize(samples, 2.0, 10.0)
+    float rawScore = 100.0 * (0.70 * hitRate + 0.30 * outcomeQuality)
+    float confidenceAdjusted = 50.0 + (rawScore - 50.0) * confidence
+    [clamp(confidenceAdjusted, 0.0, 100.0), samples, 100.0 * hitRate]
+
+// ---------------------------------------------------------------------------
+// Core series
+// ---------------------------------------------------------------------------
+float ma = movingAverage(sourceInput, maLengthInput, maTypeInput)
+float atr = ta.atr(atrLengthInput)
+float safeAtr = math.max(atr, syminfo.mintick)
+
+float signedDistanceAtr = safeDiv(close - ma, safeAtr, 0.0)
+float absoluteDistanceAtr = math.abs(signedDistanceAtr)
+
+float maSlopeAtr = safeDiv(ma - ma[slopeLengthInput], safeAtr, 0.0)
+float maSlopeStrength = 100.0 * normalize(math.abs(maSlopeAtr), 0.0, fullSlopeAtrInput)
+float maDirection = signedDirection(maSlopeAtr, fullSlopeAtrInput * 0.05)
+float priceSide = signedDirection(close - ma, safeAtr * 0.03)
+
+float bullishSideRatio = ta.sma(close > ma ? 1.0 : 0.0, persistenceLengthInput)
+float bearishSideRatio = ta.sma(close < ma ? 1.0 : 0.0, persistenceLengthInput)
+float sidePersistence = priceSide > 0.0 ? bullishSideRatio : priceSide < 0.0 ? bearishSideRatio : 0.5
+
+float bullishSlopeRatio = ta.sma(ma > ma[1] ? 1.0 : 0.0, persistenceLengthInput)
+float bearishSlopeRatio = ta.sma(ma < ma[1] ? 1.0 : 0.0, persistenceLengthInput)
+float slopePersistence = maDirection > 0.0 ? bullishSlopeRatio : maDirection < 0.0 ? bearishSlopeRatio : 0.5
+
+float pathTravel = ta.sma(math.abs(close - close[1]), efficiencyLengthInput) * efficiencyLengthInput
+float netTravel = math.abs(close - close[efficiencyLengthInput])
+float priceEfficiency = clamp(safeDiv(netTravel, pathTravel, 0.0), 0.0, 1.0)
+float efficiencyScore = 100.0 * priceEfficiency
+
+float directionalAgreement = if priceSide != 0.0 and maDirection != 0.0 and priceSide == maDirection
+    1.0
+else if priceSide != 0.0 and maDirection == 0.0
+    0.45
+else if priceSide == 0.0
+    0.25
+else
+    0.0
+
+float trendQuality =
+     100.0 * clamp(
+         0.30 * (maSlopeStrength / 100.0) +
+         0.25 * sidePersistence +
+         0.20 * slopePersistence +
+         0.15 * priceEfficiency +
+         0.10 * directionalAgreement,
+         0.0,
+         1.0)
+
+float trendDirection = if directionalAgreement >= 1.0
+    priceSide
+else if maDirection != 0.0
+    maDirection
+else
+    priceSide
+
+float signedTrend = trendQuality * trendDirection
+
+// ---------------------------------------------------------------------------
+// Six diagnostic scores
+// ---------------------------------------------------------------------------
+// 1. TREND — trendQuality (0..100) with signedTrend carrying direction.
+[respectScore0, respectSamples, respectHitRate] = respectStatistics(ma, safeAtr, respectLookbackInput, respectResponseBarsInput, proximityAtrInput)
+
+// Blend a small current-regime component: the MA is more usable when price
+// does not repeatedly alternate sides.
+float sideFlipRate = ta.sma(ta.cross(close, ma) ? 1.0 : 0.0, persistenceLengthInput)
+float currentStability = 100.0 * (1.0 - clamp(sideFlipRate * 4.0, 0.0, 1.0))
+float respectScore = clamp(0.80 * respectScore0 + 0.20 * currentStability, 0.0, 100.0)
+
+// 3. EXTENSION — distance (ATR-normalized) + statistical rarity (Z-score).
+float extensionAtrComponent = 100.0 * normalize(absoluteDistanceAtr, extensionNormalAtrInput, extensionExtremeAtrInput)
+float distanceMean = ta.sma(absoluteDistanceAtr, statisticsLengthInput)
+float distanceDeviation = ta.stdev(absoluteDistanceAtr, statisticsLengthInput)
+float extensionZ = safeDiv(absoluteDistanceAtr - distanceMean, distanceDeviation, 0.0)
+float extensionRarityComponent = 100.0 * normalize(extensionZ, 0.0, 2.5)
+float extensionScore = clamp(0.70 * extensionAtrComponent + 0.30 * extensionRarityComponent, 0.0, 100.0)
+
+// 4. COMPRESSION — clustering near the MA + tightness + volatility contraction.
+float nearMaRatio = ta.sma(absoluteDistanceAtr <= compressionBandAtrInput ? 1.0 : 0.0, compressionLengthInput)
+float averageDistance = ta.sma(absoluteDistanceAtr, compressionLengthInput)
+float tightness = 1.0 - normalize(averageDistance, compressionBandAtrInput * 0.40, compressionBandAtrInput * 1.80)
+float atrBaseline = ta.sma(safeAtr, statisticsLengthInput)
+float volatilityContraction = 1.0 - normalize(safeDiv(safeAtr, atrBaseline, 1.0), 0.70, 1.20)
+float compressionScore = 100.0 * clamp(0.50 * nearMaRatio + 0.30 * tightness + 0.20 * volatilityContraction, 0.0, 1.0)
+
+// 5. ACCELERATION — separation velocity + slope acceleration + return acceleration.
+float directedDistance = signedDistanceAtr * trendDirection
+float separationChange = directedDistance - directedDistance[accelerationLengthInput]
+float separationVelocity = safeDiv(separationChange, accelerationLengthInput, 0.0)
+float currentSlopeVelocity = safeDiv(maSlopeAtr, slopeLengthInput, 0.0) * trendDirection
+float priorSlopeAtr = safeDiv(ma[accelerationLengthInput] - ma[accelerationLengthInput + slopeLengthInput], safeAtr[accelerationLengthInput], 0.0)
+float priorSlopeVelocity = safeDiv(priorSlopeAtr, slopeLengthInput, 0.0) * trendDirection
+float slopeAcceleration = currentSlopeVelocity - priorSlopeVelocity
+float recentReturn = safeDiv(close - close[accelerationLengthInput], safeAtr, 0.0) * trendDirection
+float priorReturn = safeDiv(close[accelerationLengthInput] - close[accelerationLengthInput * 2], safeAtr[accelerationLengthInput], 0.0) * trendDirection
+float returnAcceleration = recentReturn - priorReturn
+float separationAccelerationScore = 100.0 * normalize(separationVelocity, 0.00, 0.25)
+float slopeAccelerationScore = 100.0 * normalize(slopeAcceleration, 0.00, 0.04)
+float returnAccelerationScore = 100.0 * normalize(returnAcceleration, 0.00, 1.50)
+float accelerationScore = clamp(0.50 * separationAccelerationScore + 0.20 * slopeAccelerationScore + 0.30 * returnAccelerationScore, 0.0, 100.0)
+
+// 6. EXHAUSTION — efficiency decay + opposing wick pressure + loss of progress + acceleration loss.
+float efficiencyNow = priceEfficiency
+float efficiencyPrior = priceEfficiency[exhaustionLengthInput]
+float efficiencyDecay = normalize(efficiencyPrior - efficiencyNow, 0.0, 0.35)
+float candleRange = math.max(high - low, syminfo.mintick)
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+float opposingWickRatio = if trendDirection > 0.0
+    upperWick / candleRange
+else if trendDirection < 0.0
+    lowerWick / candleRange
+else
+    0.0
+float wickPressure = ta.sma(opposingWickRatio, exhaustionLengthInput)
+float directionalProgress = safeDiv((close - close[exhaustionLengthInput]) * trendDirection, safeAtr, 0.0)
+float progressFailure = 1.0 - normalize(directionalProgress, 0.0, 1.50)
+float accelerationLoss = normalize(accelerationScore[exhaustionLengthInput] - accelerationScore, 0.0, 50.0)
+float extensionPrecondition = extensionScore / 100.0
+float exhaustionScore = 100.0 * clamp(extensionPrecondition * (0.35 * efficiencyDecay + 0.25 * wickPressure + 0.25 * progressFailure + 0.15 * accelerationLoss), 0.0, 1.0)
+
+// ---------------------------------------------------------------------------
+// Relationship oscillator
+// ---------------------------------------------------------------------------
+float extensionPenalty = normalize(extensionScore, chaseExtensionThresholdInput, 100.0)
+float exhaustionPenalty = normalize(exhaustionScore, exhaustionThresholdInput, 100.0)
+float qualityPenalty = clamp(0.18 * extensionPenalty + 0.32 * exhaustionPenalty, 0.0, 0.50)
+float relationshipRaw = signedTrend * (1.0 - qualityPenalty)
+float relationship = ta.ema(relationshipRaw, 3)
+float relationshipSignal = ta.ema(relationship, 5)
+
+bool bullishEnvironment = relationship >= 20.0
+bool bearishEnvironment = relationship <= -20.0
+bool neutralEnvironment = not bullishEnvironment and not bearishEnvironment
+
+// ---------------------------------------------------------------------------
+// State engine
+// ---------------------------------------------------------------------------
+bool isConfirmed = not confirmedOnlyInput or barstate.isconfirmed
+
+bool compressionState = compressionScore >= compressionThresholdInput and trendQuality < minimumTrendInput
+bool bullishAccelerationState = trendDirection > 0.0 and trendQuality >= minimumTrendInput and accelerationScore >= accelerationThresholdInput and exhaustionScore < exhaustionThresholdInput
+bool bearishAccelerationState = trendDirection < 0.0 and trendQuality >= minimumTrendInput and accelerationScore >= accelerationThresholdInput and exhaustionScore < exhaustionThresholdInput
+bool overextendedState = trendQuality >= minimumTrendInput and extensionScore >= chaseExtensionThresholdInput and exhaustionScore < exhaustionThresholdInput
+bool exhaustionState = trendQuality >= minimumTrendInput and exhaustionScore >= exhaustionThresholdInput
+bool healthyTrendState = trendQuality >= minimumTrendInput and respectScore >= minimumRespectInput and extensionScore < chaseExtensionThresholdInput and exhaustionScore < exhaustionThresholdInput and not bullishAccelerationState and not bearishAccelerationState
+
+string stateName = if compressionState
+    "MA Compression"
+else if exhaustionState and trendDirection > 0.0
+    "Bullish Exhaustion Risk"
+else if exhaustionState and trendDirection < 0.0
+    "Bearish Exhaustion Risk"
+else if overextendedState and trendDirection > 0.0
+    "Bullish — Do Not Chase"
+else if overextendedState and trendDirection < 0.0
+    "Bearish — Do Not Chase"
+else if bullishAccelerationState
+    "Bullish Acceleration"
+else if bearishAccelerationState
+    "Bearish Acceleration"
+else if healthyTrendState and trendDirection > 0.0
+    "Healthy Bullish Trend"
+else if healthyTrendState and trendDirection < 0.0
+    "Healthy Bearish Trend"
+else if trendDirection > 0.0 and trendQuality >= 35.0
+    "Developing Bullish Relationship"
+else if trendDirection < 0.0 and trendQuality >= 35.0
+    "Developing Bearish Relationship"
+else
+    "Neutral / Unstructured"
+
+// ---------------------------------------------------------------------------
+// Event engine
+// ---------------------------------------------------------------------------
+bool priorBullishTrend = trendDirection[1] > 0.0 and trendQuality[1] >= minimumTrendInput
+bool priorBearishTrend = trendDirection[1] < 0.0 and trendQuality[1] >= minimumTrendInput
+
+float recentMaximumExtension = ta.highest(absoluteDistanceAtr[1], math.max(2, accelerationLengthInput + 1))
+
+bool bullishRejection = low <= ma + safeAtr * proximityAtrInput and close > ma and close > open and close >= (high + low) * 0.5
+bool bearishRejection = high >= ma - safeAtr * proximityAtrInput and close < ma and close < open and close <= (high + low) * 0.5
+
+bool bullishPullbackSetup = isConfirmed and priorBullishTrend and trendDirection > 0.0 and trendQuality >= minimumTrendInput and respectScore >= minimumRespectInput and recentMaximumExtension >= pullbackPriorExtensionInput and bullishRejection and exhaustionScore <= maximumPullbackExhaustionInput
+bool bearishPullbackSetup = isConfirmed and priorBearishTrend and trendDirection < 0.0 and trendQuality >= minimumTrendInput and respectScore >= minimumRespectInput and recentMaximumExtension >= pullbackPriorExtensionInput and bearishRejection and exhaustionScore <= maximumPullbackExhaustionInput
+
+bool compressionWasPresent = ta.highest(compressionScore[1], compressionLengthInput) >= compressionThresholdInput
+
+bool bullishMomentumSetup = isConfirmed and compressionWasPresent and ta.crossover(signedDistanceAtr, compressionBandAtrInput) and maSlopeAtr > 0.0 and accelerationScore >= accelerationThresholdInput and priceEfficiency >= 0.35 and exhaustionScore < exhaustionThresholdInput
+bool bearishMomentumSetup = isConfirmed and compressionWasPresent and ta.crossunder(signedDistanceAtr, -compressionBandAtrInput) and maSlopeAtr < 0.0 and accelerationScore >= accelerationThresholdInput and priceEfficiency >= 0.35 and exhaustionScore < exhaustionThresholdInput
+
+bool bullishDoNotChaseSetup = isConfirmed and trendDirection > 0.0 and trendQuality >= minimumTrendInput and ta.crossover(extensionScore, chaseExtensionThresholdInput)
+bool bearishDoNotChaseSetup = isConfirmed and trendDirection < 0.0 and trendQuality >= minimumTrendInput and ta.crossover(extensionScore, chaseExtensionThresholdInput)
+
+bool bullishExhaustionSetup = isConfirmed and trendDirection > 0.0 and ta.crossover(exhaustionScore, exhaustionThresholdInput)
+bool bearishExhaustionSetup = isConfirmed and trendDirection < 0.0 and ta.crossover(exhaustionScore, exhaustionThresholdInput)
+
+float recentBullishAcceptance = ta.sma(close > ma ? 1.0 : 0.0, breakConfirmationInput)
+float recentBearishAcceptance = ta.sma(close < ma ? 1.0 : 0.0, breakConfirmationInput)
+
+bool bullishRelationshipBrokenSetup = isConfirmed and trendDirection[breakConfirmationInput] > 0.0 and trendQuality[breakConfirmationInput] >= minimumTrendInput and recentBearishAcceptance >= 0.80 and relationship < 10.0 and maSlopeAtr <= fullSlopeAtrInput * 0.10
+bool bearishRelationshipBrokenSetup = isConfirmed and trendDirection[breakConfirmationInput] < 0.0 and trendQuality[breakConfirmationInput] >= minimumTrendInput and recentBullishAcceptance >= 0.80 and relationship > -10.0 and maSlopeAtr >= -fullSlopeAtrInput * 0.10
+bullishRelationshipBrokenSetup := bullishRelationshipBrokenSetup and not bullishRelationshipBrokenSetup[1]
+bearishRelationshipBrokenSetup := bearishRelationshipBrokenSetup and not bearishRelationshipBrokenSetup[1]
+
+// Divergence — price pivots remain pure diagnostics; they gate nothing.
+float pivotLowPrice = ta.pivotlow(low, divergencePivotLeftInput, divergencePivotRightInput)
+float pivotHighPrice = ta.pivothigh(high, divergencePivotLeftInput, divergencePivotRightInput)
+bool newPivotLow = not na(pivotLowPrice)
+bool newPivotHigh = not na(pivotHighPrice)
+
+var float lastPivotLowPrice = na
+var float lastPivotLowRelationship = na
+var float lastPivotHighPrice = na
+var float lastPivotHighRelationship = na
+
+bool bullishDivergenceSetup = isConfirmed and newPivotLow and not na(lastPivotLowPrice) and pivotLowPrice < lastPivotLowPrice and relationship[divergencePivotRightInput] > lastPivotLowRelationship
+bool bearishDivergenceSetup = isConfirmed and newPivotHigh and not na(lastPivotHighPrice) and pivotHighPrice > lastPivotHighPrice and relationship[divergencePivotRightInput] < lastPivotHighRelationship
+
+if newPivotLow
+    lastPivotLowPrice := pivotLowPrice
+    lastPivotLowRelationship := relationship[divergencePivotRightInput]
+if newPivotHigh
+    lastPivotHighPrice := pivotHighPrice
+    lastPivotHighRelationship := relationship[divergencePivotRightInput]
+
+// Turn from extreme — pivot-free relationship curling off its own extreme.
+float relationshipRecentLow = ta.lowest(relationship, turnLookbackInput)
+float relationshipRecentHigh = ta.highest(relationship, turnLookbackInput)
+bool bullishTurnSetup = isConfirmed and relationshipRecentLow <= -turnExtremeLevelInput and ta.rising(relationship, turnConfirmBarsInput)
+bool bearishTurnSetup = isConfirmed and relationshipRecentHigh >= turnExtremeLevelInput and ta.falling(relationship, turnConfirmBarsInput)
+bullishTurnSetup := bullishTurnSetup and not bullishTurnSetup[1]
+bearishTurnSetup := bearishTurnSetup and not bearishTurnSetup[1]
+
+// Shared cooldown by event family.
+bool pullbackCandidate = bullishPullbackSetup or bearishPullbackSetup
+bool momentumCandidate = bullishMomentumSetup or bearishMomentumSetup
+bool chaseCandidate = bullishDoNotChaseSetup or bearishDoNotChaseSetup
+bool exhaustionCandidate = bullishExhaustionSetup or bearishExhaustionSetup
+bool breakCandidate = bullishRelationshipBrokenSetup or bearishRelationshipBrokenSetup
+bool divergenceCandidate = bullishDivergenceSetup or bearishDivergenceSetup
+bool turnCandidate = bullishTurnSetup or bearishTurnSetup
+
+bool pullbackAllowed = barsSinceEvent(pullbackCandidate[1]) > signalCooldownInput
+bool momentumAllowed = barsSinceEvent(momentumCandidate[1]) > signalCooldownInput
+bool chaseAllowed = barsSinceEvent(chaseCandidate[1]) > signalCooldownInput
+bool exhaustionAllowed = barsSinceEvent(exhaustionCandidate[1]) > signalCooldownInput
+bool breakAllowed = barsSinceEvent(breakCandidate[1]) > signalCooldownInput
+bool divergenceAllowed = barsSinceEvent(divergenceCandidate[1]) > signalCooldownInput
+bool turnAllowed = barsSinceEvent(turnCandidate[1]) > signalCooldownInput
+
+bool bullishPullback = bullishPullbackSetup and pullbackAllowed
+bool bearishPullback = bearishPullbackSetup and pullbackAllowed
+bool bullishMomentum = bullishMomentumSetup and momentumAllowed
+bool bearishMomentum = bearishMomentumSetup and momentumAllowed
+bool bullishDoNotChase = bullishDoNotChaseSetup and chaseAllowed
+bool bearishDoNotChase = bearishDoNotChaseSetup and chaseAllowed
+bool bullishExhaustion = bullishExhaustionSetup and exhaustionAllowed
+bool bearishExhaustion = bearishExhaustionSetup and exhaustionAllowed
+bool bullishRelationshipBroken = bullishRelationshipBrokenSetup and breakAllowed
+bool bearishRelationshipBroken = bearishRelationshipBrokenSetup and breakAllowed
+bool bullishDivergence = bullishDivergenceSetup and divergenceAllowed
+bool bearishDivergence = bearishDivergenceSetup and divergenceAllowed
+bool bullishTurn = bullishTurnSetup and turnAllowed
+bool bearishTurn = bearishTurnSetup and turnAllowed
+
+// ---------------------------------------------------------------------------
+// Visuals — oscillator
+// ---------------------------------------------------------------------------
+color relationshipColor = if relationship > 0.0
+    color.from_gradient(relationship, 0.0, 100.0, NEU_COL, BULL_COL)
+else if relationship < 0.0
+    color.from_gradient(relationship, -100.0, 0.0, BEAR_COL, NEU_COL)
+else
+    NEU_COL
+
+color stateBackground = if not showStateBackgroundInput
+    na
+else if compressionState
+    color.new(COMP_COL, visualTransparencyInput)
+else if exhaustionState
+    color.new(BEAR_COL, visualTransparencyInput)
+else if overextendedState
+    color.new(WARN_COL, visualTransparencyInput)
+else if bullishAccelerationState or bearishAccelerationState
+    color.new(WARN_COL, math.min(95, visualTransparencyInput + 8))
+else if healthyTrendState and trendDirection > 0.0
+    color.new(BULL_COL, math.min(95, visualTransparencyInput + 8))
+else if healthyTrendState and trendDirection < 0.0
+    color.new(BEAR_COL, math.min(95, visualTransparencyInput + 8))
+else
+    na
+
+bgcolor(stateBackground, title = "Relationship state")
+
+hline(75.0, "Strong bullish", color = color.new(BULL_COL, 65), linestyle = hline.style_dotted)
+hline(20.0, "Bullish threshold", color = color.new(BULL_COL, 82), linestyle = hline.style_dashed)
+hline(0.0, "Equilibrium", color = color.new(NEU_COL, 45))
+hline(-20.0, "Bearish threshold", color = color.new(BEAR_COL, 82), linestyle = hline.style_dashed)
+hline(-75.0, "Strong bearish", color = color.new(BEAR_COL, 65), linestyle = hline.style_dotted)
+
+relationshipPlot = plot(relationship, "MA Relationship", color = relationshipColor, linewidth = 3)
+signalPlot = plot(relationshipSignal, "Relationship signal", color = color.new(NEU_COL, 35), linewidth = 1)
+zeroPlot = plot(0.0, "Zero", color = color.new(NEU_COL, 100), editable = false)
+fill(relationshipPlot, zeroPlot, color = showRelationshipFillInput ? color.new(relationshipColor, 84) : na, title = "Relationship fill")
+
+plotshape(showPaneMarkersInput and bullishMomentum, title = "Bullish compression release", style = shape.diamond, location = location.bottom, color = BULL_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and bearishMomentum, title = "Bearish compression release", style = shape.diamond, location = location.top, color = BEAR_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and (bullishDoNotChase or bearishDoNotChase) ? relationship : na, title = "Do not chase", style = shape.circle, location = location.absolute, color = WARN_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and (bullishExhaustion or bearishExhaustion) ? relationship : na, title = "Exhaustion warning", style = shape.xcross, location = location.absolute, color = BEAR_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and (bullishRelationshipBroken or bearishRelationshipBroken) ? relationship : na, title = "Relationship broken", style = shape.square, location = location.absolute, color = NEU_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and bullishDivergence ? relationship : na, title = "Bullish divergence", style = shape.circle, location = location.absolute, color = BULL_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and bearishDivergence ? relationship : na, title = "Bearish divergence", style = shape.circle, location = location.absolute, color = BEAR_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and bullishTurn ? relationship : na, title = "Turning bullish from extreme", style = shape.arrowup, location = location.absolute, color = BULL_COL, size = size.tiny)
+plotshape(showPaneMarkersInput and bearishTurn ? relationship : na, title = "Turning bearish from extreme", style = shape.arrowdown, location = location.absolute, color = BEAR_COL, size = size.tiny)
+
+// ---------------------------------------------------------------------------
+// Visuals — price chart
+// ---------------------------------------------------------------------------
+plot(showMaInput ? ma : na, "Selected MA", color = relationshipColor, linewidth = 2, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishPullback, title = "Chart: Bullish pullback", style = shape.triangleup, location = location.belowbar, color = BULL_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishPullback, title = "Chart: Bearish pullback", style = shape.triangledown, location = location.abovebar, color = BEAR_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishMomentum, title = "Chart: Bullish momentum release", style = shape.diamond, location = location.belowbar, color = BULL_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishMomentum, title = "Chart: Bearish momentum release", style = shape.diamond, location = location.abovebar, color = BEAR_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishDoNotChase, title = "Chart: Bullish do not chase", style = shape.circle, location = location.abovebar, color = WARN_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishDoNotChase, title = "Chart: Bearish do not chase", style = shape.circle, location = location.belowbar, color = WARN_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishRelationshipBroken, title = "Chart: Bullish relationship broken", style = shape.xcross, location = location.abovebar, color = BEAR_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishRelationshipBroken, title = "Chart: Bearish relationship broken", style = shape.xcross, location = location.belowbar, color = BULL_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishDivergence, title = "Chart: Bullish divergence", style = shape.circle, location = location.belowbar, color = BULL_COL, size = size.tiny, offset = -divergencePivotRightInput, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishDivergence, title = "Chart: Bearish divergence", style = shape.circle, location = location.abovebar, color = BEAR_COL, size = size.tiny, offset = -divergencePivotRightInput, force_overlay = true)
+plotshape(showPriceMarkersInput and bullishTurn, title = "Chart: Turning bullish from extreme", style = shape.arrowup, location = location.belowbar, color = BULL_COL, size = size.tiny, force_overlay = true)
+plotshape(showPriceMarkersInput and bearishTurn, title = "Chart: Turning bearish from extreme", style = shape.arrowdown, location = location.abovebar, color = BEAR_COL, size = size.tiny, force_overlay = true)
+
+color barRelationshipColor = if not colorBarsInput
+    na
+else if relationship >= 20.0
+    color.new(BULL_COL, 35)
+else if relationship <= -20.0
+    color.new(BEAR_COL, 35)
+else
+    color.new(NEU_COL, 55)
+barcolor(barRelationshipColor)
+
+// ---------------------------------------------------------------------------
+// Event tooltips
+// ---------------------------------------------------------------------------
+string diagnosticsText =
+     "State: " + stateName +
+     "\nReference: " + maTypeInput + " " + str.tostring(maLengthInput) +
+     "\nRelationship: " + formatSigned(relationship) +
+     "\nTrend: " + formatScore(trendQuality) +
+     "\nRespect: " + formatScore(respectScore) +
+     "\nExtension: " + formatScore(extensionScore) + "  (" + formatScore(absoluteDistanceAtr) + " ATR)" +
+     "\nCompression: " + formatScore(compressionScore) +
+     "\nAcceleration: " + formatScore(accelerationScore) +
+     "\nExhaustion: " + formatScore(exhaustionScore) +
+     "\nMA slope: " + formatSigned(maSlopeAtr) + " ATR / " + str.tostring(slopeLengthInput) + " bars" +
+     "\nRespect samples: " + str.tostring(respectSamples, "#") +
+     "\nRespect hit rate: " + formatScore(respectHitRate) + "%"
+
+bool anyBullishPriceEvent = bullishPullback or bullishMomentum or bearishRelationshipBroken or bullishTurn
+bool anyBearishPriceEvent = bearishPullback or bearishMomentum or bullishRelationshipBroken or bearishTurn
+bool anyWarningPriceEvent = bullishDoNotChase or bearishDoNotChase or bullishExhaustion or bearishExhaustion
+
+if showEventTooltipsInput and anyBullishPriceEvent
+    label.new(bar_index, low, "", yloc = yloc.belowbar, style = label.style_circle, color = color.new(BULL_COL, 100), textcolor = color.new(color.white, 100), size = size.tiny, tooltip = diagnosticsText, force_overlay = true)
+if showEventTooltipsInput and anyBearishPriceEvent
+    label.new(bar_index, high, "", yloc = yloc.abovebar, style = label.style_circle, color = color.new(BEAR_COL, 100), textcolor = color.new(color.white, 100), size = size.tiny, tooltip = diagnosticsText, force_overlay = true)
+if showEventTooltipsInput and anyWarningPriceEvent
+    label.new(bar_index, trendDirection >= 0.0 ? high : low, "", yloc = trendDirection >= 0.0 ? yloc.abovebar : yloc.belowbar, style = label.style_circle, color = color.new(WARN_COL, 100), textcolor = color.new(color.black, 100), size = size.tiny, tooltip = diagnosticsText, force_overlay = true)
+if showEventTooltipsInput and bullishDivergence
+    label.new(bar_index - divergencePivotRightInput, low[divergencePivotRightInput], "", yloc = yloc.belowbar, style = label.style_circle, color = color.new(BULL_COL, 100), textcolor = color.new(color.white, 100), size = size.tiny, tooltip = diagnosticsText, force_overlay = true)
+if showEventTooltipsInput and bearishDivergence
+    label.new(bar_index - divergencePivotRightInput, high[divergencePivotRightInput], "", yloc = yloc.abovebar, style = label.style_circle, color = color.new(BEAR_COL, 100), textcolor = color.new(color.white, 100), size = size.tiny, tooltip = diagnosticsText, force_overlay = true)
+
+// ---------------------------------------------------------------------------
+// Data window
+// ---------------------------------------------------------------------------
+plot(trendQuality, "Diagnostic · Trend", display = display.data_window)
+plot(respectScore, "Diagnostic · Respect", display = display.data_window)
+plot(extensionScore, "Diagnostic · Extension", display = display.data_window)
+plot(compressionScore, "Diagnostic · Compression", display = display.data_window)
+plot(accelerationScore, "Diagnostic · Acceleration", display = display.data_window)
+plot(exhaustionScore, "Diagnostic · Exhaustion", display = display.data_window)
+plot(absoluteDistanceAtr, "Diagnostic · Distance from MA (ATR)", display = display.data_window)
+plot(maSlopeAtr, "Diagnostic · MA slope (ATR)", display = display.data_window)
+plot(respectSamples, "Diagnostic · Respect samples", display = display.data_window)
+plot(respectHitRate, "Diagnostic · Respect hit rate (%)", display = display.data_window)
+plot(relationshipRecentLow, "Diagnostic · Relationship recent low", display = display.data_window)
+plot(relationshipRecentHigh, "Diagnostic · Relationship recent high", display = display.data_window)
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+if enablePullbackAlertsInput and (bullishPullback or bearishPullback)
+    alert("MARE Pullback: " + (bullishPullback ? "BULL" : "BEAR") + " | State: " + stateName, alert.freq_once_per_bar_close)
+if enableMomentumAlertsInput and (bullishMomentum or bearishMomentum)
+    alert("MARE Compression Release: " + (bullishMomentum ? "BULL" : "BEAR") + " | State: " + stateName, alert.freq_once_per_bar_close)
+if enableRiskAlertsInput and (bullishDoNotChase or bearishDoNotChase)
+    alert("MARE Do-Not-Chase: extension extreme | State: " + stateName, alert.freq_once_per_bar_close)
+if enableRiskAlertsInput and (bullishExhaustion or bearishExhaustion)
+    alert("MARE Exhaustion Warning: " + (bullishExhaustion ? "BULL" : "BEAR") + " | State: " + stateName, alert.freq_once_per_bar_close)
+if enableBreakAlertsInput and (bullishRelationshipBroken or bearishRelationshipBroken)
+    alert("MARE Relationship Break: " + (bullishRelationshipBroken ? "BULL broken" : "BEAR broken"), alert.freq_once_per_bar_close)
+if enableDivergenceAlertsInput and (bullishDivergence or bearishDivergence)
+    alert("MARE Divergence: " + (bullishDivergence ? "BULL" : "BEAR"), alert.freq_once_per_bar_close)
+if enableTurnAlertsInput and (bullishTurn or bearishTurn)
+    alert("MARE Turn From Extreme: " + (bullishTurn ? "BULL" : "BEAR"), alert.freq_once_per_bar_close)
+
+// ---------------------------------------------------------------------------
+// Strategy execution — trend-following entries (Pullback + Compression Release)
+// ---------------------------------------------------------------------------
+strategy.risk.max_drawdown(useMaxDD ? maxDD : 100, strategy.percent_of_equity)
+strategy.risk.max_intraday_loss(useMaxIntraDD ? maxIntraDD : 100, strategy.percent_of_equity)
+
+var int _genLossStreak = 0
+if strategy.losstrades > strategy.losstrades[1]
+    _genLossStreak := _genLossStreak + 1
+if strategy.wintrades > strategy.wintrades[1]
+    _genLossStreak := 0
+_genFilterOk = (not useSession or not na(time(timeframe.period, sessionInput))) and
+     (not useDateRange or (time >= dateFromVal and time <= dateToVal)) and
+     (not useLossStreak or _genLossStreak < maxLossStreak)
+
+var int _lastExitBar = na
+_justClosed = strategy.closedtrades > 0 and strategy.closedtrades.exit_bar_index(strategy.closedtrades - 1) == bar_index
+if _justClosed
+    _lastExitBar := bar_index
+_inCooldown = cooldownBars > 0 and not na(_lastExitBar) and (bar_index - _lastExitBar) < cooldownBars
+_canEntry = not _inCooldown and (not confirmClose or barstate.isconfirmed) and _genFilterOk
+
+bool strategyLongSignal = bullishPullback or bullishMomentum
+bool strategyShortSignal = bearishPullback or bearishMomentum
+
+float longStop = ma - safeAtr * stopAtrMultInput
+float shortStop = ma + safeAtr * stopAtrMultInput
+
+_canLong = tradeDirInput != "Short Only"
+_canShort = tradeDirInput != "Long Only"
+
+if strategyLongSignal and _canLong and _canEntry
+    strategy.entry("Long", strategy.long)
+if strategyShortSignal and _canShort and _canEntry
+    strategy.entry("Short", strategy.short)
+
+if enableVolExit and strategy.position_size != 0
+    _atrCur = ta.atr(atrLengthInput)
+    _atrBase = ta.ema(_atrCur, 50)
+    _spike = not na(_atrBase) and _atrCur >= _atrBase * volExitRatio
+    if _spike and strategy.position_size > 0
+        strategy.close("Long", comment = "Vol Exit (ATR×" + str.tostring(volExitRatio, '#.#') + ")")
+    if _spike and strategy.position_size < 0
+        strategy.close("Short", comment = "Vol Exit (ATR×" + str.tostring(volExitRatio, '#.#') + ")")
+
+_beAtr = ta.atr(14) * beATRInput
+_beLong = enableBE and strategy.position_size > 0 and close >= strategy.position_avg_price + _beAtr
+_beShort = enableBE and strategy.position_size < 0 and close <= strategy.position_avg_price - _beAtr
+
+_finalLongStop = _beLong ? math.max(longStop, strategy.position_avg_price) : longStop
+_finalShortStop = _beShort ? math.min(shortStop, strategy.position_avg_price) : shortStop
+
+if strategy.position_size > 0
+    strategy.exit("Long Exit", "Long", stop = _finalLongStop)
+if strategy.position_size < 0
+    strategy.exit("Short Exit", "Short", stop = _finalShortStop)

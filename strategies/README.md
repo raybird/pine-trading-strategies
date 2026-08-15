@@ -22,7 +22,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
 | `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，20）
+## Trend & Momentum（趨勢與動量，21）
 
 | 策略 | 說明 |
 |------|------|
@@ -44,6 +44,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignVortexV6` | 渦流極性審計 + 200 EMA 過濾 |
 | `tn_wavetrend_v4_v6` | WaveTrend v4 波動交易策略 |
 | `tn_smooth_trend_radar_v6` | 雙平滑超級趨勢 + 樞軸拒絕雷達 |
+| `TnSovereignMaRelationshipV6` | MA 關係診斷引擎（單一市場參考 MA 十型 + 六維診斷 0-100【Trend/Respect/Extension/Compression/Acceleration/Exhaustion】+ 歷史 Respect 互動品質統計 + 關係振盪器 -100..+100 + 11 態狀態引擎 + 七家族事件【Pullback 拉回 / Compression Release 壓縮釋放 / Do-Not-Chase / Exhaustion / Break / Divergence / Turn】+ 順勢入場【拉回 + 動量釋放】+ MA 錨定 ATR 停損 + 波動尖峰出場 + Break-Even + 完整濾網），移植自 casoon/pine-scripts (WavesUnchained) Market-Average Relationship Engine v1.2.0 |
 | `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
 | `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 
@@ -250,4 +251,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：174（v26.0814.1839 更新）*
+*策略總數：175（v26.0815.1830 更新）*
