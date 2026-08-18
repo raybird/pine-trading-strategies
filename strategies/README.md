@@ -22,7 +22,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
 | `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，21）
+## Trend & Momentum（趨勢與動量，22）
 
 | 策略 | 說明 |
 |------|------|
@@ -45,10 +45,11 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `tn_wavetrend_v4_v6` | WaveTrend v4 波動交易策略 |
 | `tn_smooth_trend_radar_v6` | 雙平滑超級趨勢 + 樞軸拒絕雷達 |
 | `TnSovereignMaRelationshipV6` | MA 關係診斷引擎（單一市場參考 MA 十型 + 六維診斷 0-100【Trend/Respect/Extension/Compression/Acceleration/Exhaustion】+ 歷史 Respect 互動品質統計 + 關係振盪器 -100..+100 + 11 態狀態引擎 + 七家族事件【Pullback 拉回 / Compression Release 壓縮釋放 / Do-Not-Chase / Exhaustion / Break / Divergence / Turn】+ 順勢入場【拉回 + 動量釋放】+ MA 錨定 ATR 停損 + 波動尖峰出場 + Break-Even + 完整濾網），移植自 casoon/pine-scripts (WavesUnchained) Market-Average Relationship Engine v1.2.0 |
+| `TnSovereignDonchianPullbackV6` | Donchian 突破拉回策略（Donchian 通道突破確立趨勢狀態 → 價格拉回通道中線進場【state-based 多空狀態機 + 防重複進場 Flag】+ 通道上下緣 TP/SL bracket + 可選 Fixed R:R + EMA 趨勢地層 + Session/測試窗過濾），移植自 Ahmed-GoCode/Quant-Edge-Indicators (Donchian Pullback) |
 | `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
 | `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，21）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，22）
 
 | 策略 | 說明 |
 |------|------|
@@ -73,6 +74,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignContraPivotStFadeV6` | 樞軸 SuperTrend 反向（Fade）策略（Pivot PP ST band + Touch/Reversal/Both 觸發 + ORB/ADX/ATR/EMA 過濾 + 金字塔），移植自 jayadevrana/pinescript-contra-pivot-supertrend-fade-strategy |
 | `TnSovereignBtcMtfMeanRevV6` | BTC 多時框超保守均值回歸（1m/5m ADX 區間 + 5m RSI/EMA 中性帶 + 影線篩選 + 每日虧損護欄 + Dashboard），移植自 JusticeWiz/btc-mean-reversion-bot |
 | `TnSovereignVwapPullbackV6` | VWAP 拉回 Dip-Buy（RTH/每日錨定 VWAP 公平值線掛單限價買入 + 1H EMA 趨勢偏見 + VWAP 斜率方向閘門 + A+ 強趨勢/ATR 拉伸品質 + 時窗 + 0.5×ATR 停損 + R:R 目標 + 掛單取消狀態機），移植自 jchi18/ote-tradingview |
+| `TnSovereignConnorsRsiV6` | Connors R2 短期均值回歸（2-Period RSI 極端超賣<10 買點 + 長週期 SMA/EMA/RMA 趨勢過濾【預設 200】+ RSI 回升 >70 出場 OR 最大持倉 K 線數【預設 3，原版參數】+ 多空獨立開關 + 可選 RVOL 爆量確認 + 可選 ATR 落地 Stop），移植自 Ahmed-GoCode/Quant-Edge-Indicators (Larry Connors 2-Period RSI Strategy) |
 
 ## Volatility & Breakout（波動率與突破，26）
 
@@ -251,4 +253,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：175（v26.0815.1830 更新）*
+*策略總數：177（v26.0819.0630 更新）*

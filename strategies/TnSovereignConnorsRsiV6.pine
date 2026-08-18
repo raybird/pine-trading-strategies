@@ -1,0 +1,187 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignConnorsRsiV6
+// ============================================================================
+// Causal Audit: 2026-08-19 06:30 CST
+// Version: v26.0819.0630
+// Build: Connors R2 Mean-Reversion Sovereign Port
+//
+// Source: Ahmed-GoCode/Quant-Edge-Indicators (MPL-2.0)
+//         Quant-Edge-Indicators/RSI & Momentum/Larry Connors 2-Period RSI Strategy.pinescript
+//
+// Core Thesis:
+//   Larry Connors 的「2-Period RSI (R2)」短期均值回歸紀律：以 2 期 RSI 的極端
+//   超賣 (<10) 作為買點，僅在高於長週期移動平均的上升環境中做多，並以
+//   RSI 回升 (>70) 或持有 K 線數上限強制獲利了結。核心精髓在於「快也無妨」—
+//   短週期 RSI 對極端情緒的反應遠快於傳統 14 期，回歸力學在震盪市格外有效。
+//
+// Sovereign Overlays:
+//   ✓ 2-Period RSI (R2) 極端超賣 Buy 觸發 + 長週期趨勢過濾 (SMA/EMA)
+//   ✓ RSI 回升 Exit 閘門 (預設 70) OR 最大持有 K 線數 (預設 3) OR 時間出場
+//   ✓ 可選 ATR 落地 Stop (Larry Connors 原版僅以 RSI 情緒出場)
+//   ✓ 多空獨立開關 + 時段/日期測試窗過濾
+//   ✓ RVOL 成交爆量確認 (可選) — 情緒耗盡確認
+//   ✓ 視覺化 R2 軌跡 + 零軸陰陽 + Sovereign HUD
+// ============================================================================
+strategy("TeleNexus Sovereign Connors R2 V6",
+     overlay              = true,
+     precision            = 2,
+     initial_capital      = 100000,
+     default_qty_type     = strategy.percent_of_equity,
+     default_qty_value    = 10,
+     commission_type      = strategy.commission.percent,
+     commission_value     = 0.05,
+     slippage             = 1,
+     pyramiding           = 0,
+     calc_on_every_tick   = false,
+     process_orders_on_close = true)
+
+// ---------------------------------------------------------------------------
+// Group labels
+// ---------------------------------------------------------------------------
+var string G_MAIN  = "01 · R2 Entry Model"
+var string G_FILT  = "02 · Filter Stack"
+var string G_RISK  = "03 · Risk & Exits"
+var string G_TIME  = "04 · Test Window"
+var string G_VIS   = "05 · Visuals"
+
+// ---------------------------------------------------------------------------
+// Inputs — R2 Entry Model
+// ---------------------------------------------------------------------------
+r2Len         = input.int(2,    "R2 RSI Period",                minval=1, group=G_MAIN, tooltip="Larry Connors 短週期 RSI。2 為原版參數。")
+buyThresh     = input.float(10, "Buy Threshold (RSI <)",        minval=1, maxval=50, step=1, group=G_MAIN)
+exitThresh    = input.float(70, "Exit Threshold (RSI >)",       minval=50, maxval=99, step=1, group=G_MAIN)
+maxHoldBars   = input.int(3,    "Max Bars in Trade",            minval=1, group=G_MAIN, tooltip="原版 3；突破 R2 後強制獲利了結。")
+maxHoldBarsEn = input.bool(true, "Enable Max-Bars In-Trade Exit", group=G_MAIN)
+
+// ---------------------------------------------------------------------------
+// Inputs — Filter Stack
+// ---------------------------------------------------------------------------
+useTrend      = input.bool(true,  "Use Long-Term Trend Filter", group=G_FILT)
+trendType     = input.string("SMA", "Trend MA Type", options=["SMA", "EMA", "RMA"], group=G_FILT)
+trendLen      = input.int(200,   "Trend MA Length",             minval=20, group=G_FILT)
+tradeDir      = input.string("Long only", "Trade Direction", options=["Long only", "Short only", "Both"], group=G_FILT)
+useRvol       = input.bool(false, "Require RVOL Spike (>2.0)",  group=G_FILT)
+rvolLen       = input.int(20,    "RVOL Lookback",               minval=5, group=G_FILT)
+rvolMin       = input.float(2.0, "RVOL Minimum",                minval=0.5, step=0.1, group=G_FILT)
+
+// ---------------------------------------------------------------------------
+// Inputs — Risk & Exits
+// ---------------------------------------------------------------------------
+useAtrStop    = input.bool(false, "Enable ATR Stop (optional)", group=G_RISK)
+atrLen        = input.int(14,    "ATR Period",                  minval=1, group=G_RISK)
+atrMult       = input.float(3.0, "ATR Stop Multiplier",         step=0.25, group=G_RISK, tooltip="Larry Connors 原版以 RSI 出場，此為可選落地保護。")
+
+// ---------------------------------------------------------------------------
+// Inputs — Test Window
+// ---------------------------------------------------------------------------
+useDateRange  = input.bool(false, "Enable Test Window",          group=G_TIME)
+startDate     = input.time(timestamp("1 Jan 2020 00:00 +0000"), "Start",     group=G_TIME)
+endDate       = input.time(timestamp("1 Jan 2030 00:00 +0000"), "End",       group=G_TIME)
+
+// ---------------------------------------------------------------------------
+// Inputs — Visuals
+// ---------------------------------------------------------------------------
+cBuyCol   = input.color(color.new(#26a69a, 0),  "Buy Color",  group=G_VIS)
+cSellCol  = input.color(color.new(#ef5350, 0),  "Sell Color", group=G_VIS)
+cUpCol    = input.color(color.new(#26a69a, 55), "R2 Up Candle",  group=G_VIS)
+cDownCol  = input.color(color.new(#ef5350, 55), "R2 Down Candle", group=G_VIS)
+cNeutCol  = input.color(color.new(#78909c, 55), "R2 Neutral",     group=G_VIS)
+
+// ---------------------------------------------------------------------------
+// Core Calculations
+// ---------------------------------------------------------------------------
+float r2      = ta.rsi(close, r2Len)
+float trendMA = trendType == "SMA" ? ta.sma(close, trendLen) : trendType == "EMA" ? ta.ema(close, trendLen) : ta.rma(close, trendLen)
+float atrVal  = useAtrStop ? ta.atr(atrLen) : na
+
+// RVOL: 單位成交量 / 移動平均
+volAvg   = ta.sma(volume, rvolLen)
+rvol     = volAvg > 0 ? volume / volAvg : 1.0
+bool rvolSpike = not useRvol or rvol >= rvolMin
+
+// Trend & Direction Gating
+bool trendLongOK  = not useTrend or close > trendMA
+bool trendShortOK = not useTrend or close < trendMA
+bool allowLong    = tradeDir != "Short only"
+bool allowShort   = tradeDir != "Long only"
+
+// Test window
+bool inWindow = not useDateRange or (time >= startDate and time <= endDate)
+
+// ---------------------------------------------------------------------------
+// In-Trade Time Counter (barSinceEntry)
+// ---------------------------------------------------------------------------
+var int  barSinceEntry = 0
+bool     inPosition    = strategy.opentrades > 0
+barSinceEntry := inPosition ? barSinceEntry + 1 : 0
+
+// ---------------------------------------------------------------------------
+// Signal Synthesis
+// ---------------------------------------------------------------------------
+// Long: R2 極端超賣 + 上升趨勢環境 + (可選 RVOL 爆量) + Flat-gate
+bool longEntry  = allowLong  and r2 < buyThresh and trendLongOK  and rvolSpike and not inPosition and inWindow
+// Short: R2 極端超買 + 下降趨勢環境 (Connors R2 之對偶)
+bool shortEntry = allowShort and r2 > (100 - buyThresh) and trendShortOK and rvolSpike and not inPosition and inWindow
+
+// Exit: R2 回升至 exitThresh OR Max-Bars-In-Trade
+bool exitLong  = inPosition and (r2 > exitThresh or (maxHoldBarsEn and barSinceEntry >= maxHoldBars))
+bool exitShort = inPosition and (r2 < (100 - exitThresh) or (maxHoldBarsEn and barSinceEntry >= maxHoldBars))
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+if longEntry
+    strategy.entry("Long", strategy.long, comment="R2 Dip")
+
+if shortEntry
+    strategy.entry("Short", strategy.short, comment="R2 Rip")
+
+if exitLong
+    strategy.close("Long", comment="R2 Resolve")
+
+if exitShort
+    strategy.close("Short", comment="R2 Resolve")
+
+// Optional ATR catastrophe stop
+if useAtrStop and strategy.position_size > 0
+    strategy.exit("L-ATR", "Long", stop = strategy.position_avg_price - atrMult * atrVal)
+if useAtrStop and strategy.position_size < 0
+    strategy.exit("S-ATR", "Short", stop = strategy.position_avg_price + atrMult * atrVal)
+
+// ---------------------------------------------------------------------------
+// Visuals — R2 trace & candles
+// ---------------------------------------------------------------------------
+plot(r2, "R2 RSI", color=color.new(#2962ff, 0), linewidth=2)
+hBuy  = hline(buyThresh,  "Buy Zone",  color=color.new(cBuyCol, 0), linestyle=hline.style_dashed)
+hSell = hline(100 - buyThresh, "Sell Zone", color=color.new(cSellCol, 0), linestyle=hline.style_dashed)
+fill(hBuy, hSell, color=color.new(#2962ff, 92))
+plot(trendType == "SMA" ? trendMA : na, "Trend SMA", color=color.new(#ffa726, 40))
+plot(strategy.opentrades > 0 ? trendMA : na, "In-Trade Marker", color=color.new(#ffa726, 0), style=plot.style_circles, linewidth=2)
+
+plotshape(longEntry,  "R2 Buy",  shape.triangleup,   location.belowbar, cBuyCol,  text="R2", size=size.small)
+plotshape(shortEntry, "R2 Sell", shape.triangledown, location.abovebar, cSellCol, text="R2", size=size.small)
+plotshape(exitLong,   "R2 Exit", shape.xcross,       location.abovebar, color.white, size=size.tiny)
+
+// ---------------------------------------------------------------------------
+// Sovereign HUD
+// ---------------------------------------------------------------------------
+var table hud = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.isconfirmed
+    table.cell(hud, 0, 0, "◈ CONNORS R2", text_color=color.white, bgcolor=color.new(#2962ff, 30))
+    table.cell(hud, 1, 0, "SOVEREIGN",    text_color=color.white, bgcolor=color.new(#2962ff, 30))
+    table.cell(hud, 0, 1, "R2 Value",    text_color=color.gray)
+    table.cell(hud, 1, 1, str.tostring(r2, "#.##"), text_color=r2 < buyThresh ? cBuyCol : r2 > 100 - buyThresh ? cSellCol : color.white)
+    table.cell(hud, 0, 2, "Trend",       text_color=color.gray)
+    table.cell(hud, 1, 2, trendLongOK ? "LONG-OK" : trendShortOK ? "SHORT-OK" : "NEUTRAL", text_color=trendLongOK ? color.lime : trendShortOK ? color.red : color.gray)
+    table.cell(hud, 0, 3, "Bars-in-Trade", text_color=color.gray)
+    table.cell(hud, 1, 3, str.tostring(barSinceEntry), text_color=inPosition ? color.yellow : color.gray)
+    table.cell(hud, 0, 4, "Version",     text_color=color.gray)
+    table.cell(hud, 1, 4, "v26.0819.0630", text_color=color.gray)
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+alertcondition(longEntry,  "R2 Buy Entry",  "Connors R2 極端超賣買點觸發（趨勢環境）")
+alertcondition(shortEntry, "R2 Sell Entry", "Connors R2 極端超買賣點觸發（趨勢環境）")
+alertcondition(exitLong,   "R2 Long Exit",  "R2 回升 / Max-Bars 平多")
