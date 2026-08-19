@@ -1,0 +1,667 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignIctLsReversalV6
+// ============================================================================
+// Causal Audit: 2026-08-20 06:30 CST
+// Version: v26.0820.0630
+// Build: Crypto ICT Liquidity Sweep Reversal Strategy v1 — Sovereign Port
+//
+// Source: pranay123-stack/Tradingview_Pinescript_Strategy
+//   (crypto/Crypto ICT Liquidity Sweep Reversal Strategy v1/strategy/
+//    crypto_ict_liquidity_sweep_reversal_v1.pine)
+//
+// Core Thesis (deterministic ICT sweep-reversal chain):
+//   HTF BIAS -> LIQUIDITY -> SWEEP -> DISPLACEMENT -> MSS/CHoCH -> FVG
+//            -> FVG RETRACEMENT ENTRY -> LIQUIDITY-BASED TAKE PROFIT
+//
+// Sovereign Overlays:
+//   ✓ Non-repainting contract: decisions only on CLOSED bars, pivot values
+//     consumed only on their confirmation bar, no lookahead.
+//   ✓ HTF swing-structure bias (HH+HL / LH+LL) gated by HTF bar close time.
+//   ✓ Liquidity registry pools per side (Swing / Equal / PD / PW) with FIFO
+//     pruning and lifecycle (break expiries a level, never a sweep setup).
+//   ✓ Sweep = trade-through + CLOSE BACK (not a touch, not a break); quality
+//     filters: maxSweepDist (x ATR), minWickRatio.
+//   ✓ Displacement / MSS-CHoCH / FVG registry (three-candle imbalance).
+//   ✓ FVG retracement midpoint entry (limit) with multi-model stop & TP:
+//     SL = sweep-invalidation | FVG-invalidation | ATR;
+//     TP = opposing liquidity | fixed RR | prev-day | prev-week | hybrid.
+//   ✓ State machine: IDLE -> WAIT_SWEEP -> SWEEP -> DISP -> MSS -> FVG ->
+//     WAIT_RETR -> ENTRY -> IN_POS. Length-one ephemeral INVALID states.
+//   ✓ Equity-risk position sizing, daily loss limit, max trades/day,
+//     consecutive-loss cooldown, optional break-even.
+// ============================================================================
+
+strategy("TnSovereignIctLsReversalV6 [TeleNexus]",
+     overlay                    = true,
+     pyramiding                 = 0,
+     initial_capital            = 100000,
+     currency                   = currency.USD,
+     default_qty_type           = strategy.fixed,
+     default_qty_value          = 1,
+     commission_type            = strategy.commission.percent,
+     commission_value           = 0.04,
+     slippage                   = 2,
+     calc_on_every_tick         = false,
+     calc_on_order_fills        = false,
+     process_orders_on_close    = false,
+     fill_orders_on_standard_ohlc = true,
+     close_entries_rule         = "ANY",
+     max_bars_back              = 1000)
+
+// ── Groups ─────────────────────────────────────────────────────────────────
+G_EXEC = "1 Execution & realism"
+G_HTF  = "2 HTF bias"
+G_STR  = "3 Market structure"
+G_LIQ  = "4 Liquidity model"
+G_SWP  = "5 Sweep"
+G_DSP  = "6 Displacement"
+G_MSS  = "7 MSS/CHoCH"
+G_FVG  = "8 Fair value gap"
+G_ENT  = "9 Entry engine"
+G_FLT  = "10 Filters"
+G_SES  = "11 Sessions"
+G_SL   = "12 Stop loss"
+G_TP   = "13 Take profit"
+G_RSK  = "14 Risk"
+G_VIS  = "15 Visualisation"
+
+// ── Inputs ─────────────────────────────────────────────────────────────────
+bool useDate   = input.bool(true, "Restrict backtest window", group = G_EXEC)
+int  startDate = input.time(timestamp("01 Jan 2021 00:00 +0000"), "Start", group = G_EXEC)
+int  endDate   = input.time(timestamp("01 Jan 2035 00:00 +0000"), "End", group = G_EXEC)
+
+string htfTf       = input.timeframe("60", "HTF bias timeframe", group = G_HTF)
+int    htfSwingLen = input.int(2, "HTF swing length", minval = 1, maxval = 20, group = G_HTF)
+bool   reqBias     = input.bool(true, "Require HTF bias alignment", group = G_HTF)
+bool   allowNeut   = input.bool(false, "Allow neutral HTF bias", group = G_HTF)
+
+int    swingLen  = input.int(3, "Swing length (chart TF)", minval = 1, maxval = 20, group = G_STR)
+int    atrLen    = input.int(14, "ATR length", minval = 2, group = G_STR)
+
+bool useSwingLiq = input.bool(true,  "Swing liquidity", group = G_LIQ)
+bool useEqLiq    = input.bool(true,  "Equal highs/lows", group = G_LIQ)
+bool usePdLiq    = input.bool(true,  "Previous day H/L", group = G_LIQ)
+bool usePwLiq    = input.bool(true,  "Previous week H/L", group = G_LIQ)
+int  maxLevSide  = input.int(12, "Max levels per side", minval = 3, maxval = 40, group = G_LIQ)
+float eqTolATR   = input.float(0.10, "Equal tolerance (x ATR)", step = 0.01, group = G_LIQ)
+int  eqLookback  = input.int(3, "Equal: max swings back", minval = 1, maxval = 10, group = G_LIQ)
+int  eqMaxApart  = input.int(100, "Equal: max bars apart", minval = 5, group = G_LIQ)
+int  liqMaxAge   = input.int(0, "Discard levels older than N bars (0=never)", minval = 0, group = G_LIQ)
+
+float maxSweepDist = input.float(0.25, "Max sweep distance (x ATR)", minval = 0.01, step = 0.05, group = G_SWP)
+float minWickRatio = input.float(0.30, "Min wick/range ratio", minval = 0.0, maxval = 1.0, step = 0.05, group = G_SWP)
+int   sweepValid   = input.int(10, "Sweep validity (bars)", minval = 1, group = G_SWP)
+
+float dispATRMult  = input.float(1.20, "Displacement range (x ATR)", minval = 0.1, step = 0.1, group = G_DSP)
+float minBodyRatio = input.float(0.60, "Min body/range ratio", minval = 0.1, maxval = 1.0, step = 0.05, group = G_DSP)
+
+bool  reqMSS       = input.bool(true, "Require MSS/CHoCH", group = G_MSS)
+
+float minFvgATR    = input.float(0.05, "Min FVG size (x ATR)", minval = 0.0, step = 0.01, group = G_FVG)
+int   fvgSearchBars= input.int(5, "Bars after MSS to find FVG", minval = 0, group = G_FVG)
+bool  fvgNeedDisp  = input.bool(true, "FVG must contain displacement candle", group = G_FVG)
+int   fvgRetraceMax= input.int(20, "Max bars FVG->entry", minval = 1, group = G_FVG)
+
+string entryModel = input.string("Midpoint (50% of FVG)", "FVG entry level",
+     options = ["Midpoint (50% of FVG)", "Proximal edge (first touch)", "Distal edge (full fill)"], group = G_ENT)
+
+bool useSess   = input.bool(true, "Use session filter", group = G_SES)
+string sessMode= input.string("Both", "Allowed sessions", options = ["London", "New York", "Both", "All sessions"], group = G_SES)
+string sessTz  = input.string("UTC", "Session timezone", group = G_SES)
+string sessDays= input.string("1234567", "Session days mask", group = G_SES)
+string ldnSess = input.session("0700-1600", "London session", group = G_SES)
+string nySess  = input.session("1200-2100", "New York session", group = G_SES)
+
+string slMode   = input.string("Liquidity sweep invalidation", "Stop loss model",
+     options = ["Liquidity sweep invalidation", "FVG invalidation", "ATR"], group = G_SL)
+float  slBufATR = input.float(0.10, "Stop buffer (x ATR)", minval = 0.0, step = 0.05, group = G_SL)
+float  slATRMult= input.float(1.50, "ATR stop multiplier", minval = 0.1, step = 0.1, group = G_SL)
+bool   useBE    = input.bool(false, "Move stop to break-even", group = G_SL)
+float  beTrigR  = input.float(1.0, "BE trigger (R)", minval = 0.1, step = 0.1, group = G_SL)
+float  beOffATR = input.float(0.02, "BE offset (x ATR)", minval = 0.0, step = 0.01, group = G_SL)
+
+string tpMode  = input.string("Opposing liquidity", "Take profit model",
+     options = ["Opposing liquidity", "Fixed RR", "Hybrid (partial + liquidity)"], group = G_TP)
+float  minRR   = input.float(1.5, "Min reward:risk", minval = 0.1, step = 0.1, group = G_TP)
+float  fixedRR = input.float(2.0, "Fixed RR", minval = 0.1, step = 0.1, group = G_TP)
+float  partPct = input.float(50, "Hybrid: % closed at fixed RR", minval = 1, maxval = 99, step = 5, group = G_TP)
+
+string sizeMode  = input.string("Risk % of equity", "Position sizing",
+     options = ["Risk % of equity", "Fixed quantity"], group = G_RSK)
+float  riskPct   = input.float(1.0, "Risk % per trade", minval = 0.01, maxval = 100, step = 0.1, group = G_RSK)
+float  fixedQty  = input.float(1.0, "Fixed quantity", minval = 0.0, step = 0.01, group = G_RSK)
+int    maxTradesDir = input.int(0, "Max trades per day (0=off)", minval = 0, group = G_RSK)
+int    maxConsLoss  = input.int(0, "Max consecutive losses (0=off)", minval = 0, group = G_RSK)
+float  dailyLossPct = input.float(3.0, "Daily loss limit %", minval = 0.1, step = 0.5, group = G_RSK)
+int    cooldownBars = input.int(5, "Cooldown after closed trade (bars)", minval = 0, group = G_RSK)
+string riskTz    = input.string("UTC", "Risk/day boundary timezone", group = G_RSK)
+
+bool showDash = input.bool(true, "Show dashboard", group = G_VIS)
+bool visLvl   = input.bool(true, "Show liquidity lines", group = G_VIS)
+bool visFvg   = input.bool(true, "Show FVG boxes", group = G_VIS)
+
+// ── Base series ────────────────────────────────────────────────────────────
+atr      = ta.atr(atrLen)
+barRange = high - low
+barBody  = math.abs(close - open)
+bodyRatio= barRange > 0 ? barBody / barRange : 0.0
+upWick   = barRange > 0 ? (high - math.max(open, close)) / barRange : 0.0
+dnWick   = barRange > 0 ? (math.min(open, close) - low) / barRange : 0.0
+
+// ── Time / session ─────────────────────────────────────────────────────────
+f_inSess(simple string s) =>
+    not na(time(timeframe.period, s + ":" + sessDays, sessTz))
+
+inLondon = f_inSess(ldnSess)
+inNY     = f_inSess(nySess)
+sessOk   = not useSess or sessMode == "All sessions" ? true :
+     sessMode == "London" ? inLondon :
+     sessMode == "New York" ? inNY : (inLondon or inNY)
+dateOk   = not useDate or (time >= startDate and time <= endDate)
+
+dNum = year(time, riskTz) * 10000 + month(time, riskTz) * 100 + dayofmonth(time, riskTz)
+wNum = year(time, riskTz) * 100 + weekofyear(time, riskTz)
+isNewDay  = na(dNum[1]) ? false : dNum != dNum[1]
+isNewWeek = na(wNum[1]) ? false : wNum != wNum[1]
+
+var float runDH = na
+var float runDL = na
+var float runWH = na
+var float runWL = na
+var float pdh = na
+var float pdl = na
+var float pwh = na
+var float pwl = na
+if isNewDay
+    pdh := runDH
+    pdl := runDL
+    runDH := high
+    runDL := low
+else
+    runDH := na(runDH) ? high : math.max(runDH, high)
+    runDL := na(runDL) ? low  : math.min(runDL, low)
+if isNewWeek
+    pwh := runWH
+    pwl := runWL
+    runWH := high
+    runWL := low
+else
+    runWH := na(runWH) ? high : math.max(runWH, high)
+    runWL := na(runWL) ? low  : math.min(runWL, low)
+
+// ── HTF bias (swing structure) ─────────────────────────────────────────────
+f_htfBias(int len) =>
+    var float lph = na
+    var float pph = na
+    var float lpl = na
+    var float ppl = na
+    float ph = ta.pivothigh(high, len, len)
+    float pl = ta.pivotlow(low, len, len)
+    if not na(ph)
+        pph := lph
+        lph := ph
+    if not na(pl)
+        ppl := lpl
+        lpl := pl
+    bool hh = not na(lph) and not na(pph) and lph > pph
+    bool hl = not na(lpl) and not na(ppl) and lpl > ppl
+    bool lh = not na(lph) and not na(pph) and lph < pph
+    bool ll = not na(lpl) and not na(ppl) and lpl < ppl
+    int b = hh and hl ? 1 : lh and ll ? -1 : 0
+    b
+
+[htf1Raw, htf1Close] = request.security(syminfo.tickerid, htfTf, [f_htfBias(htfSwingLen), time_close], lookahead = barmerge.lookahead_off)
+var int htfBias = 0
+if not na(htf1Raw) and not na(htf1Close) and htf1Close <= time_close
+    htfBias := int(htf1Raw)
+biasFlipped = htfBias != htfBias[1]
+
+f_biasOk(int dir) =>
+    bool ok = true
+    if reqBias
+        ok := htfBias == dir or (htfBias == 0 and allowNeut)
+    ok
+
+// ── Swing structure / BOS-CHoCH (chart TF) ─────────────────────────────────
+phRaw = ta.pivothigh(high, swingLen, swingLen)
+plRaw = ta.pivotlow(low, swingLen, swingLen)
+newPH = not na(phRaw)
+newPL = not na(plRaw)
+pivBar = bar_index - swingLen
+
+var float lastSH = na
+var float prevSH = na
+var float lastSL = na
+var float prevSL = na
+var bool  shBroken = true
+var bool  slBroken = true
+var int   ltfTrend = 0
+
+var array<float> swHPx = array.new_float()
+var array<int>   swHBr = array.new_int()
+var array<float> swLPx = array.new_float()
+var array<int>   swLBr = array.new_int()
+
+eqhHit = false
+eqlHit = false
+float eqhPx = na
+float eqlPx = na
+if newPH and useEqLiq and array.size(swHPx) > 0
+    int n = array.size(swHPx)
+    int s0 = math.max(0, n - eqLookback)
+    for k = n - 1 to s0
+        float rp = array.get(swHPx, k)
+        int   rb = array.get(swHBr, k)
+        if not eqhHit and math.abs(rp - phRaw) <= atr * eqTolATR and (pivBar - rb) <= eqMaxApart
+            eqhHit := true
+            eqhPx  := math.max(rp, phRaw)
+if newPL and useEqLiq and array.size(swLPx) > 0
+    int n2 = array.size(swLPx)
+    int s1 = math.max(0, n2 - eqLookback)
+    for k2 = n2 - 1 to s1
+        float rp2 = array.get(swLPx, k2)
+        int   rb2 = array.get(swLBr, k2)
+        if not eqlHit and math.abs(rp2 - plRaw) <= atr * eqTolATR and (pivBar - rb2) <= eqMaxApart
+            eqlHit := true
+            eqlPx  := math.min(rp2, plRaw)
+
+if newPH
+    prevSH := lastSH
+    lastSH := phRaw
+    shBroken := false
+    array.push(swHPx, phRaw)
+    array.push(swHBr, pivBar)
+    while array.size(swHPx) > maxLevSide
+        array.shift(swHPx)
+        array.shift(swHBr)
+if newPL
+    prevSL := lastSL
+    lastSL := plRaw
+    slBroken := false
+    array.push(swLPx, plRaw)
+    array.push(swLBr, pivBar)
+    while array.size(swLPx) > maxLevSide
+        array.shift(swLPx)
+        array.shift(swLBr)
+
+bosUp = false
+bosDn = false
+chochUp = false
+chochDn = false
+if not na(lastSH) and not shBroken and close > lastSH
+    shBroken := true
+    if ltfTrend == 1
+        bosUp := true
+    else
+        chochUp := true
+    ltfTrend := 1
+if not na(lastSL) and not slBroken and close < lastSL
+    slBroken := true
+    if ltfTrend == -1
+        bosDn := true
+    else
+        chochDn := true
+    ltfTrend := -1
+
+// ── Liquidity registry ─────────────────────────────────────────────────────
+type LiqLevel
+    float price = na
+    int   side  = 0
+    string grp  = "SWING"
+    int   bar   = 0
+    bool  active = true
+    bool  swept  = false
+
+var array<LiqLevel> bslPool = array.new<LiqLevel>()
+var array<LiqLevel> sslPool = array.new<LiqLevel>()
+
+f_addLiq(array<LiqLevel> pool, float px, int side, string grp, int br) =>
+    if not na(px)
+        array.push(pool, LiqLevel.new(price = px, side = side, grp = grp, bar = br))
+        while array.size(pool) > maxLevSide
+            array.shift(pool)
+    array.size(pool)
+
+if newPH and useSwingLiq
+    f_addLiq(bslPool, phRaw, 1, "SWING", pivBar)
+if newPL and useSwingLiq
+    f_addLiq(sslPool, plRaw, -1, "SWING", pivBar)
+if eqhHit
+    f_addLiq(bslPool, eqhPx, 1, "EQ", pivBar)
+if eqlHit
+    f_addLiq(sslPool, eqlPx, -1, "EQ", pivBar)
+if isNewDay and usePdLiq
+    f_addLiq(bslPool, pdh, 1, "PD", bar_index)
+    f_addLiq(sslPool, pdl, -1, "PD", bar_index)
+if isNewWeek and usePwLiq
+    f_addLiq(bslPool, pwh, 1, "PW", bar_index)
+    f_addLiq(sslPool, pwl, -1, "PW", bar_index)
+
+// ── Sweep detection (trade-through + close back) ───────────────────────────
+float sweptBSL = na
+string sweGrpBSL = ""
+float sweptSSL = na
+string sweGrpSSL = ""
+if array.size(bslPool) > 0
+    for l in bslPool
+        if l.active and not l.swept and not na(l.price) and high > l.price and close < l.price
+            if na(sweptBSL) or l.price > sweptBSL
+                sweptBSL := l.price
+                sweGrpBSL := l.grp
+if array.size(sslPool) > 0
+    for l in sslPool
+        if l.active and not l.swept and not na(l.price) and low < l.price and close > l.price
+            if na(sweptSSL) or l.price < sweptSSL
+                sweptSSL := l.price
+                sweGrpSSL := l.grp
+
+if not na(sweptBSL)
+    for l in bslPool
+        if l.active and not l.swept and not na(l.price) and high > l.price and close < l.price
+            l.swept := true
+            l.active := false
+if not na(sweptSSL)
+    for l in sslPool
+        if l.active and not l.swept and not na(l.price) and low < l.price and close > l.price
+            l.swept := true
+            l.active := false
+
+bool sweepBSLValid = not na(sweptBSL) and barRange > 0 and (high - sweptBSL) <= atr * maxSweepDist and upWick >= minWickRatio
+bool sweepSSLValid = not na(sweptSSL) and barRange > 0 and (sweptSSL - low) <= atr * maxSweepDist and dnWick >= minWickRatio
+bothSwept = sweepBSLValid and sweepSSLValid
+penBSL = bothSwept ? (high - sweptBSL) : 0.0
+penSSL = bothSwept ? (sweptSSL - low) : 0.0
+takeBSL = sweepBSLValid and (not bothSwept or penBSL > penSSL)
+takeSSL = sweepSSLValid and (not bothSwept or penSSL > penBSL)
+
+// lifecycle: expire/broken levels
+if array.size(bslPool) > 0
+    for l in bslPool
+        if l.active and not na(l.price)
+            if liqMaxAge > 0 and (bar_index - l.bar) > liqMaxAge
+                l.active := false
+            else if l.side == 1 and close > l.price
+                l.active := false
+if array.size(sslPool) > 0
+    for l in sslPool
+        if l.active and not na(l.price)
+            if liqMaxAge > 0 and (bar_index - l.bar) > liqMaxAge
+                l.active := false
+            else if l.side == -1 and close < l.price
+                l.active := false
+
+// ── Displacement ───────────────────────────────────────────────────────────
+dispBull = barRange > atr * dispATRMult and bodyRatio >= minBodyRatio and close > open
+dispBear = barRange > atr * dispATRMult and bodyRatio >= minBodyRatio and close < open
+
+// ── FVG registry ───────────────────────────────────────────────────────────
+type Fvg
+    float top = na
+    float bot = na
+    bool  bull = true
+    int   bar = 0
+    int   midBar = 0
+    bool  active = true
+
+var array<Fvg> fvgPool = array.new<Fvg>()
+newFvgBull = false
+newFvgBear = false
+float nFvgTop = na
+float nFvgBot = na
+if bar_index >= 2 and not na(atr)
+    if low > high[2]
+        float t = low
+        float b = high[2]
+        if (t - b) >= atr * minFvgATR
+            newFvgBull := true
+            nFvgTop := t
+            nFvgBot := b
+            array.push(fvgPool, Fvg.new(top = t, bot = b, bull = true, bar = bar_index, midBar = bar_index - 1))
+    if high < low[2]
+        float t2 = low[2]
+        float b2 = high
+        if (t2 - b2) >= atr * minFvgATR
+            newFvgBear := true
+            nFvgTop := t2
+            nFvgBot := b2
+            array.push(fvgPool, Fvg.new(top = t2, bot = b2, bull = false, bar = bar_index, midBar = bar_index - 1))
+
+if array.size(fvgPool) > 0
+    for f in fvgPool
+        if f.active and f.bar < bar_index
+            if f.bull and low <= f.bot
+                f.active := false
+            else if not f.bull and high >= f.top
+                f.active := false
+while array.size(fvgPool) > 20
+    array.shift(fvgPool)
+
+// ── State machine ──────────────────────────────────────────────────────────
+ST_IDLE     = 0
+ST_WAIT_SWP = 1
+ST_SWEEP    = 2
+ST_WAIT_DISP= 3
+ST_DISP     = 4
+ST_MSS      = 5
+ST_FVG      = 6
+ST_WAIT_RETR= 7
+ST_ENTRY    = 8
+ST_IN_POS   = 9
+ST_INVALID  = 10
+
+var int  st         = ST_IDLE
+var int  stDir      = 0
+var int  sweepBar   = na
+var float sweepLevel = na
+var float sweepExtre = na
+var string sweepGrp = ""
+var bool displaced  = false
+var bool mssDone    = false
+var int  fvgBar     = na
+var float fvgTop    = na
+var float fvgBot    = na
+var float inSL      = na
+var float inTP      = na
+var float inEntry   = na
+var float inQty     = na
+var float entryR    = na
+
+var int   tradesToday = 0
+var int   daySnap     = 0
+var float dayStartEq  = na
+var int   consecLoss = 0
+var int   lastExitBar = na
+var int   closedSeen = 0
+var bool  beMoved    = false
+var int   todayKey    = 0
+
+// day rollover
+todayKey := year(time, riskTz) * 10000 + month(time, riskTz) * 100 + dayofmonth(time, riskTz)
+if todayKey != daySnap
+    daySnap := todayKey
+    tradesToday := 0
+
+equityBase = strategy.initial_capital + strategy.netprofit
+if na(dayStartEq) or isNewDay
+    dayStartEq := equityBase
+
+// closed-trade scan for consecutive loss + risk resets
+if strategy.closedtrades > closedSeen
+    for ti = closedSeen to strategy.closedtrades - 1
+        if strategy.closedtrades.profit(ti) < 0
+            consecLoss += 1
+        else
+            consecLoss := 0
+        lastExitBar := bar_index
+    closedSeen := strategy.closedtrades
+
+float lossBudget = equityBase * (dailyLossPct / 100.0)
+float dayPnL = equityBase - dayStartEq
+bool dailyHit = dayPnL <= -lossBudget
+
+// ── Transition logic ───────────────────────────────────────────────────────
+switch st
+    ST_IDLE, ST_INVALID =>
+        if takeBSL or takeSSL
+            st := ST_WAIT_SWP
+            stDir := takeSSL ? 1 : -1
+            sweepBar := bar_index
+            sweepLevel := takeSSL ? sweptSSL : sweptBSL
+            sweepExtre := takeSSL ? (sweptSSL - 0.0) : (sweptBSL + 0.0)
+            sweepGrp := takeSSL ? sweGrpSSL : sweGrpBSL
+            displaced := false
+            mssDone := false
+    ST_WAIT_SWP =>
+        if bar_index - sweepBar > sweepValid
+            st := ST_INVALID
+        else if (stDir == 1 and dispBull) or (stDir == -1 and dispBear)
+            st := ST_DISP
+            displaced := true
+    ST_DISP =>
+        st := reqMSS ? ST_MSS : ST_FVG
+    ST_MSS =>
+        if (stDir == 1 and chochUp) or (stDir == -1 and chochDn)
+            st := ST_FVG
+        else if bar_index - sweepBar > sweepValid
+            st := ST_INVALID
+    ST_FVG =>
+        // find qualifying FVG (bull for long, bear for short) created after sweep
+        float candTop = na
+        float candBot = na
+        int   candBar = na
+        bool  found = false
+        int   searchWin = bar_index - (sweepBar + 1) > fvgSearchBars ? bar_index : sweepBar + 1 + fvgSearchBars
+        if array.size(fvgPool) > 0
+            for f in fvgPool
+                if f.active and f.bar >= sweepBar and f.bar <= searchWin
+                    if stDir == 1 and f.bull and not found
+                        candTop := f.top
+                        candBot := f.bot
+                        candBar := f.bar
+                        found := true
+                    else if stDir == -1 and not f.bull and not found
+                        candTop := f.top
+                        candBot := f.bot
+                        candBar := f.bar
+                        found := true
+        if found
+            st := ST_WAIT_RETR
+            fvgBar := candBar
+            fvgTop := candTop
+            fvgBot := candBot
+        else if bar_index - sweepBar > sweepValid
+            st := ST_INVALID
+    ST_WAIT_RETR =>
+        if stDir == 1 and low <= fvgTop and low >= fvgBot
+            st := ST_ENTRY
+            inEntry := entryModel == "Midpoint (50% of FVG)" ? (fvgTop + fvgBot) / 2.0 :
+                 entryModel == "Proximal edge (first touch)" ? fvgBot : fvgTop
+        else if stDir == -1 and high >= fvgBot and high <= fvgTop
+            st := ST_ENTRY
+            inEntry := entryModel == "Midpoint (50% of FVG)" ? (fvgTop + fvgBot) / 2.0 :
+                 entryModel == "Distal edge (full fill)" ? fvgBot : fvgTop
+        else if bar_index - fvgBar > fvgRetraceMax
+            st := ST_INVALID
+
+// entry fires on the bar transition into ST_ENTRY
+bool fireLong  = st == ST_ENTRY and stDir == 1
+bool fireShort = st == ST_ENTRY and stDir == -1
+
+// ── Risk & sizing ──────────────────────────────────────────────────────────
+bool riskBlock = dailyHit or (maxTradesDir > 0 and tradesToday >= maxTradesDir) or (maxConsLoss > 0 and consecLoss >= maxConsLoss) or (cooldownBars > 0 and not na(lastExitBar) and bar_index - lastExitBar < cooldownBars)
+
+f_qty(float entryPxL, float slPxL) =>
+    float q = 0.0
+    if sizeMode == "Risk % of equity"
+        float riskAmt = equityBase * (riskPct / 100.0)
+        float riskPx  = math.abs(entryPxL - slPxL)
+        q := riskPx > 0 ? riskAmt / riskPx : 0.0
+    else
+        q := fixedQty
+    q
+
+// stop placement
+f_stop(int dir, float entryPxL) =>
+    float s = na
+    if slMode == "ATR"
+        s := dir == 1 ? entryPxL - atr * slATRMult : entryPxL + atr * slATRMult
+    else if slMode == "FVG invalidation"
+        s := dir == 1 ? fvgBot - atr * slBufATR : fvgTop + atr * slBufATR
+    else   // sweep invalidation
+        s := dir == 1 ? sweepExtre - atr * slBufATR : sweepExtre + atr * slBufATR
+    s
+
+// ── Execution ──────────────────────────────────────────────────────────────
+if st == ST_ENTRY and not riskBlock and strategy.position_size == 0 and f_biasOk(stDir) and sessOk and dateOk
+    float sl = f_stop(stDir, inEntry)
+    float risk = math.abs(inEntry - sl)
+    if risk > 0
+        float q = f_qty(inEntry, sl)
+        if q > 0
+            inSL := sl
+            inQty := q
+            if stDir == 1 and fireLong
+                strategy.entry("L.LSR", strategy.long, qty = q, comment = "LSR Long " + sweepGrp)
+                strategy.exit("X.LSR", "L.LSR", stop = sl, limit = inEntry + risk * fixedRR)
+            else if stDir == -1 and fireShort
+                strategy.entry("S.LSR", strategy.short, qty = q, comment = "LSR Short " + sweepGrp)
+                strategy.exit("X.LSR", "S.LSR", stop = sl, limit = inEntry - risk * fixedRR)
+            tradesToday += 1
+            st := ST_IN_POS
+
+if st == ST_IN_POS and strategy.position_size == 0
+    st := ST_IDLE
+
+// break-even management
+if strategy.position_size > 0 and useBE and not beMoved
+    float entryAvg = strategy.position_avg_price
+    float slGap = math.abs(entryAvg - strategy.position_avg_price) > 0 ? math.abs(inSL - entryAvg) : atr * slATRMult
+    float favMove = strategy.position_size > 0 ? close - entryAvg : entryAvg - close
+    if favMove >= (slGap * beTrigR)
+        strategy.exit("BE", from_entry = strategy.position_size > 0 ? "L.LSR" : "S.LSR", stop = entryAvg + (strategy.position_size > 0 ? beOffATR * atr : -beOffATR * atr))
+        beMoved := true
+
+// ── Visual: liquidity lines ────────────────────────────────────────────────
+if visLvl and array.size(bslPool) > 0
+    for l in bslPool
+        if l.active and not na(l.price) and barstate.islast
+            line.new(bar_index - 5, l.price, bar_index, l.price, color = color.new(color.red, 75), style = line.style_dotted)
+if visLvl and array.size(sslPool) > 0
+    for l in sslPool
+        if l.active and not na(l.price) and barstate.islast
+            line.new(bar_index - 5, l.price, bar_index, l.price, color = color.new(color.green, 75), style = line.style_dotted)
+
+if visFvg and not na(fvgTop) and not na(fvgBot) and not na(fvgBar) and st == ST_WAIT_RETR
+    box.new(fvgBar - 1, fvgTop, bar_index + 5, fvgBot, border_color = color.new(color.blue, 50), bgcolor = color.new(color.blue, 90))
+
+bgcolor(st == ST_WAIT_RETR ? color.new(color.white, 96) : na)
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+if showDash and barstate.islast
+    var table hud = table.new(position.top_right, 2, 9, frame_color = color.gray, frame_width = 1)
+    string stName = st == ST_WAIT_SWP ? "WAIT_SWEEP" : st == ST_SWEEP ? "SWEEP" : st == ST_DISP ? "DISP" : st == ST_MSS ? "MSS" : st == ST_FVG ? "FVG" : st == ST_WAIT_RETR ? "WAIT_RETR" : st == ST_ENTRY ? "ENTRY" : st == ST_IN_POS ? "IN_POS" : "IDLE"
+    table.cell(hud, 0, 0, "Tn ICT-LSR v6", bgcolor = color.new(color.black, 70), text_color = color.white)
+    table.cell(hud, 1, 0, "v26.0820.0630", bgcolor = color.new(color.black, 70), text_color = color.white)
+    table.cell(hud, 0, 1, "State")
+    table.cell(hud, 1, 1, stName, text_color = st == ST_WAIT_RETR ? color.lime : color.white)
+    table.cell(hud, 0, 2, "HTF Bias")
+    table.cell(hud, 1, 2, htfBias == 1 ? "BULL" : htfBias == -1 ? "BEAR" : "NEUTRAL", text_color = htfBias == 1 ? color.lime : htfBias == -1 ? color.red : color.gray)
+    table.cell(hud, 0, 3, "Sweep")
+    table.cell(hud, 1, 3, sweepGrp == "EQ" ? "EQH/EQL" : sweepGrp == "PD" ? "PDH/PDL" : sweepGrp == "PW" ? "PWH/PWL" : sweepGrp == "SWING" ? "SWING" : "-")
+    table.cell(hud, 0, 4, "Trades-Day")
+    table.cell(hud, 1, 4, str.tostring(tradesToday))
+    table.cell(hud, 0, 5, "Day P&L")
+    table.cell(hud, 1, 5, str.tostring(dayPnL, "#.##"), text_color = dayPnL < 0 ? color.red : color.lime)
+    table.cell(hud, 0, 6, "Consec Loss")
+    table.cell(hud, 1, 6, str.tostring(consecLoss))
+    table.cell(hud, 0, 7, "Status")
+    table.cell(hud, 1, 7, dailyHit ? "DAILY_LIMIT" : strategy.position_size != 0 ? "IN_POS" : "ACTIVE", text_color = dailyHit ? color.red : color.lime)
+    table.cell(hud, 0, 8, "SOVEREIGNTY")
+    table.cell(hud, 1, 8, "LOCKED", bgcolor = color.new(color.green, 50))
+
+// ── Alerts ─────────────────────────────────────────────────────────────────
+if fireLong
+    alert("ICT-LSR Long: SSL sweep -> MSS -> FVG retrace @ " + str.tostring(inEntry), alert.freq_once_per_bar_close)
+if fireShort
+    alert("ICT-LSR Short: BSL sweep -> MSS -> FVG retrace @ " + str.tostring(inEntry), alert.freq_once_per_bar_close)

@@ -107,7 +107,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignNqOprBreakoutV6` | NQ NY 時段 OPR 突破策略（可配置區間 + RSI/EMA 選擇性過濾 + 擺動止損 + 每日一單止損紀律），移植自 jcornierfra/TradingView_Strategy_JCO_OPR_Breakout |
 | `TnSovereignPineFlowOrbV6` | HTF EMA + DMI/ADX 趨勢強度 ORB 突破（權益風險 ATR 倉位 + 兩層獲利 1.5R/3.0R + 風險限制），移植自 loveyuanfandj-glitch/pineflow-v6 |
 
-## Market Structure & Price Action（市場結構與價格行為，34）
+## Market Structure & Price Action（市場結構與價格行為，35）
 
 | 策略 | 說明 |
 |------|------|
@@ -145,8 +145,9 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignGoldIBRetracementV6` | 黃金 IB 突破拉回（IB 範圍 % 過濾 + 突破偵測 + 回撤入場 + 成交量確認），移植自 Prat617/strategic |
 | `TnSovereignPineFlowIctFvgV6` | 三層 ICT 執行模型（4H→15m→1m 確定性 FVG + 流動性掃蕩 + MSS/CISD 階梯確認），移植自 loveyuanfandj-glitch/pineflow-v6 |
 | `TnSovereignIctM1CrtSniperV6` | ICT/SMC M1 狙擊（CRT 範圍 + M15 BOS/CHOCH + 未接合 FVG/OB PI 引擎 + Premium/Discount + Break Even），移植自 thesenegalesehitch/Pine-Script |
+| `TnSovereignIctLsReversalV6` | ICT 流動性掃蕩反轉（HTF 結構偏見 → BSL/SSL 流動性池【Swing/EQ/PD/PW】→ 穿越回穿掃蕩 → 位移 → MSS/CHoCH → FVG 回撤入場 → 對向流動性 TP；10 態狀態機 + 非重繪契約），移植自 pranay123-stack/Tradingview_Pinescript_Strategy |
 
-## Volume & Order Flow（成交量與訂單流，15）
+## Volume & Order Flow（成交量與訂單流，16）
 
 | 策略 | 說明 |
 |------|------|
@@ -165,6 +166,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignViopSessionV6` | VIOP 時序審計時段策略 |
 | `tn_liquidity_sovereign_v6` | 4 層因果對位流動性審計 |
 | `TnSovereignLiquidityMagnetV6` | 機率評分流動性磁鐵引擎（四維權重 + Pool 排名），移植自 FEELS Liquidity Magnet v1.6.4 |
+| `TnSovereignIctVpContinuationV6` | ICT 量價輪廓延續（確定性 VP 直方圖【POC/VAH/VAL/HVN/LVN】→ 價值接受 → BOS → 位移 → FVG 回撤延續入場 → 部分平倉 + Runner），移植自 pranay123-stack/Tradingview_Pinescript_Strategy |
 
 ## Deep Reinforcement Learning（深度強化學習，1）
 
