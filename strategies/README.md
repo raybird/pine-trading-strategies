@@ -107,7 +107,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignNqOprBreakoutV6` | NQ NY 時段 OPR 突破策略（可配置區間 + RSI/EMA 選擇性過濾 + 擺動止損 + 每日一單止損紀律），移植自 jcornierfra/TradingView_Strategy_JCO_OPR_Breakout |
 | `TnSovereignPineFlowOrbV6` | HTF EMA + DMI/ADX 趨勢強度 ORB 突破（權益風險 ATR 倉位 + 兩層獲利 1.5R/3.0R + 風險限制），移植自 loveyuanfandj-glitch/pineflow-v6 |
 
-## Market Structure & Price Action（市場結構與價格行為，35）
+## Market Structure & Price Action（市場結構與價格行為，36）
 
 | 策略 | 說明 |
 |------|------|
@@ -146,6 +146,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignPineFlowIctFvgV6` | 三層 ICT 執行模型（4H→15m→1m 確定性 FVG + 流動性掃蕩 + MSS/CISD 階梯確認），移植自 loveyuanfandj-glitch/pineflow-v6 |
 | `TnSovereignIctM1CrtSniperV6` | ICT/SMC M1 狙擊（CRT 範圍 + M15 BOS/CHOCH + 未接合 FVG/OB PI 引擎 + Premium/Discount + Break Even），移植自 thesenegalesehitch/Pine-Script |
 | `TnSovereignIctLsReversalV6` | ICT 流動性掃蕩反轉（HTF 結構偏見 → BSL/SSL 流動性池【Swing/EQ/PD/PW】→ 穿越回穿掃蕩 → 位移 → MSS/CHoCH → FVG 回撤入場 → 對向流動性 TP；10 態狀態機 + 非重繪契約），移植自 pranay123-stack/Tradingview_Pinescript_Strategy |
+| `TnSovereignZoneFlowV6` | 樞軸區間 Break-and-Retest 紐約盤尖形策略（Pivot-Zone 自動整併區間 → POI/OTE 0.618-0.705/Mitigation 0.705-0.786/1.272 目標 → HTF 30m 結構偏見 → 微樞軸突破 3-bar 回踩窗 + 拒絕K線品質確認 → Regime Score 0-100【ADX·0.35+ATR·0.20+斜率·0.25+方向效率·0.20】＋ Location Score【寬度·0.35+新鮮度·0.30+R:R·0.35】→ NY 時段引擎【RTH 09:30-16:00/午餐尺規/暖機/跳空隔離】→ PT1/PT2 兩段平倉 + 15:55 強制平倉；Lunch Shadow 診斷模式），移植自 anirudh-annamaneni/tradingview-indicators (SPX_ZoneFlow_Validation v2.0) |
 
 ## Volume & Order Flow（成交量與訂單流，16）
 
@@ -255,4 +256,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：177（v26.0819.0630 更新）*
+*策略總數：180（v26.0909.0630 更新）*

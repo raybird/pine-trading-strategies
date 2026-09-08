@@ -1,0 +1,856 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignZoneFlowV6
+// ============================================================================
+// Causal Audit: 2026-09-09 06:30 CST
+// Version: v26.0909.0630
+// Build: SPX ZoneFlow Break-and-Retest Sovereign Port
+//
+// Source: anirudh-annamaneni/tradingview-indicators (MIT)
+//         strategies/spx-zoneflow-validation/SPX_ZoneFlow_Validation.pine (v2.0)
+//
+// Core Thesis:
+//   以「樞軸區間 (Zone)」為結構核心的紐約盤尖形引擎：在 Zone TF (預設 5m)
+//   以已確認樞軸高/低點透過最小動能 (minImpulseAtr) 建構多空腿區間，並依
+//   腿長投影四象限 POI / OTE 0.618-0.705 / Mitigation 0.705-0.786 /
+//   1.272 結構目標。Bias TF (預設 30m) 提供結構偏見，微樞軸突破建立
+//   Break 旗標後，僅接受「區間內回踩重測 (Break-and-Retest) + 拒絕K線品質」
+//   的確認觸發。整條決策鏈再以地點品質評分 (Location Score) 與三維
+//   Regime Score（ADX/ATR/斜率/方向效率）把關，取的是「突破後的結構性
+//   延續」而非追逐突破本身。核心精髓在於「地點、時序、品質」三位一體：
+//   在哪裡進（POI/OTE 合併可執行帶）、何時進（紐約時段 + 午餐尺規 +
+//   暖機 + 跳空隔離）、如何進（回踩窗 + 拒絕K線品質 + 量能確認）。
+//
+// Sovereign Overlays:
+//   ✓ Pivot-Zone 建構（POI / Optimal / Mitigation / Target 1.272｜merge 自動整併）
+//   ✓ HTF 結構偏見 (Bias) + 偏見幅度評分（25 + 45·ADXnorm + 30·momentum）
+//   ✓ Regime Score 0-100（ADX·0.35 + ATR·0.20 + 斜率·0.25 + 方向效率·0.20）+ 進出遲滯
+//   ✓ Session EMA（開盤錨定 EMA）+ 歷史 EMA 備援
+//   ✓ NY 時段引擎：入場窗 / 午餐尺規（硬封 / 降信心 / 體制+量能）/ 暖機 / 跳空隔離 / 資料新鮮度
+//   ✓ 微樞軸 Break → Break-and-Retest 回踩窗（3 bar）+ 容差 + 拒絕K線品質（wicks/body/量能）
+//   ✓ Location Quality Score（寬度·0.35 + 新鮮度·0.30 + R:R 空間·0.35）
+//   ✓ 自適應結構 / 區間失效 / ATR 停損 + PT1/PT2 部分平倉 + Reference Room 封頂
+//   ✓ 每日交易上限 / 最大持倉分鐘 / 15:55 強制平倉 + Lunch Shadow 日誌
+//   ✓ Blockers 阻擋表 + ZoneFlow HUD + Webhook 就緒 alertcondition
+// ============================================================================
+strategy("TeleNexus Sovereign ZoneFlow V6",
+     overlay                  = true,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.percent_of_equity,
+     default_qty_value        = 10,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     pyramiding               = 0,
+     calc_on_every_tick       = false,
+     process_orders_on_close  = true)
+
+// ---------------------------------------------------------------------------
+// Group labels
+// ---------------------------------------------------------------------------
+var string GROUP_SOURCE      = "01 · Source"
+var string GROUP_ZONE        = "02 · Zone Engine"
+var string GROUP_FILTERS     = "03 · Regime & Filters"
+var string GROUP_RISK        = "04 · Risk & Exits"
+var string GROUP_DIAGNOSTICS = "05 · Diagnostics"
+
+// ---------------------------------------------------------------------------
+// Inputs — Source
+// ---------------------------------------------------------------------------
+string signalSourceInput          = input.symbol("", "Signal source (blank = chart)", group = GROUP_SOURCE)
+string confirmationSourceInput    = input.symbol("", "Volume confirmation source", group = GROUP_SOURCE)
+
+// ---------------------------------------------------------------------------
+// Inputs — Zone Engine
+// ---------------------------------------------------------------------------
+string zoneTimeframeInput         = input.timeframe("5", "Zone timeframe", group = GROUP_ZONE)
+string biasTimeframeInput         = input.timeframe("30", "Bias timeframe", group = GROUP_ZONE)
+string entrySessionInput          = input.session("0945-1500", "Entry session (New York)", group = GROUP_ZONE)
+int    zoneSwingInput             = input.int(3, "Zone pivot strength", minval = 2, maxval = 12, group = GROUP_ZONE)
+int    biasSwingInput             = input.int(3, "Bias pivot strength", minval = 2, maxval = 12, group = GROUP_ZONE)
+int    microSwingInput            = input.int(2, "Micro pivot strength", minval = 1, maxval = 8, group = GROUP_ZONE)
+float  minImpulseAtrInput         = input.float(1.25, "Minimum impulse (ATR)", minval = 0.25, step = 0.25, group = GROUP_ZONE)
+int    maxZoneBarsInput           = input.int(8, "Maximum zone age", minval = 1, maxval = 50, group = GROUP_ZONE)
+bool   firstTouchOnlyInput        = input.bool(true, "First retracement only", group = GROUP_ZONE)
+float  mergeDistanceAtrInput      = input.float(0.15, "Merge nearby entry areas (ATR)", minval = 0.0, maxval = 1.0, step = 0.05, group = GROUP_ZONE)
+int    maximumZoneTouchesInput    = input.int(2, "Maximum zone touches", minval = 1, maxval = 10, group = GROUP_ZONE)
+int    sessionWarmupBarsInput     = input.int(3, "Session warmup (zone bars)", minval = 1, maxval = 12, group = GROUP_ZONE)
+float  gapQuarantineAtrInput      = input.float(2.0, "Large-gap threshold (ATR)", minval = 0.5, maxval = 10.0, step = 0.25, group = GROUP_ZONE)
+bool   requireFreshSessionZoneInput = input.bool(true, "Require current-session zone", group = GROUP_ZONE)
+
+// ---------------------------------------------------------------------------
+// Inputs — Regime & Filters
+// ---------------------------------------------------------------------------
+int    emaLengthInput             = input.int(9, "Execution EMA", minval = 2, group = GROUP_FILTERS)
+int    adxLengthInput             = input.int(14, "ADX length", minval = 5, group = GROUP_FILTERS)
+float  minimumAdxInput            = input.float(18.0, "Minimum ADX", minval = 5.0, step = 0.5, group = GROUP_FILTERS)
+float  minimumAtrRatioInput       = input.float(0.80, "Minimum ATR / baseline", minval = 0.25, step = 0.05, group = GROUP_FILTERS)
+float  minimumEmaSlopeInput       = input.float(0.05, "Minimum EMA slope (ATR)", minval = 0.0, step = 0.01, group = GROUP_FILTERS)
+float  trendEnterScoreInput       = input.float(65.0, "Trend entry score", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_FILTERS)
+float  trendExitScoreInput        = input.float(50.0, "Trend exit score", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_FILTERS)
+string lunchModeInput             = input.string("Hard block", "11:30–13:30 ET handling", options = ["Hard block", "Reduced confidence", "Regime + volume only", "Off"], group = GROUP_FILTERS)
+float  lunchScorePremiumInput     = input.float(10.0, "Reduced-confidence score premium", minval = 0.0, maxval = 35.0, step = 1.0, group = GROUP_FILTERS)
+bool   requireRetestInput         = input.bool(true, "Require break-and-retest", group = GROUP_FILTERS)
+int    retestBarsInput            = input.int(3, "Retest window", minval = 1, maxval = 10, group = GROUP_FILTERS)
+float  retestToleranceAtrInput    = input.float(0.10, "Retest tolerance (ATR)", minval = 0.0, step = 0.05, group = GROUP_FILTERS)
+float  maxBreakoutBodyAtrInput    = input.float(1.0, "Maximum breakout body (ATR)", minval = 0.25, step = 0.25, group = GROUP_FILTERS)
+float  minimumReactionBodyAtrInput = input.float(0.20, "Minimum reaction body (ATR)", minval = 0.0, step = 0.05, group = GROUP_FILTERS)
+float  minimumWickBodyRatioInput  = input.float(0.50, "Minimum rejection wick/body", minval = 0.0, step = 0.25, group = GROUP_FILTERS)
+float  volumeMultiplierInput      = input.float(1.10, "Minimum volume / average", minval = 0.0, step = 0.05, group = GROUP_FILTERS)
+bool   useLocationFilterInput     = input.bool(true, "Use location-quality filter", group = GROUP_FILTERS)
+float  minimumLocationScoreInput  = input.float(55.0, "Minimum location score", minval = 0.0, maxval = 100.0, step = 1.0, group = GROUP_FILTERS)
+
+// ---------------------------------------------------------------------------
+// Inputs — Risk & Exits
+// ---------------------------------------------------------------------------
+float  target1RInput              = input.float(1.0, "Price Target 1 (R)", minval = 0.5, maxval = 5.0, step = 0.25, group = GROUP_RISK)
+float  target2RInput              = input.float(2.0, "Price Target 2 (R)", minval = 1.0, maxval = 10.0, step = 0.25, group = GROUP_RISK)
+float  minimumRrInput             = input.float(1.5, "Minimum PT2 reward/risk", minval = 0.5, step = 0.1, group = GROUP_RISK)
+int    maxTradesInput             = input.int(2, "Maximum trades per day", minval = 1, maxval = 10, group = GROUP_RISK)
+string stopModeInput              = input.string("Adaptive structure", "Stop reference", options = ["Adaptive structure", "Retest candle", "Zone invalidation", "ATR"], group = GROUP_RISK)
+float  stopBufferAtrInput         = input.float(0.10, "Stop buffer (ATR)", minval = 0.0, step = 0.05, group = GROUP_RISK)
+float  atrStopMultipleInput       = input.float(1.0, "ATR stop multiple", minval = 0.25, step = 0.25, group = GROUP_RISK)
+float  minimumStopAtrInput        = input.float(0.05, "Minimum stop distance (ATR)", minval = 0.0, step = 0.05, group = GROUP_RISK)
+float  maximumStopAtrInput        = input.float(2.0, "Maximum stop distance (ATR)", minval = 0.25, step = 0.25, group = GROUP_RISK)
+int    maxTradeMinutesInput       = input.int(90, "Maximum trade minutes", minval = 5, maxval = 390, group = GROUP_RISK)
+bool   flatAtCloseInput           = input.bool(true, "Close at 15:55 ET", group = GROUP_RISK)
+bool   useReferenceRoomInput      = input.bool(true, "Cap PT2 at nearest reference level", group = GROUP_RISK)
+float  pt1ExitPercentInput        = input.float(50.0, "PT1 exit size (%)", minval = 1.0, maxval = 99.0, step = 1.0, group = GROUP_RISK)
+
+// ---------------------------------------------------------------------------
+// Inputs — Diagnostics
+// ---------------------------------------------------------------------------
+bool   trackShadowLunchInput      = input.bool(true, "Track lunch-blocked shadow setups", group = GROUP_DIAGNOSTICS)
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+f_confirmedSwings(int strength) =>
+    float pivotHigh = ta.pivothigh(high, strength, strength)
+    float pivotLow = ta.pivotlow(low, strength, strength)
+    bool highReady = not na(pivotHigh[1])
+    bool lowReady = not na(pivotLow[1])
+    int originOffset = strength + 1
+    [pivotHigh[1], highReady ? time[originOffset] : na, highReady ? open[originOffset] : na, highReady ? high[originOffset] : na, highReady ? low[originOffset] : na, highReady ? close[originOffset] : na, pivotLow[1], lowReady ? time[originOffset] : na, lowReady ? open[originOffset] : na, lowReady ? high[originOffset] : na, lowReady ? low[originOffset] : na, lowReady ? close[originOffset] : na, ta.atr(14)[1]]
+
+f_biasState(int strength) =>
+    float pivotHigh = ta.pivothigh(high, strength, strength)
+    float pivotLow = ta.pivotlow(low, strength, strength)
+    var float previousHigh = na
+    var float previousLow = na
+    var int structureState = 0
+    if not na(pivotHigh)
+        if not na(previousHigh) and pivotHigh > previousHigh
+            structureState := 1
+        previousHigh := pivotHigh
+    if not na(pivotLow)
+        if not na(previousLow) and pivotLow < previousLow
+            structureState := -1
+        previousLow := pivotLow
+    float fastEma = ta.ema(close, 9)
+    float slowEma = ta.ema(close, 21)
+    int momentumState = close > fastEma and fastEma > slowEma ? 1 : close < fastEma and fastEma < slowEma ? -1 : 0
+    int state = structureState == 0 ? momentumState : structureState == momentumState ? structureState : 0
+    state[1]
+
+f_inArea(float price, float poiTop, float poiBottom, float optimalTop, float optimalBottom, float mitigationTop, float mitigationBottom) =>
+    (price <= poiTop and price >= poiBottom) or (price <= optimalTop and price >= optimalBottom) or (price <= mitigationTop and price >= mitigationBottom)
+
+f_nearestAbove(float price, float levelA, float levelB, float levelC) =>
+    float result = na
+    if not na(levelA) and levelA > price
+        result := levelA
+    if not na(levelB) and levelB > price
+        result := na(result) ? levelB : math.min(result, levelB)
+    if not na(levelC) and levelC > price
+        result := na(result) ? levelC : math.min(result, levelC)
+    result
+
+f_nearestBelow(float price, float levelA, float levelB, float levelC) =>
+    float result = na
+    if not na(levelA) and levelA < price
+        result := levelA
+    if not na(levelB) and levelB < price
+        result := na(result) ? levelB : math.max(result, levelB)
+    if not na(levelC) and levelC < price
+        result := na(result) ? levelC : math.max(result, levelC)
+    result
+
+f_clamp(float value, float minimum, float maximum) =>
+    math.max(minimum, math.min(maximum, value))
+
+f_price(float value) =>
+    na(value) ? "--" : str.tostring(value, format.mintick)
+
+f_addReason(string reasons, bool blocked, string reason) =>
+    blocked ? (reasons == "" ? reason : reasons + " · " + reason) : reasons
+
+// ---------------------------------------------------------------------------
+// Multi-timeframe source resolution
+// ---------------------------------------------------------------------------
+string signalSymbol = signalSourceInput == "" ? syminfo.tickerid : signalSourceInput
+string confirmationSymbol = confirmationSourceInput == "" ? signalSymbol : confirmationSourceInput
+[srcOpen, srcHigh, srcLow, srcClose, srcMinTick] = request.security(signalSymbol, timeframe.period, [open, high, low, close, syminfo.mintick], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+float confirmVolume = request.security(confirmationSymbol, timeframe.period, volume, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+[pivotHigh, pivotHighTime, pivotHighOpen, pivotHighHigh, pivotHighLow, pivotHighClose, pivotLow, pivotLowTime, pivotLowOpen, pivotLowHigh, pivotLowLow, pivotLowClose, zoneAtr] = request.security(signalSymbol, zoneTimeframeInput, f_confirmedSwings(zoneSwingInput), lookahead = barmerge.lookahead_on)
+int confirmedBias = request.security(signalSymbol, biasTimeframeInput, f_biasState(biasSwingInput), lookahead = barmerge.lookahead_on)
+
+if barstate.isfirst and target2RInput <= target1RInput
+    runtime.error("Price Target 2 must use a larger R multiple than Price Target 1.")
+
+// ---------------------------------------------------------------------------
+// Session engine — NY RTH & entry window
+// ---------------------------------------------------------------------------
+bool inRth = not na(time(timeframe.period, "0930-1600", "America/New_York"))
+bool inEntrySession = not na(time(timeframe.period, entrySessionInput, "America/New_York"))
+bool inLunch = not na(time(timeframe.period, "1130-1330", "America/New_York"))
+bool closeWindow = not na(time(timeframe.period, "1555-1600", "America/New_York"))
+bool newTradingDay = timeframe.change("1D")
+bool newRthSession = inRth and (newTradingDay or not inRth[1])
+var int sessionStartTime = na
+var int sessionZoneBars = 0
+if newRthSession
+    sessionStartTime := time
+    sessionZoneBars := 1
+else if inRth and timeframe.change(zoneTimeframeInput)
+    sessionZoneBars += 1
+
+[previousDayHigh, previousDayLow, previousDayClose] = request.security(signalSymbol, "1D", [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+bool inOpeningRange = not na(time(timeframe.period, "0930-0945", "America/New_York"))
+var float openingRangeHigh = na
+var float openingRangeLow = na
+if newTradingDay
+    openingRangeHigh := na
+    openingRangeLow := na
+if inOpeningRange
+    openingRangeHigh := na(openingRangeHigh) ? srcHigh : math.max(openingRangeHigh, srcHigh)
+    openingRangeLow := na(openingRangeLow) ? srcLow : math.min(openingRangeLow, srcLow)
+
+// ---------------------------------------------------------------------------
+// Regime — ATR / session EMA / ADX / directional efficiency / Regime Score
+// ---------------------------------------------------------------------------
+float sourceTrueRange = math.max(srcHigh - srcLow, math.max(math.abs(srcHigh - srcClose[1]), math.abs(srcLow - srcClose[1])))
+float sourceAtr = ta.rma(sourceTrueRange, 14)
+float atrBaseline = ta.sma(sourceAtr, 50)
+float historicalEma = ta.ema(srcClose, emaLengthInput)
+float emaAlpha = 2.0 / (emaLengthInput + 1.0)
+var float sessionEma = na
+if newRthSession
+    sessionEma := srcClose
+else if inRth
+    sessionEma := na(sessionEma) ? srcClose : sessionEma + emaAlpha * (srcClose - sessionEma)
+float executionEma = inRth and not na(sessionEma) ? sessionEma : historicalEma
+float emaSlope = sessionZoneBars > 3 ? math.abs(executionEma - executionEma[3]) : 0.0
+float chartBarMilliseconds = timeframe.in_seconds(timeframe.period) * 1000.0
+bool feedFresh = not barstate.isrealtime or timenow - time <= chartBarMilliseconds * 2.0
+var float sessionGapAtr = 0.0
+if newRthSession
+    float gapAtrReference = nz(sourceAtr[1], sourceAtr)
+    sessionGapAtr := gapAtrReference > 0 and not na(previousDayClose) ? math.abs(srcOpen - previousDayClose) / gapAtrReference : 0.0
+bool largeGapSession = sessionGapAtr >= gapQuarantineAtrInput
+bool warmupComplete = sessionZoneBars >= sessionWarmupBarsInput
+bool gapQuarantine = largeGapSession and not warmupComplete
+bool sessionDataReady = inRth and feedFresh and warmupComplete and not gapQuarantine
+float upMove = ta.change(srcHigh)
+float downMove = -ta.change(srcLow)
+float plusDm = upMove > downMove and upMove > 0 ? upMove : 0
+float minusDm = downMove > upMove and downMove > 0 ? downMove : 0
+float smoothedTr = ta.rma(sourceTrueRange, adxLengthInput)
+float plusDi = smoothedTr > 0 ? 100 * ta.rma(plusDm, adxLengthInput) / smoothedTr : 0
+float minusDi = smoothedTr > 0 ? 100 * ta.rma(minusDm, adxLengthInput) / smoothedTr : 0
+float diSum = plusDi + minusDi
+float sourceAdx = ta.rma(diSum > 0 ? 100 * math.abs(plusDi - minusDi) / diSum : 0, adxLengthInput)
+float atrRatio = not na(atrBaseline) and atrBaseline > 0 ? sourceAtr / atrBaseline : 1.0
+float normalizedAdx = f_clamp((sourceAdx - 10.0) / 20.0, 0.0, 1.0)
+float normalizedAtr = f_clamp((atrRatio - 0.60) / 0.60, 0.0, 1.0)
+float normalizedSlope = sourceAtr > 0 ? f_clamp(emaSlope / sourceAtr / math.max(minimumEmaSlopeInput * 2.0, 0.10), 0.0, 1.0) : 0.0
+float efficiencyDenominator = math.sum(math.abs(ta.change(srcClose)), 10)
+float directionalEfficiency = efficiencyDenominator > 0 ? math.abs(srcClose - srcClose[10]) / efficiencyDenominator : 0.0
+float regimeScore = 100.0 * (normalizedAdx * 0.35 + normalizedAtr * 0.20 + normalizedSlope * 0.25 + directionalEfficiency * 0.20)
+var bool trendState = false
+if barstate.isconfirmed
+    trendState := trendState ? regimeScore >= trendExitScoreInput : regimeScore >= trendEnterScoreInput
+int executionMomentum = srcClose > executionEma and executionEma > executionEma[1] ? 1 : srcClose < executionEma and executionEma < executionEma[1] ? -1 : 0
+bool directionalTrend = trendState and confirmedBias != 0 and executionMomentum == confirmedBias
+bool regimeOk = sessionDataReady and directionalTrend and sourceAdx >= minimumAdxInput and (na(atrBaseline) or sourceAtr >= atrBaseline * minimumAtrRatioInput) and sourceAtr > 0 and emaSlope >= sourceAtr * minimumEmaSlopeInput
+float confirmationVolumeAverage = ta.sma(confirmVolume, 20)
+bool volumeAvailable = not na(confirmVolume) and confirmVolume > 0 and not na(confirmationVolumeAverage) and confirmationVolumeAverage > 0
+bool reactionVolumeOk = not volumeAvailable or confirmVolume >= confirmationVolumeAverage * volumeMultiplierInput
+float biasMomentum = sourceAtr > 0 ? f_clamp(math.abs(srcClose - executionEma) / sourceAtr, 0.0, 1.0) : 0.0
+float biasMagnitude = 25.0 + 45.0 * normalizedAdx + 30.0 * biasMomentum
+float signedBiasScore = confirmedBias * biasMagnitude
+string biasStrength = confirmedBias == 0 ? "NEUTRAL" : biasMagnitude < 45 ? "WEAK" : biasMagnitude < 70 ? "MODERATE" : "STRONG"
+bool reducedLunchOk = regimeScore >= trendEnterScoreInput + lunchScorePremiumInput and reactionVolumeOk
+bool lunchAllowed = not inLunch or lunchModeInput == "Off" or (lunchModeInput == "Reduced confidence" and reducedLunchOk) or (lunchModeInput == "Regime + volume only" and regimeOk and reactionVolumeOk)
+bool timeOk = inEntrySession and sessionDataReady and lunchAllowed
+
+// ---------------------------------------------------------------------------
+// Pivot-Zone state
+// ---------------------------------------------------------------------------
+var float lastHigh = na
+var int lastHighTime = na
+var float lastHighOpen = na
+var float lastHighHigh = na
+var float lastHighClose = na
+var float lastLow = na
+var int lastLowTime = na
+var float lastLowOpen = na
+var float lastLowLow = na
+var float lastLowClose = na
+var int zoneDirection = 0
+var int zoneCreatedTime = na
+var bool zoneInactive = false
+var bool zoneSignaled = false
+var int touchCount = 0
+var float poiTop = na
+var float poiBottom = na
+var float optimalTop = na
+var float optimalBottom = na
+var float mitigationTop = na
+var float mitigationBottom = na
+var float targetLevel = na
+
+if newTradingDay
+    lastHigh := na
+    lastLow := na
+    zoneDirection := 0
+    zoneCreatedTime := na
+    zoneInactive := false
+    zoneSignaled := false
+    touchCount := 0
+
+bool newHigh = sessionDataReady and not na(pivotHighTime) and pivotHighTime >= nz(sessionStartTime, time) and not na(pivotHigh) and (na(pivotHigh[1]) or pivotHighTime != pivotHighTime[1])
+bool newLow = sessionDataReady and not na(pivotLowTime) and pivotLowTime >= nz(sessionStartTime, time) and not na(pivotLow) and (na(pivotLow[1]) or pivotLowTime != pivotLowTime[1])
+
+bool createBullish = false
+bool createBearish = false
+float legStart = na
+float legEnd = na
+float originOpen = na
+float originHigh = na
+float originLow = na
+float originClose = na
+
+if newHigh
+    lastHigh := pivotHigh
+    lastHighTime := pivotHighTime
+    lastHighOpen := pivotHighOpen
+    lastHighHigh := pivotHighHigh
+    lastHighClose := pivotHighClose
+    if not na(lastLow) and lastLowTime < pivotHighTime and pivotHigh - lastLow >= zoneAtr * minImpulseAtrInput
+        createBullish := true
+        legStart := lastLow
+        legEnd := pivotHigh
+        originOpen := lastLowOpen
+        originLow := lastLowLow
+        originClose := lastLowClose
+
+if newLow
+    lastLow := pivotLow
+    lastLowTime := pivotLowTime
+    lastLowOpen := pivotLowOpen
+    lastLowLow := pivotLowLow
+    lastLowClose := pivotLowClose
+    if not na(lastHigh) and lastHighTime < pivotLowTime and lastHigh - pivotLow >= zoneAtr * minImpulseAtrInput
+        createBearish := true
+        legStart := lastHigh
+        legEnd := pivotLow
+        originOpen := lastHighOpen
+        originHigh := lastHighHigh
+        originClose := lastHighClose
+
+if createBullish and createBearish
+    if pivotHighTime > pivotLowTime
+        createBearish := false
+    else
+        createBullish := false
+
+if createBullish or createBearish
+    float legRange = math.abs(legEnd - legStart)
+    zoneDirection := createBullish ? 1 : -1
+    zoneCreatedTime := time
+    zoneInactive := false
+    zoneSignaled := false
+    touchCount := 0
+    if zoneDirection == 1
+        poiTop := math.max(originOpen, originClose)
+        poiBottom := originLow
+        optimalTop := legEnd - legRange * 0.618
+        optimalBottom := legEnd - legRange * 0.705
+        mitigationTop := legEnd - legRange * 0.705
+        mitigationBottom := legEnd - legRange * 0.786
+        targetLevel := legStart + legRange * 1.272
+    else
+        poiTop := originHigh
+        poiBottom := math.min(originOpen, originClose)
+        optimalTop := legEnd + legRange * 0.705
+        optimalBottom := legEnd + legRange * 0.618
+        mitigationTop := legEnd + legRange * 0.786
+        mitigationBottom := legEnd + legRange * 0.705
+        targetLevel := legStart - legRange * 1.272
+
+bool zoneFromCurrentSession = not requireFreshSessionZoneInput or not na(zoneCreatedTime) and not na(sessionStartTime) and zoneCreatedTime >= sessionStartTime
+bool activeZone = zoneDirection != 0 and not zoneInactive and zoneFromCurrentSession and sessionDataReady
+float mergeDistance = sourceAtr * mergeDistanceAtrInput
+bool poiOptimalConnected = math.max(poiBottom, optimalBottom) <= math.min(poiTop, optimalTop) + mergeDistance
+bool optimalMitigationConnected = math.max(optimalBottom, mitigationBottom) <= math.min(optimalTop, mitigationTop) + mergeDistance
+float consolidatedTop = poiOptimalConnected ? math.max(poiTop, optimalTop) : na
+float consolidatedBottom = poiOptimalConnected ? math.min(poiBottom, optimalBottom) : na
+if poiOptimalConnected and optimalMitigationConnected
+    consolidatedTop := math.max(consolidatedTop, mitigationTop)
+    consolidatedBottom := math.min(consolidatedBottom, mitigationBottom)
+bool consolidatedAvailable = not na(consolidatedTop) and not na(consolidatedBottom)
+float actionableTop = consolidatedAvailable ? consolidatedTop : math.max(poiTop, math.max(optimalTop, mitigationTop))
+float actionableBottom = consolidatedAvailable ? consolidatedBottom : math.min(poiBottom, math.min(optimalBottom, mitigationBottom))
+float actionableWidth = math.max(srcMinTick, actionableTop - actionableBottom)
+bool areaTouch = activeZone and (consolidatedAvailable ? srcLow <= consolidatedTop and srcHigh >= consolidatedBottom : (srcLow <= poiTop and srcHigh >= poiBottom) or (srcLow <= optimalTop and srcHigh >= optimalBottom) or (srcLow <= mitigationTop and srcHigh >= mitigationBottom))
+float penetrationDepth = not areaTouch ? 0.0 : zoneDirection == 1 ? f_clamp((actionableTop - srcLow) / actionableWidth, 0.0, 1.0) : f_clamp((srcHigh - actionableBottom) / actionableWidth, 0.0, 1.0)
+bool freshTouch = barstate.isconfirmed and areaTouch and ((createBullish or createBearish) or not areaTouch[1])
+if freshTouch
+    touchCount += 1
+    if (firstTouchOnlyInput and touchCount > 1) or touchCount > maximumZoneTouchesInput
+        zoneInactive := true
+
+float zoneMilliseconds = timeframe.in_seconds(zoneTimeframeInput) * 1000.0
+int zoneAge = not na(zoneCreatedTime) and zoneMilliseconds > 0 ? int(math.floor((time - zoneCreatedTime) / zoneMilliseconds)) : 0
+if activeZone and (zoneAge > maxZoneBarsInput or (zoneDirection == 1 and srcClose < poiBottom) or (zoneDirection == -1 and srcClose > poiTop))
+    zoneInactive := true
+
+activeZone := zoneDirection != 0 and not zoneInactive and zoneFromCurrentSession and sessionDataReady
+
+// ---------------------------------------------------------------------------
+// Micro pivots & break-and-retest trigger
+// ---------------------------------------------------------------------------
+float microHigh = ta.pivothigh(srcHigh, microSwingInput, microSwingInput)
+float microLow = ta.pivotlow(srcLow, microSwingInput, microSwingInput)
+var float sellersLevel = na
+var float buyersLevel = na
+var bool sellersEligible = false
+var bool buyersEligible = false
+var bool sellersBroken = false
+var bool buyersBroken = false
+
+if newTradingDay
+    sellersLevel := na
+    buyersLevel := na
+    sellersEligible := false
+    buyersEligible := false
+    sellersBroken := false
+    buyersBroken := false
+
+if not na(microHigh) and inRth
+    sellersLevel := microHigh
+    sellersBroken := false
+    sellersEligible := activeZone and zoneDirection == 1 and time[microSwingInput] >= nz(zoneCreatedTime, time) and f_inArea(microHigh, poiTop, poiBottom, optimalTop, optimalBottom, mitigationTop, mitigationBottom)
+if not na(microLow) and inRth
+    buyersLevel := microLow
+    buyersBroken := false
+    buyersEligible := activeZone and zoneDirection == -1 and time[microSwingInput] >= nz(zoneCreatedTime, time) and f_inArea(microLow, poiTop, poiBottom, optimalTop, optimalBottom, mitigationTop, mitigationBottom)
+
+bool bullBreak = barstate.isconfirmed and not sellersBroken and not na(sellersLevel) and srcClose > sellersLevel and srcClose[1] <= sellersLevel
+bool bearBreak = barstate.isconfirmed and not buyersBroken and not na(buyersLevel) and srcClose < buyersLevel and srcClose[1] >= buyersLevel
+bool bodyOk = math.abs(srcClose - srcOpen) <= sourceAtr * maxBreakoutBodyAtrInput
+float reactionBody = math.abs(srcClose - srcOpen)
+float upperReactionWick = srcHigh - math.max(srcOpen, srcClose)
+float lowerReactionWick = math.min(srcOpen, srcClose) - srcLow
+bool reactionBodyOk = sourceAtr > 0 and reactionBody >= sourceAtr * minimumReactionBodyAtrInput
+bool bullishReactionOk = barstate.isconfirmed and areaTouch and srcClose > srcOpen and lowerReactionWick >= reactionBody * minimumWickBodyRatioInput and reactionBodyOk and reactionVolumeOk
+bool bearishReactionOk = barstate.isconfirmed and areaTouch and srcClose < srcOpen and upperReactionWick >= reactionBody * minimumWickBodyRatioInput and reactionBodyOk and reactionVolumeOk
+var int retestDirection = 0
+var float retestLevel = na
+var int breakBar = na
+
+if newTradingDay or createBullish or createBearish or zoneInactive
+    retestDirection := 0
+    retestLevel := na
+    breakBar := na
+
+if bullBreak
+    sellersBroken := true
+    if sellersEligible and bodyOk
+        retestDirection := 1
+        retestLevel := sellersLevel
+        breakBar := bar_index
+if bearBreak
+    buyersBroken := true
+    if buyersEligible and bodyOk
+        retestDirection := -1
+        retestLevel := buyersLevel
+        breakBar := bar_index
+
+bool longRetest = false
+bool shortRetest = false
+if retestDirection == 1 and bar_index > breakBar
+    bool valid = bar_index - breakBar <= retestBarsInput
+    if valid and srcLow <= retestLevel + sourceAtr * retestToleranceAtrInput and srcClose > retestLevel and srcClose > srcOpen
+        longRetest := true
+        retestDirection := 0
+    else if not valid or srcClose < retestLevel
+        retestDirection := 0
+if retestDirection == -1 and bar_index > breakBar
+    bool valid = bar_index - breakBar <= retestBarsInput
+    if valid and srcHigh >= retestLevel - sourceAtr * retestToleranceAtrInput and srcClose < retestLevel and srcClose < srcOpen
+        shortRetest := true
+        retestDirection := 0
+    else if not valid or srcClose > retestLevel
+        retestDirection := 0
+
+bool longTrigger = (requireRetestInput ? longRetest : bullBreak and sellersEligible and bodyOk) and bullishReactionOk
+bool shortTrigger = (requireRetestInput ? shortRetest : bearBreak and buyersEligible and bodyOk) and bearishReactionOk
+float stopBuffer = math.max(srcMinTick * 2.0, sourceAtr * stopBufferAtrInput)
+float adaptiveLongStopBase = not na(poiBottom) ? math.min(srcLow, poiBottom) : srcLow
+float adaptiveShortStopBase = not na(poiTop) ? math.max(srcHigh, poiTop) : srcHigh
+
+// ---------------------------------------------------------------------------
+// Risk — stops, targets, R:R room, location quality
+// ---------------------------------------------------------------------------
+float longStopBase = stopModeInput == "Adaptive structure" ? adaptiveLongStopBase : stopModeInput == "Zone invalidation" ? poiBottom : srcLow
+float shortStopBase = stopModeInput == "Adaptive structure" ? adaptiveShortStopBase : stopModeInput == "Zone invalidation" ? poiTop : srcHigh
+float longStop = stopModeInput == "ATR" ? srcClose - sourceAtr * atrStopMultipleInput : longStopBase - stopBuffer
+float shortStop = stopModeInput == "ATR" ? srcClose + sourceAtr * atrStopMultipleInput : shortStopBase + stopBuffer
+float longRisk = srcClose - longStop
+float shortRisk = shortStop - srcClose
+float longTarget1 = longRisk > 0 ? srcClose + longRisk * target1RInput : na
+float shortTarget1 = shortRisk > 0 ? srcClose - shortRisk * target1RInput : na
+float longTarget2Raw = longRisk > 0 ? srcClose + longRisk * target2RInput : na
+float shortTarget2Raw = shortRisk > 0 ? srcClose - shortRisk * target2RInput : na
+float nearestLongReference = f_nearestAbove(srcClose, previousDayHigh, previousDayClose, openingRangeHigh)
+float nearestShortReference = f_nearestBelow(srcClose, previousDayLow, previousDayClose, openingRangeLow)
+float longStructuralObjective = f_nearestAbove(srcClose, targetLevel, nearestLongReference, na)
+float shortStructuralObjective = f_nearestBelow(srcClose, targetLevel, nearestShortReference, na)
+float longTarget2 = useReferenceRoomInput and not na(longStructuralObjective) ? math.min(longTarget2Raw, longStructuralObjective) : longTarget2Raw
+float shortTarget2 = useReferenceRoomInput and not na(shortStructuralObjective) ? math.max(shortTarget2Raw, shortStructuralObjective) : shortTarget2Raw
+float longTarget2Rr = longRisk > 0 and not na(longTarget2) ? (longTarget2 - srcClose) / longRisk : na
+float shortTarget2Rr = shortRisk > 0 and not na(shortTarget2) ? (srcClose - shortTarget2) / shortRisk : na
+float longStopAtr = sourceAtr > 0 ? longRisk / sourceAtr : na
+float shortStopAtr = sourceAtr > 0 ? shortRisk / sourceAtr : na
+bool longStopValid = not na(longStopAtr) and longStopAtr >= minimumStopAtrInput and longStopAtr <= maximumStopAtrInput
+bool shortStopValid = not na(shortStopAtr) and shortStopAtr >= minimumStopAtrInput and shortStopAtr <= maximumStopAtrInput
+bool longTargetsValid = not na(longTarget1) and not na(longTarget2) and longTarget2 > longTarget1 + srcMinTick and not na(longTarget2Rr) and longTarget2Rr >= minimumRrInput
+bool shortTargetsValid = not na(shortTarget1) and not na(shortTarget2) and shortTarget2 < shortTarget1 - srcMinTick and not na(shortTarget2Rr) and shortTarget2Rr >= minimumRrInput
+float widthScore = sourceAtr > 0 ? 100.0 * (1.0 - f_clamp(actionableWidth / (sourceAtr * 2.0), 0.0, 1.0)) : 0.0
+float freshnessScore = 100.0 * (1.0 - f_clamp((touchCount - 1.0) / math.max(maximumZoneTouchesInput - 1.0, 1.0), 0.0, 1.0))
+float directionRr = zoneDirection == 1 ? nz(longTarget2Rr, 0.0) : zoneDirection == -1 ? nz(shortTarget2Rr, 0.0) : 0.0
+float roomScore = 100.0 * f_clamp(directionRr / math.max(target2RInput, 0.1), 0.0, 1.0)
+float locationScore = widthScore * 0.35 + freshnessScore * 0.30 + roomScore * 0.35
+bool locationOk = not useLocationFilterInput or locationScore >= minimumLocationScoreInput
+var int tradesToday = 0
+var int activeTradeStartTime = na
+var int activeTradeStartBar = na
+var float activeStop = na
+var float activeTarget1 = na
+var float activeTarget2 = na
+var int activeDirection = 0
+var float activeEntry = na
+var float activeRisk = na
+var float activeMfeR = 0.0
+var float activeMaeR = 0.0
+var float completedMfeTotal = 0.0
+var float completedMaeTotal = 0.0
+var int completedExcursionTrades = 0
+if newTradingDay
+    tradesToday := 0
+    activeTradeStartTime := na
+    activeTradeStartBar := na
+    activeStop := na
+    activeTarget1 := na
+    activeTarget2 := na
+
+bool noOpenTrade = strategy.position_size == 0
+bool longSetupReady = noOpenTrade and activeZone and not zoneSignaled and touchCount > 0 and regimeOk and confirmedBias == 1 and srcClose > executionEma and longTrigger and longStopValid and longTargetsValid and locationOk and tradesToday < maxTradesInput
+bool shortSetupReady = noOpenTrade and activeZone and not zoneSignaled and touchCount > 0 and regimeOk and confirmedBias == -1 and srcClose < executionEma and shortTrigger and shortStopValid and shortTargetsValid and locationOk and tradesToday < maxTradesInput
+bool longSignal = longSetupReady and timeOk
+bool shortSignal = shortSetupReady and timeOk
+bool lunchBlockedLong = longSetupReady and inEntrySession and inLunch and not lunchAllowed
+bool lunchBlockedShort = shortSetupReady and inEntrySession and inLunch and not lunchAllowed
+
+// ---------------------------------------------------------------------------
+// Lunch previews & shadow diagnostics
+// ---------------------------------------------------------------------------
+var bool previewActive = false
+var int previewDirection = 0
+var int previewStartBar = na
+var float previewEntry = na
+var float previewStop = na
+var float previewTarget1 = na
+var float previewTarget2 = na
+var string previewInvalidation = ""
+
+if newTradingDay
+    previewActive := false
+    previewDirection := 0
+    previewStartBar := na
+    previewEntry := na
+    previewStop := na
+    previewTarget1 := na
+    previewTarget2 := na
+    previewInvalidation := ""
+
+if barstate.isconfirmed and not previewActive and (lunchBlockedLong or lunchBlockedShort)
+    previewActive := true
+    previewDirection := lunchBlockedLong ? 1 : -1
+    previewStartBar := bar_index
+    previewEntry := srcClose
+    previewStop := lunchBlockedLong ? longStop : shortStop
+    previewTarget1 := lunchBlockedLong ? longTarget1 : shortTarget1
+    previewTarget2 := lunchBlockedLong ? longTarget2 : shortTarget2
+    previewInvalidation := ""
+
+if previewActive
+    bool previewStopCrossed = previewDirection == 1 ? srcLow <= previewStop : srcHigh >= previewStop
+    bool previewEmaLost = previewDirection == 1 ? srcClose <= executionEma : srcClose >= executionEma
+    bool previewTargetsInvalid = previewDirection == 1 ? previewTarget1 <= previewEntry or previewTarget2 <= previewTarget1 : previewTarget1 >= previewEntry or previewTarget2 >= previewTarget1
+    bool previewExpired = bar_index - previewStartBar > retestBarsInput
+    if previewStopCrossed or previewEmaLost or previewTargetsInvalid or previewExpired or not activeZone
+        previewInvalidation := previewStopCrossed ? "STOP CROSSED" : previewEmaLost ? "EMA LOST" : previewTargetsInvalid ? "TARGET INVALID" : previewExpired ? "EXPIRED" : "ZONE INVALID"
+        previewActive := false
+        previewDirection := 0
+
+if longSignal or shortSignal
+    previewActive := false
+    previewDirection := 0
+
+if barstate.isconfirmed and not previewActive and previewInvalidation != "" and not na(previewStartBar) and bar_index > previewStartBar + 1
+    previewInvalidation := ""
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+if longSignal
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long PT1", "Long", stop = longStop, limit = longTarget1, qty_percent = pt1ExitPercentInput)
+    strategy.exit("Long PT2", "Long", stop = longStop, limit = longTarget2, qty_percent = 100.0 - pt1ExitPercentInput)
+    zoneSignaled := true
+    tradesToday += 1
+    activeTradeStartTime := time
+    activeTradeStartBar := bar_index
+    activeStop := longStop
+    activeTarget1 := longTarget1
+    activeTarget2 := longTarget2
+    activeDirection := 1
+    activeEntry := srcClose
+    activeRisk := longRisk
+    activeMfeR := 0.0
+    activeMaeR := 0.0
+if shortSignal
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short PT1", "Short", stop = shortStop, limit = shortTarget1, qty_percent = pt1ExitPercentInput)
+    strategy.exit("Short PT2", "Short", stop = shortStop, limit = shortTarget2, qty_percent = 100.0 - pt1ExitPercentInput)
+    zoneSignaled := true
+    tradesToday += 1
+    activeTradeStartTime := time
+    activeTradeStartBar := bar_index
+    activeStop := shortStop
+    activeTarget1 := shortTarget1
+    activeTarget2 := shortTarget2
+    activeDirection := -1
+    activeEntry := srcClose
+    activeRisk := shortRisk
+    activeMfeR := 0.0
+    activeMaeR := 0.0
+
+if strategy.position_size != 0 and activeRisk > 0 and bar_index > activeTradeStartBar
+    float favorableR = activeDirection == 1 ? (srcHigh - activeEntry) / activeRisk : (activeEntry - srcLow) / activeRisk
+    float adverseR = activeDirection == 1 ? (activeEntry - srcLow) / activeRisk : (srcHigh - activeEntry) / activeRisk
+    activeMfeR := math.max(activeMfeR, favorableR)
+    activeMaeR := math.max(activeMaeR, adverseR)
+
+if not na(activeTradeStartTime) and strategy.position_size != 0 and time - activeTradeStartTime >= maxTradeMinutesInput * 60000
+    strategy.close_all(comment = "Time expiry")
+
+if flatAtCloseInput and closeWindow and strategy.position_size != 0
+    strategy.close_all(comment = "Session close")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    completedMfeTotal += activeMfeR
+    completedMaeTotal += activeMaeR
+    completedExcursionTrades += 1
+    activeTradeStartTime := na
+    activeTradeStartBar := na
+    activeStop := na
+    activeTarget1 := na
+    activeTarget2 := na
+    activeDirection := 0
+    activeEntry := na
+    activeRisk := na
+    activeMfeR := 0.0
+    activeMaeR := 0.0
+
+// ---------------------------------------------------------------------------
+// Lunch shadow (never places orders — measures blocked setups)
+// ---------------------------------------------------------------------------
+var bool shadowActive = false
+var int shadowDirection = 0
+var int shadowStartTime = na
+var int shadowStartBar = na
+var float shadowEntry = na
+var float shadowStop = na
+var float shadowTarget = na
+var float shadowRisk = na
+var float shadowMfeR = 0.0
+var float shadowMaeR = 0.0
+var int shadowCount = 0
+var int shadowWins = 0
+var float shadowMfeTotal = 0.0
+var float shadowMaeTotal = 0.0
+var string shadowLastResult = "--"
+var int lastShadowZoneTime = na
+
+if newTradingDay
+    shadowActive := false
+    shadowDirection := 0
+    shadowStartTime := na
+    shadowStartBar := na
+    lastShadowZoneTime := na
+
+if trackShadowLunchInput and not shadowActive and zoneCreatedTime != lastShadowZoneTime and (lunchBlockedLong or lunchBlockedShort)
+    shadowActive := true
+    shadowDirection := lunchBlockedLong ? 1 : -1
+    shadowStartTime := time
+    shadowStartBar := bar_index
+    shadowEntry := srcClose
+    shadowStop := lunchBlockedLong ? longStop : shortStop
+    shadowTarget := lunchBlockedLong ? longTarget2 : shortTarget2
+    shadowRisk := lunchBlockedLong ? longRisk : shortRisk
+    shadowMfeR := 0.0
+    shadowMaeR := 0.0
+    lastShadowZoneTime := zoneCreatedTime
+
+if shadowActive and shadowRisk > 0 and bar_index > shadowStartBar
+    float shadowFavorableR = shadowDirection == 1 ? (srcHigh - shadowEntry) / shadowRisk : (shadowEntry - srcLow) / shadowRisk
+    float shadowAdverseR = shadowDirection == 1 ? (shadowEntry - srcLow) / shadowRisk : (srcHigh - shadowEntry) / shadowRisk
+    shadowMfeR := math.max(shadowMfeR, shadowFavorableR)
+    shadowMaeR := math.max(shadowMaeR, shadowAdverseR)
+    bool shadowStopHit = shadowDirection == 1 ? srcLow <= shadowStop : srcHigh >= shadowStop
+    bool shadowTargetHit = not shadowStopHit and (shadowDirection == 1 ? srcHigh >= shadowTarget : srcLow <= shadowTarget)
+    bool shadowExpired = time - shadowStartTime >= maxTradeMinutesInput * 60000 or closeWindow
+    if shadowStopHit or shadowTargetHit or shadowExpired
+        shadowCount += 1
+        shadowWins += shadowTargetHit ? 1 : 0
+        shadowMfeTotal += shadowMfeR
+        shadowMaeTotal += shadowMaeR
+        shadowLastResult := shadowTargetHit ? "PT2" : shadowStopHit ? "STOP" : "EXPIRED"
+        shadowActive := false
+        shadowDirection := 0
+        shadowStartTime := na
+        shadowStartBar := na
+
+// ---------------------------------------------------------------------------
+// Visuals
+// ---------------------------------------------------------------------------
+plot(executionEma, "Execution EMA", color.yellow)
+actionableTopPlot = plot(activeZone ? actionableTop : na, "Actionable zone top", color.rgb(212, 175, 55), style = plot.style_linebr)
+actionableBottomPlot = plot(activeZone ? actionableBottom : na, "Actionable zone bottom", color.rgb(212, 175, 55), style = plot.style_linebr)
+fill(actionableTopPlot, actionableBottomPlot, color = color.new(color.rgb(212, 175, 55), 90), title = "Primary actionable zone")
+plot(regimeScore, "Regime score", color = color.new(color.blue, 100), display = display.data_window)
+plot(feedFresh ? 1 : 0, "Feed fresh", color = color.new(color.aqua, 100), display = display.data_window)
+plot(sessionDataReady ? 1 : 0, "Session data ready", color = color.new(color.lime, 100), display = display.data_window)
+plot(sessionZoneBars, "Current-session zone bars", color = color.new(color.yellow, 100), display = display.data_window)
+plot(sessionGapAtr, "Opening gap (ATR)", color = color.new(color.orange, 100), display = display.data_window)
+plot(touchCount, "Zone touches", color = color.new(color.orange, 100), display = display.data_window)
+plot(signedBiasScore, "Signed bias score", color = color.new(color.purple, 100), display = display.data_window)
+plot(locationScore, "Location quality score", color = color.new(color.aqua, 100), display = display.data_window)
+plot(penetrationDepth * 100.0, "Zone penetration percent", color = color.new(color.yellow, 100), display = display.data_window)
+plot(reactionVolumeOk ? 1 : 0, "Volume confirmed", color = color.new(color.lime, 100), display = display.data_window)
+plot(shadowCount, "Lunch shadow count", color = color.new(color.gray, 100), display = display.data_window)
+plot(shadowCount > 0 ? 100.0 * shadowWins / shadowCount : na, "Lunch shadow win rate", color = color.new(color.gray, 100), display = display.data_window)
+plot(shadowCount > 0 ? shadowMfeTotal / shadowCount : na, "Lunch shadow average MFE R", color = color.new(color.gray, 100), display = display.data_window)
+plot(shadowCount > 0 ? shadowMaeTotal / shadowCount : na, "Lunch shadow average MAE R", color = color.new(color.gray, 100), display = display.data_window)
+plot(completedExcursionTrades > 0 ? completedMfeTotal / completedExcursionTrades : na, "Trade average MFE R", color = color.new(color.green, 100), display = display.data_window)
+plot(completedExcursionTrades > 0 ? completedMaeTotal / completedExcursionTrades : na, "Trade average MAE R", color = color.new(color.red, 100), display = display.data_window)
+plot(strategy.position_size != 0 ? activeStop : na, "Active stop", color.red, style = plot.style_linebr)
+plot(strategy.position_size != 0 ? activeTarget1 : na, "Active PT1", color.yellow, style = plot.style_linebr)
+plot(strategy.position_size != 0 ? activeTarget2 : na, "Active PT2", color.lime, style = plot.style_linebr)
+bgcolor(not regimeOk ? color.new(color.gray, 94) : na, title = "Filtered regime")
+
+plotshape(longSignal,  "ZoneFlow Long",  shape.triangleup,   location.belowbar, color.lime,  size = size.small, text = "ZF-L")
+plotshape(shortSignal, "ZoneFlow Short", shape.triangledown, location.abovebar, color.red,    size = size.small, text = "ZF-S")
+
+// ---------------------------------------------------------------------------
+// Diagnostics — blockers & HUD
+// ---------------------------------------------------------------------------
+bool directionEmaOk = confirmedBias == 1 ? srcClose > executionEma : confirmedBias == -1 ? srcClose < executionEma : false
+bool directionTriggerOk = confirmedBias == 1 ? longTrigger : confirmedBias == -1 ? shortTrigger : false
+bool directionStopOk = confirmedBias == 1 ? longStopValid : confirmedBias == -1 ? shortStopValid : false
+bool directionTargetOk = confirmedBias == 1 ? longTargetsValid : confirmedBias == -1 ? shortTargetsValid : false
+string blockers = ""
+blockers := f_addReason(blockers, not feedFresh, "DATA STALE")
+blockers := f_addReason(blockers, inRth and not warmupComplete, "WARMUP")
+blockers := f_addReason(blockers, gapQuarantine, "GAP QUARANTINE")
+blockers := f_addReason(blockers, not inEntrySession, inRth ? "SESSION" : "PREMARKET")
+blockers := f_addReason(blockers, inLunch and not lunchAllowed, "LUNCH")
+blockers := f_addReason(blockers, not activeZone, "NO ZONE")
+if activeZone
+    blockers := f_addReason(blockers, touchCount == 0, "NO TOUCH")
+    blockers := f_addReason(blockers, not regimeOk, "REGIME")
+    blockers := f_addReason(blockers, confirmedBias == 0, "NEUTRAL")
+    blockers := f_addReason(blockers, confirmedBias != 0 and not directionEmaOk, "EMA")
+    blockers := f_addReason(blockers, not locationOk, "LOCATION")
+    blockers := f_addReason(blockers, not reactionVolumeOk, "VOLUME")
+    blockers := f_addReason(blockers, confirmedBias != 0 and not directionTriggerOk, "TRIGGER")
+    blockers := f_addReason(blockers, confirmedBias != 0 and not directionStopOk, "STOP WIDTH")
+    blockers := f_addReason(blockers, confirmedBias != 0 and not directionTargetOk, "TARGET ROOM")
+blockers := f_addReason(blockers, tradesToday >= maxTradesInput, "DAILY LIMIT")
+blockers := f_addReason(blockers, not noOpenTrade, "TRADE ACTIVE")
+string blockReason = blockers == "" ? "READY" : blockers
+string directionText = confirmedBias == 1 ? "BUYERS " + str.tostring(math.abs(signedBiasScore), "#") : confirmedBias == -1 ? "SELLERS " + str.tostring(math.abs(signedBiasScore), "#") : "NEUTRAL"
+string operatingState = not feedFresh ? "DATA INITIALIZING" : not inRth ? "PREMARKET" : not warmupComplete or gapQuarantine ? "INITIALIZING" : directionalTrend ? "TREND" : "BALANCED"
+string regimeText = operatingState + " • EXP " + str.tostring(regimeScore, "#")
+string executionText = executionMomentum == 1 ? "BULLISH" : executionMomentum == -1 ? "BEARISH" : "NEUTRAL"
+bool executionAligned = confirmedBias != 0 and executionMomentum == confirmedBias
+string alignmentText = confirmedBias == 0 or executionMomentum == 0 ? "NEUTRAL" : executionAligned ? "ALIGNED" : "CONFLICTED"
+bool tradeActive = strategy.position_size != 0
+bool confirmedSetup = longSignal or shortSignal
+bool watchSetup = not tradeActive and previewActive
+int displayDirection = tradeActive ? activeDirection : longSignal ? 1 : shortSignal ? -1 : previewActive ? previewDirection : 0
+string displaySide = displayDirection == 1 ? "LONG" : displayDirection == -1 ? "SHORT" : ""
+string setupText = tradeActive ? displaySide + " ACTIVE" : longSignal ? "LONG CONFIRMED" : shortSignal ? "SHORT CONFIRMED" : watchSetup ? "PREVIEW " + displaySide : previewInvalidation != "" ? "INVALID • " + previewInvalidation : not sessionDataReady ? operatingState : not directionalTrend ? "BALANCED • NO EDGE" : "WAIT • " + alignmentText
+float displayEntry = tradeActive ? activeEntry : confirmedSetup ? srcClose : previewActive ? previewEntry : na
+float displayStop = tradeActive ? activeStop : longSignal ? longStop : shortSignal ? shortStop : previewActive ? previewStop : na
+float displayTarget1 = tradeActive ? activeTarget1 : longSignal ? longTarget1 : shortSignal ? shortTarget1 : previewActive ? previewTarget1 : na
+float displayTarget2 = tradeActive ? activeTarget2 : longSignal ? longTarget2 : shortSignal ? shortTarget2 : previewActive ? previewTarget2 : na
+int displayAge = tradeActive and not na(activeTradeStartBar) ? bar_index - activeTradeStartBar : previewActive and not na(previewStartBar) ? bar_index - previewStartBar : 0
+string ageText = tradeActive or previewActive ? str.tostring(displayAge) + " bars" : "--"
+color directionColor = confirmedBias == 1 ? color.lime : confirmedBias == -1 ? color.red : color.silver
+color regimeColor = operatingState == "TREND" ? color.aqua : operatingState == "BALANCED" ? color.orange : color.yellow
+color executionColor = executionMomentum == 1 ? color.lime : executionMomentum == -1 ? color.red : color.silver
+color setupColor = tradeActive or confirmedSetup ? color.lime : watchSetup ? color.yellow : color.silver
+
+var table diagnostics = table.new(position.bottom_right, 4, 7, bgcolor = color.new(color.rgb(18, 23, 34), 8), frame_color = color.new(color.white, 75), frame_width = 1)
+if barstate.islast
+    table.cell(diagnostics, 0, 0, "ZONEFLOW 2.0", text_color = color.white, text_size = size.small, bgcolor = color.rgb(20, 31, 55))
+    table.cell(diagnostics, 1, 0, regimeText, text_color = regimeColor, text_size = size.small, bgcolor = color.rgb(20, 31, 55))
+    table.cell(diagnostics, 2, 0, "HTF BIAS", text_color = color.silver, text_size = size.small, bgcolor = color.rgb(20, 31, 55))
+    table.cell(diagnostics, 3, 0, directionText, text_color = directionColor, text_size = size.small, bgcolor = color.rgb(20, 31, 55))
+    table.cell(diagnostics, 0, 1, "MOMENTUM", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 1, executionText, text_color = executionColor, text_size = size.small)
+    table.cell(diagnostics, 2, 1, "SETUP", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 1, setupText, text_color = setupColor, text_size = size.small)
+    table.cell(diagnostics, 0, 2, "ENTRY", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 2, f_price(displayEntry), text_color = color.white, text_size = size.small)
+    table.cell(diagnostics, 2, 2, "STOP", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 2, f_price(displayStop), text_color = color.red, text_size = size.small)
+    table.cell(diagnostics, 0, 3, "PT1", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 3, f_price(displayTarget1), text_color = color.yellow, text_size = size.small)
+    table.cell(diagnostics, 2, 3, "PT2", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 3, f_price(displayTarget2), text_color = color.lime, text_size = size.small)
+    table.cell(diagnostics, 0, 4, "BLOCKERS", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 4, blockReason, text_color = blockReason == "READY" ? color.lime : color.orange, text_size = size.small)
+    table.cell(diagnostics, 2, 4, "AGE", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 4, ageText, text_color = color.white, text_size = size.small)
+    table.cell(diagnostics, 0, 5, "TIMEFRAMES", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 5, timeframe.period + " / " + zoneTimeframeInput, text_color = color.white, text_size = size.small)
+    table.cell(diagnostics, 2, 5, "READINESS", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 5, str.tostring(sessionZoneBars) + "/" + str.tostring(sessionWarmupBarsInput) + (largeGapSession ? " • GAP" : ""), text_color = sessionDataReady ? color.lime : color.yellow, text_size = size.small)
+    table.cell(diagnostics, 0, 6, "VERSION", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 1, 6, "v26.0909.0630", text_color = color.gray, text_size = size.small)
+    table.cell(diagnostics, 2, 6, "SOURCE", text_color = color.silver, text_size = size.small)
+    table.cell(diagnostics, 3, 6, "MIT · anirudh-annamaneni", text_color = color.gray, text_size = size.small)
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+alertcondition(longSignal,  "ZoneFlow Long Entry",  "SPX ZoneFlow：多單確認（美東盤回踩重測 + 品質過關）")
+alertcondition(shortSignal, "ZoneFlow Short Entry", "SPX ZoneFlow：空單確認（美東盤回踩重測 + 品質過關）")
+alertcondition(strategy.position_size != 0 and closeWindow, "ZoneFlow Session Close", "SPX ZoneFlow：15:55 強制平倉")
+alertcondition(blockReason == "READY", "ZoneFlow Setup Ready", "SPX ZoneFlow：所有阻擋皆解除，隨時可進場")

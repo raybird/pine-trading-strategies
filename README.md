@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 179 個已實體化主權策略，分 14 大類（v26.0820.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 180 個已實體化主權策略，分 14 大類（v26.0909.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -46,7 +46,7 @@
 | **Trend & Momentum** | 22 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回 |
 | **Mean Reversion & Oscillator** | 22 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
-| **Market Structure & Price Action** | 35 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉 |
+| **Market Structure & Price Action** | 36 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow |
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **179** | 主權策略矩陣（v26.0820.0630 更新） |
+| **Total** | **180** | 主權策略矩陣（v26.0909.0630 更新） |
 
+
+> **最新加入（v26.0909.0630）**: 獵頭審計 #136 — GitHub 全數檢索（跨 2 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"v6" tradingview strategy created:>2026-06-01`）。新檢索 repos 逐一深掃，唯一全新候選 **anirudh-annamaneni/tradingview-indicators**（MIT，2026-09-01 更新，未曾審計）含 **SPX_ZoneFlow_Validation v2.0**（~749 行 strategy() 自足無外部 lib：Zone TF 5m 以 `ta.pivothigh/low` + `minImpulseAtr` 建構樞軸腿區間 → POI / OTE 0.618-0.705 / Mitigation 0.705-0.786 / 1.272 目標 → Bias TF 30m 結構偏見 + 偏見幅度評分【25 + 45·ADXnorm + 30·momentum】→ 微樞軸突破建立 Break 旗標後僅接受 3-bar 回踩窗 Break-and-Retest + 拒絕K線品質【wicks/body/量能】→ Regime Score 0-100【ADX·0.35 + ATR·0.20 + 斜率·0.25 + 方向效率·0.20】+ 進出遲滯 → Location Score【寬度·0.35 + 新鮮度·0.30 + R:R·0.35】→ NY 時段引擎【RTH 09:30-16:00 入場窗 + 11:30-13:30 午餐尺規【硬封/降信心/體制+量能】+ 開盤暖機 + 跳空隔離 + 資料新鮮度】→ Session EMA 開盤錨定 + 歷史 EMA 備援 → 自適應結構/區間失效/ATR 停損 → PT1/PT2 兩段部分平倉 + 15:55 強制平倉 → Lunch Shadow 診斷（不下單）。現有庫為單一 FVG/SMC/ICT 結構敘事，無「樞軸區間 + 突破回踩重測 + 體制品質評分」完整紀律，移植為 `TnSovereignZoneFlowV6`，歸 Market Structure & Price Action 35→36）。其餘候選排除：QuantForgeHQ（#134 已覆蓋）、kierbica（重複）、jonlink714-crypto（SOURCE-AVAILABLE 禁止衍生）、jayadevrana fractal-memory（LEGAL NOTICE 禁止 AI training/re-creation）、natebking/345-strategies（皆 indicator()）、StarReversal（外部 Smogbreath lib 無授權）、ICT-Gold-Pro（2 行 stub）、khadkaaayush941 XAUUSD（ICT 邏輯與現庫重疊）、kurosakijin（無 pine）；TradingView 社群仍 Cloudflare 阻擋無直接可取 strategy()。本次按規訓只新增 1 策略（179→180）：Market Structure & Price Action 35→36。Dashboard/README 完全對位。
 
 > **最新加入（v26.0820.0630）**: 獵頭審計 #135 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pine script" "v6" strategy` + `tradingview pine v6 strategy`）。新檢索 repos 逐一深掃：唯一全新候選 **pranay123-stack/Tradingview_Pinescript_Strategy**（0★，2026-08-20 4 小時前初始發佈，研究級非重繪 ICT 套件）含 2 枚 strategy() 實體：**Crypto ICT Liquidity Sweep Reversal v1**（~1565 行：HTF 結構偏見【lookahead_off + HTF 收盤時間閘門】→ BSL/SSL 流動性雙池【SWING/EQ/PD/PW 四來源】→ 穿越+收收盤回穿掃蕩【maxSweepDist + minWickRatio 品質過濾】→ 位移 → MSS/CHoCH → FVG 三燭失衡 → 回撤入場 → 對向流動性 TP；10 態狀態機。現有庫 IctSniper/PineFlowIctFvg 為單層 sweep+FVG 或三層時框階梯，無「流動性池 + 掃蕩品質過濾 + FVG 回撤 + 對向流動性 TP 階層」完整紀律，移植為 `TnSovereignIctLsReversalV6`，歸 Market Structure & Price Action 34→35）與 **ICT Volume Profile Continuation v1**（~1879 行，MPL-2.0：自製確定性 VP 直方圖【POC/VAH/VAL/HVN/LVN】→ 價值接受【連續 N 收盤穿越 VA】→ BOS → 位移 → FVG 回撤延續入場 → 部分平倉 + Runner。現有庫 volume_profile_matrix_v6 為原生 footprint VAH/VAL 突破、VolumeProfileScalpV6 為 POC scalp，皆無「VP 情境 + 價值接受 + BOS 延續」模型，移植為 `TnSovereignIctVpContinuationV6`，歸 Volume & Order Flow 15→16）。其餘檢索 repos（Ahmed-GoCode/Quant-Edge-Indicators、pineforge-4pass/pineforge-engine、jayadevrana 系列、FaustoS88、monch1962/stratus、QuantForgeHQ/pinescript-portfolio 等）均已在 #101–#134 審計覆蓋。TradingView 社群 pine-script-v6 頁面持續 Cloudflare 阻擋，無直接可取 strategy() 實體。新增 2 策略（177→179）：Market Structure & Price Action 34→35、Volume & Order Flow 15→16。Dashboard/README 完全對位。
 
