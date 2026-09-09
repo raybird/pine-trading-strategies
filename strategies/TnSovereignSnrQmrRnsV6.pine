@@ -1,0 +1,732 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignSnrQmrRnsV6
+// ============================================================================
+// Causal Audit: 2026-09-09 18:30 CST
+// Version: v26.0909.1830
+// Build: Multi-Timeframe SNR / QMR / RNS Confluence Sovereign Port
+//
+// Source: cuci1995/msnr-qmr-rns-strategy (no explicit license)
+//         MSNR_QMR_RNS_Strategy_v2.pine (v2, created 2026-09-01)
+//
+// Core Thesis:
+//   三層結構區間紀律之主力化：① 原始 SNR 區間 —— 以 W/D/H4/H1 四時框已
+//   確認樞軸高/低點，以「外緣=影線極值、內緣=實體邊界」建構支撐/阻力帶。
+//   ② Quasimodo (QMR) 型態 —— Slow 結構破壞後「過度伸張再回補」的反轉區
+//   （Low1→High1→Low2 跌破 Low1→收盤站回 High1 = 在 Low1 建立 BUY 區；
+//   幻象賣方對稱）。③ RNS 翻轉 —— 當任一區間被「實體收線穿越其外緣」時
+//   角色翻轉再生 (Role New Support/Resistance)。MSNR 共流感合＝同一新鮮
+//   未觸區與其他時框新鮮區重疊，以 minConfluence 門檻把關。整條決策鏈再
+//   疊加 W/D Open 偏見過濾、RNS 觸發之 K 線確認（吞噬/針棒）、與 LTF
+//   結構 (H1/M30/M15) 縮 Stoploss 的 R:R (預設 1:5) 風控。精髓在於
+//   「新鮮區重叠的時框共感」取捨高品質結構位階，而非單一時框追逐。
+//
+// Sovereign Overlays:
+//   ✓ 四時框 (W/D/H4/H1) SNR 區間建構（外緣樞軸 ± buffer｜lookahead_off 非重繪）
+//   ✓ Quasimodo (QMR) 三樞軸型態偵測（只於收線突破觸發區後確認成立）
+//   ✓ RNS 翻轉引擎（實體收線 mitigate → 舊support→新resistance 再生）
+//   ✓ MSNR 共流感合計數（新鮮·未破·重疊）+ Min TF 門檻
+//   ✓ W/D Open-Close 偏見濾網（可關）；RNS 觸發之吞噬/針棒 K 線確認
+//   ✓ LTF (H1/M30/M15) 結構縮停 + SL buffer + 預設 1:5 R:R bracket
+//   ✓ 權益% 倉位 + 單一持倉紀律（oneTradeAtATime）+ 日期窗
+//   ✓ JSON Webhook alert + alertcondition + 統計表 + 版號鎖定
+// ============================================================================
+strategy("TeleNexus Sovereign SNR-QMR-RNS V6",
+     overlay                  = true,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.percent_of_equity,
+     default_qty_value        = 10,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     pyramiding               = 0,
+     calc_on_every_tick       = false,
+     max_labels_count         = 100,
+     max_lines_count          = 200,
+     max_boxes_count          = 200)
+
+// ============================================================================
+// NOTES ON DEFINITIONS
+//  SNR  = raw swing high/low zone. Outer edge = wick extreme, inner edge = body edge.
+//  QMR  = Quasimodo. Low1 -> High1 -> Low2(breaks Low1) -> close back above High1
+//         confirms a BUY zone at Low1 (the smaller level "behind" the larger break).
+//         Mirrored for sells (High1 -> Low1 -> High2(breaks High1) -> close below Low1).
+//  RNS  = when an SNR/QMR zone is mitigated (body close through its outer edge), it
+//         flips role and is reborn as a fresh RNS zone (old support -> new resistance).
+//  Fresh      = zone has not yet been wick-touched since it formed.
+//  Mitigated  = a candle BODY closed through the zone's outer (wick) edge.
+//               A wick alone poking into/through a zone never mitigates it.
+//  MSNR       = confluence: a fresh zone overlapping with fresh zones on other enabled
+//               timeframes (W/D/H4/H1), gated by "Min Timeframes for Confluence".
+// ============================================================================
+
+// ---------------- INPUTS ----------------
+grpGeneral = "General"
+pivotLen      = input.int(5, "Pivot Strength (bars each side)", minval=2, group=grpGeneral)
+maxZonesPerTF = input.int(12, "Max Zones Stored per Timeframe", minval=4, maxval=30, group=grpGeneral)
+zoneBufferPts = input.float(0.0, "Zone Outer Edge Buffer (price units, e.g. 0.0001)", minval=0, group=grpGeneral)
+
+grpTF = "Timeframes"
+useW  = input.bool(true, "Use Weekly",  group=grpTF)
+useD  = input.bool(true, "Use Daily",   group=grpTF)
+useH4 = input.bool(true, "Use H4",      group=grpTF)
+useH1 = input.bool(true, "Use H1",      group=grpTF)
+minConfluence = input.int(3, "Min Timeframes for MSNR Confluence (incl. trigger TF)", minval=1, maxval=4, group=grpTF)
+
+grpZones = "Zone Types"
+showSNR = input.bool(true, "Show Raw SNR Zones", group=grpZones)
+showQMR = input.bool(true, "Show Quasimodo (QMR) Zones", group=grpZones)
+showRNS = input.bool(true, "Show Flip (RNS) Zones", group=grpZones)
+
+grpBias = "Open/Close Bias Filter"
+useOpenCloseBias = input.bool(true, "Require Daily+Weekly Open bias alignment", group=grpBias)
+showOCLines = input.bool(true, "Plot Weekly/Daily Open & Prev Close lines", group=grpBias)
+
+grpRisk = "Risk Management"
+rrTarget      = input.float(5.0, "Minimum Risk:Reward", minval=1, group=grpRisk)
+slBufferTicks = input.int(10, "Stop Loss Buffer (ticks)", minval=0, group=grpRisk)
+useRefinedSL  = input.bool(true, "Refine SL using H1/M30/M15 structure (tighter stop)", group=grpRisk)
+useM30refine  = input.bool(true, "Include M30 in SL refinement", group=grpRisk)
+useM15refine  = input.bool(true, "Include M15 in SL refinement", group=grpRisk)
+pivotLenLTF   = input.int(3, "Lower-TF Pivot Strength (M30/M15)", minval=1, maxval=10, group=grpRisk)
+riskPct       = input.float(1.0, "Risk % of Equity per Trade", minval=0.1, maxval=10, group=grpRisk)
+oneTradeAtATime = input.bool(true, "Only one open position at a time (ignore new signals while in a trade)", group=grpRisk)
+useDateRange  = input.bool(false, "Limit backtest to date range below", group=grpRisk)
+startDate     = input.time(timestamp("2026-01-01T00:00"), "Start Date", group=grpRisk)
+endDate       = input.time(timestamp("2026-12-31T23:59"), "End Date", group=grpRisk)
+
+grpSignal = "Signal Display"
+showArrows       = input.bool(true, "Show Buy/Sell Arrows", group=grpSignal)
+arrowSize        = input.string("small", "Arrow Size", options=["tiny","small","normal","large"], group=grpSignal)
+showSignalDetail = input.bool(true, "Show SL/TP Detail Label", group=grpSignal)
+showSLTPLines    = input.bool(true, "Show SL/Entry/TP Lines per Signal", group=grpSignal)
+
+grpCandle = "Candle Pattern Confirmation (RNS Flip Zones)"
+useCandleConfirmRNS = input.bool(true, "Require Candle Confirmation on RNS Flip Zone Signals", group=grpCandle)
+candlePatternMode   = input.string("Either", "Pattern Required", options=["Engulfing Only", "Pin Bar Only", "Either"], group=grpCandle)
+pinWickRatio         = input.float(0.6, "Min Wick-to-Range Ratio (Pin Bar)", minval=0.3, maxval=0.9, group=grpCandle)
+pinBodyMaxRatio       = input.float(0.35, "Max Body-to-Range Ratio (Pin Bar)", minval=0.05, maxval=0.6, group=grpCandle)
+
+grpAlerts = "Webhook Alerts"
+useWebhookAlerts = input.bool(true, "Enable Webhook Alerts (JSON via alert())", group=grpAlerts)
+
+grpColor = "Colors"
+colW  = input.color(color.new(color.purple, 75), "Weekly Zone Color", group=grpColor)
+colD  = input.color(color.new(color.blue, 75), "Daily Zone Color", group=grpColor)
+colH4 = input.color(color.new(color.orange, 75), "H4 Zone Color", group=grpColor)
+colH1 = input.color(color.new(color.gray, 75), "H1 Zone Color", group=grpColor)
+colRNS = input.color(color.new(color.yellow, 70), "RNS Flip Zone Color", group=grpColor)
+
+// ---------------- TYPE ----------------
+type Zone
+    float top
+    float bottom
+    bool  isSupport
+    string kind      // "SNR", "QMR", "RNS"
+    bool  fresh
+    bool  broken
+    box   b
+    string tf
+
+// ---------------- STORAGE ----------------
+var array<Zone> zonesW  = array.new<Zone>()
+var array<Zone> zonesD  = array.new<Zone>()
+var array<Zone> zonesH4 = array.new<Zone>()
+var array<Zone> zonesH1 = array.new<Zone>()
+
+// small pivot history per TF for QMR pattern detection: type(1=H,0=L), value, oc-edge, confirmed-flag
+var array<float> histTypeW = array.new<float>()
+var array<float> histValW  = array.new<float>()
+var array<float> histOCW   = array.new<float>()
+var array<float> histTypeD = array.new<float>()
+var array<float> histValD  = array.new<float>()
+var array<float> histOCD   = array.new<float>()
+var array<float> histTypeH4 = array.new<float>()
+var array<float> histValH4  = array.new<float>()
+var array<float> histOCH4   = array.new<float>()
+var array<float> histTypeH1 = array.new<float>()
+var array<float> histValH1  = array.new<float>()
+var array<float> histOCH1   = array.new<float>()
+
+var float lastTimeW  = na
+var float lastTimeD  = na
+var float lastTimeH4 = na
+var float lastTimeH1 = na
+var float lastTimeM30 = na
+var float lastTimeM15 = na
+var float lastSwingLowM30  = na
+var float lastSwingHighM30 = na
+var float lastSwingLowM15  = na
+var float lastSwingHighM15 = na
+
+// ---------------- HELPERS ----------------
+f_pivots(_tf) =>
+    [_ph, _pl, _pt, _o, _c] = request.security(syminfo.tickerid, _tf,
+         [ta.pivothigh(pivotLen, pivotLen), ta.pivotlow(pivotLen, pivotLen), time[pivotLen], open[pivotLen], close[pivotLen]],
+         lookahead=barmerge.lookahead_off)
+    [_ph, _pl, _pt, _o, _c]
+
+f_pivotsLen(_tf, _len) =>
+    [_ph, _pl, _pt, _o, _c] = request.security(syminfo.tickerid, _tf,
+         [ta.pivothigh(_len, _len), ta.pivotlow(_len, _len), time[_len], open[_len], close[_len]],
+         lookahead=barmerge.lookahead_off)
+    [_ph, _pl, _pt, _o, _c]
+
+f_lastOfType(array<float> tArr, array<float> vArr, float typ) =>
+    float result = na
+    if array.size(tArr) > 0
+        for i = 0 to array.size(tArr) - 1
+            if na(result) and array.get(tArr, i) == typ
+                result := array.get(vArr, i)
+    result
+
+// pick the tightest valid stop for a BUY: highest candidate that is still below entry
+f_refineSLBuy(float entry, float m15, float m30, float h1, float fallback) =>
+    float best = fallback
+    if not na(h1) and h1 < entry and h1 > best
+        best := h1
+    if not na(m30) and m30 < entry and m30 > best
+        best := m30
+    if not na(m15) and m15 < entry and m15 > best
+        best := m15
+    best
+
+// pick the tightest valid stop for a SELL: lowest candidate that is still above entry
+f_refineSLSell(float entry, float m15, float m30, float h1, float fallback) =>
+    float best = fallback
+    if not na(h1) and h1 > entry and h1 < best
+        best := h1
+    if not na(m30) and m30 > entry and m30 < best
+        best := m30
+    if not na(m15) and m15 > entry and m15 < best
+        best := m15
+    best
+
+// ---------------- CANDLE PATTERN HELPERS (for RNS flip-zone confirmation) ----------------
+f_bullishEngulf() =>
+    close[1] < open[1] and close > open and close >= open[1] and open <= close[1]
+
+f_bearishEngulf() =>
+    close[1] > open[1] and close < open and close <= open[1] and open >= close[1]
+
+f_bullishPin() =>
+    float rng = high - low
+    bool  ok = false
+    if rng > 0
+        float body = math.abs(close - open)
+        float lowerWick = math.min(close, open) - low
+        ok := (lowerWick / rng >= pinWickRatio) and (body / rng <= pinBodyMaxRatio)
+    ok
+
+f_bearishPin() =>
+    float rng = high - low
+    bool  ok = false
+    if rng > 0
+        float body = math.abs(close - open)
+        float upperWick = high - math.max(close, open)
+        ok := (upperWick / rng >= pinWickRatio) and (body / rng <= pinBodyMaxRatio)
+    ok
+
+f_candleConfirmBuy() =>
+    bool eng = f_bullishEngulf()
+    bool pin = f_bullishPin()
+    bool result = candlePatternMode == "Engulfing Only" ? eng : candlePatternMode == "Pin Bar Only" ? pin : (eng or pin)
+    result
+
+f_candleConfirmSell() =>
+    bool eng = f_bearishEngulf()
+    bool pin = f_bearishPin()
+    bool result = candlePatternMode == "Engulfing Only" ? eng : candlePatternMode == "Pin Bar Only" ? pin : (eng or pin)
+    result
+
+// RNS zones require a confirming candle on the trigger bar; other zone kinds pass through
+f_rnsOk(string kind, bool isBuySide) =>
+    bool result = true
+    if kind == "RNS" and useCandleConfirmRNS
+        result := isBuySide ? f_candleConfirmBuy() : f_candleConfirmSell()
+    result
+
+// Webhook alert payload (JSON) for a fired signal
+f_fireAlert(string tf, string kind, bool isBuy, float entryPx, float sl, float tp, int confluence) =>
+    if useWebhookAlerts
+        string side = isBuy ? "buy" : "sell"
+        string msg = '{"symbol":"' + syminfo.ticker + '","tf":"' + tf + '","zone":"' + kind + '","side":"' + side + '","entry":' + str.tostring(entryPx) + ',"sl":' + str.tostring(sl) + ',"tp":' + str.tostring(tp) + ',"confluence":' + str.tostring(confluence) + ',"ver":"v26.0909.1830"}'
+        alert(msg, alert.freq_once_per_bar_close)
+
+f_addZone(array<Zone> arr, float top, float bottom, bool isSupport, string kind, string tfLabel, color col) =>
+    if top >= bottom
+        z = Zone.new(top, bottom, isSupport, kind, true, false, na, tfLabel)
+        z.b := box.new(left=bar_index, top=top, bottom=bottom, right=bar_index, border_color=color.new(col,0), bgcolor=col, extend=extend.right, text=tfLabel + " " + kind, text_size=size.tiny, text_color=color.new(col,0))
+        array.unshift(arr, z)
+        if array.size(arr) > maxZonesPerTF
+            old = array.pop(arr)
+            box.delete(old.b)
+
+f_pushHist(array<float> tArr, array<float> vArr, array<float> ocArr, float typ, float val, float oc) =>
+    array.unshift(tArr, typ)
+    array.unshift(vArr, val)
+    array.unshift(ocArr, oc)
+    if array.size(tArr) > 6
+        array.pop(tArr)
+        array.pop(vArr)
+        array.pop(ocArr)
+
+// checks last 3 pivots in history for a QM pattern and creates a *pending* level to confirm
+// returns [pendingActive, pendingIsBuy, pendingTop, pendingBottom, pendingTriggerLevel]
+f_scanQM(array<float> tArr, array<float> vArr, array<float> ocArr) =>
+    float pTop = na
+    float pBot = na
+    bool  pIsBuy = na
+    float pTrigger = na
+    bool  active = false
+    if array.size(tArr) >= 3
+        t2 = array.get(tArr, 0) // newest
+        t1 = array.get(tArr, 1)
+        t0 = array.get(tArr, 2) // oldest
+        v2 = array.get(vArr, 0)
+        v1 = array.get(vArr, 1)
+        v0 = array.get(vArr, 2)
+        oc0 = array.get(ocArr, 2)
+        // Bullish QM: oldest=Low, middle=High, newest=Low, newest breaks oldest low
+        if t0 == 0 and t1 == 1 and t2 == 0 and v2 < v0
+            pIsBuy := true
+            pBot := v0
+            pTop := oc0
+            pTrigger := v1   // must close above this high to confirm
+            active := true
+        // Bearish QM: oldest=High, middle=Low, newest=High, newest breaks oldest high
+        if t0 == 1 and t1 == 0 and t2 == 1 and v2 > v0
+            pIsBuy := false
+            pTop := v0
+            pBot := oc0
+            pTrigger := v1   // must close below this low to confirm
+            active := true
+    [active, pIsBuy, pTop, pBot, pTrigger]
+
+f_overlap(float aTop, float aBot, float bTop, float bBot) => aBot <= bTop and aTop >= bBot
+
+f_arrowSize() =>
+    string s = size.small
+    if arrowSize == "tiny"
+        s := size.tiny
+    else if arrowSize == "normal"
+        s := size.normal
+    else if arrowSize == "large"
+        s := size.large
+    s
+
+f_countConfluence(float top, float bottom, string selfTF, array<Zone> aW, array<Zone> aD, array<Zone> aH4, array<Zone> aH1) =>
+    int cnt = 1 // counts the trigger TF itself
+    if useW and selfTF != "W"
+        for i = 0 to array.size(aW) - 1
+            z = array.get(aW, i)
+            if z.fresh and not z.broken and f_overlap(top, bottom, z.top, z.bottom)
+                cnt += 1
+                break
+    if useD and selfTF != "D"
+        for i = 0 to array.size(aD) - 1
+            z = array.get(aD, i)
+            if z.fresh and not z.broken and f_overlap(top, bottom, z.top, z.bottom)
+                cnt += 1
+                break
+    if useH4 and selfTF != "H4"
+        for i = 0 to array.size(aH4) - 1
+            z = array.get(aH4, i)
+            if z.fresh and not z.broken and f_overlap(top, bottom, z.top, z.bottom)
+                cnt += 1
+                break
+    if useH1 and selfTF != "H1"
+        for i = 0 to array.size(aH1) - 1
+            z = array.get(aH1, i)
+            if z.fresh and not z.broken and f_overlap(top, bottom, z.top, z.bottom)
+                cnt += 1
+                break
+    cnt
+
+// mitigation + RNS flip pass
+f_mitigate(array<Zone> arr, float c, color rnsCol, string tfLabel) =>
+    for i = 0 to array.size(arr) - 1
+        z = array.get(arr, i)
+        if not z.broken and not na(z.top) and not na(z.bottom)
+            brokeSupport    = z.isSupport and c < z.bottom
+            brokeResistance = (not z.isSupport) and c > z.top
+            if brokeSupport or brokeResistance
+                z.broken := true
+                box.delete(z.b)
+                if showRNS
+                    f_addZone(arr, z.top, z.bottom, not z.isSupport, "RNS", tfLabel, rnsCol)
+
+// ---------------- PER-TF PROCESSING ----------------
+// Fetch pivots
+[phW, plW, ptW, oW, cW]   = useW  ? f_pivots("W")   : [float(na), float(na), float(na), float(na), float(na)]
+[phD, plD, ptD, oD, cD]   = useD  ? f_pivots("D")   : [float(na), float(na), float(na), float(na), float(na)]
+[phH4, plH4, ptH4, oH4, cH4] = useH4 ? f_pivots("240") : [float(na), float(na), float(na), float(na), float(na)]
+[phH1, plH1, ptH1, oH1, cH1] = useH1 ? f_pivots("60")  : [float(na), float(na), float(na), float(na), float(na)]
+
+// ---- Weekly ----
+if useW and not na(ptW) and ptW != lastTimeW
+    lastTimeW := ptW
+    if not na(phW)
+        if showSNR
+            f_addZone(zonesW, phW + zoneBufferPts, math.min(oW, cW), false, "SNR", "W", colW)
+        f_pushHist(histTypeW, histValW, histOCW, 1, phW, math.min(oW, cW))
+    if not na(plW)
+        if showSNR
+            f_addZone(zonesW, math.max(oW, cW), plW - zoneBufferPts, true, "SNR", "W", colW)
+        f_pushHist(histTypeW, histValW, histOCW, 0, plW, math.max(oW, cW))
+
+// ---- Daily ----
+if useD and not na(ptD) and ptD != lastTimeD
+    lastTimeD := ptD
+    if not na(phD)
+        if showSNR
+            f_addZone(zonesD, phD + zoneBufferPts, math.min(oD, cD), false, "SNR", "D", colD)
+        f_pushHist(histTypeD, histValD, histOCD, 1, phD, math.min(oD, cD))
+    if not na(plD)
+        if showSNR
+            f_addZone(zonesD, math.max(oD, cD), plD - zoneBufferPts, true, "SNR", "D", colD)
+        f_pushHist(histTypeD, histValD, histOCD, 0, plD, math.max(oD, cD))
+
+// ---- H4 ----
+if useH4 and not na(ptH4) and ptH4 != lastTimeH4
+    lastTimeH4 := ptH4
+    if not na(phH4)
+        if showSNR
+            f_addZone(zonesH4, phH4 + zoneBufferPts, math.min(oH4, cH4), false, "SNR", "H4", colH4)
+        f_pushHist(histTypeH4, histValH4, histOCH4, 1, phH4, math.min(oH4, cH4))
+    if not na(plH4)
+        if showSNR
+            f_addZone(zonesH4, math.max(oH4, cH4), plH4 - zoneBufferPts, true, "SNR", "H4", colH4)
+        f_pushHist(histTypeH4, histValH4, histOCH4, 0, plH4, math.max(oH4, cH4))
+
+// ---- H1 ----
+if useH1 and not na(ptH1) and ptH1 != lastTimeH1
+    lastTimeH1 := ptH1
+    if not na(phH1)
+        if showSNR
+            f_addZone(zonesH1, phH1 + zoneBufferPts, math.min(oH1, cH1), false, "SNR", "H1", colH1)
+        f_pushHist(histTypeH1, histValH1, histOCH1, 1, phH1, math.min(oH1, cH1))
+    if not na(plH1)
+        if showSNR
+            f_addZone(zonesH1, math.max(oH1, cH1), plH1 - zoneBufferPts, true, "SNR", "H1", colH1)
+        f_pushHist(histTypeH1, histValH1, histOCH1, 0, plH1, math.max(oH1, cH1))
+
+// ---- Lower-TF swing tracking for SL refinement (M30 / M15) ----
+[phM30, plM30, ptM30, oM30, cM30] = (useRefinedSL and useM30refine) ? f_pivotsLen("30", pivotLenLTF) : [float(na), float(na), float(na), float(na), float(na)]
+[phM15, plM15, ptM15, oM15, cM15] = (useRefinedSL and useM15refine) ? f_pivotsLen("15", pivotLenLTF) : [float(na), float(na), float(na), float(na), float(na)]
+
+if (useRefinedSL and useM30refine) and not na(ptM30) and ptM30 != lastTimeM30
+    lastTimeM30 := ptM30
+    if not na(phM30)
+        lastSwingHighM30 := phM30
+    if not na(plM30)
+        lastSwingLowM30 := plM30
+
+if (useRefinedSL and useM15refine) and not na(ptM15) and ptM15 != lastTimeM15
+    lastTimeM15 := ptM15
+    if not na(phM15)
+        lastSwingHighM15 := phM15
+    if not na(plM15)
+        lastSwingLowM15 := plM15
+
+// most recent H1 swing low/high, pulled from the H1 pivot history already being tracked
+lastSwingLowH1  = useRefinedSL ? f_lastOfType(histTypeH1, histValH1, 0) : na
+lastSwingHighH1 = useRefinedSL ? f_lastOfType(histTypeH1, histValH1, 1) : na
+
+// ---------------- QMR CONFIRMATION (pending state per TF) ----------------
+var bool qmActiveW = false
+var bool qmBuyW = false
+var float qmTopW = na
+var float qmBotW = na
+var float qmTrigW = na
+var bool qmActiveD = false
+var bool qmBuyD = false
+var float qmTopD = na
+var float qmBotD = na
+var float qmTrigD = na
+var bool qmActiveH4 = false
+var bool qmBuyH4 = false
+var float qmTopH4 = na
+var float qmBotH4 = na
+var float qmTrigH4 = na
+var bool qmActiveH1 = false
+var bool qmBuyH1 = false
+var float qmTopH1 = na
+var float qmBotH1 = na
+var float qmTrigH1 = na
+
+if showQMR and array.size(histTypeW) >= 3
+    [aW, bW, tpW, btW, trW] = f_scanQM(histTypeW, histValW, histOCW)
+    if aW
+        qmActiveW := true
+        qmBuyW := bW
+        qmTopW := tpW
+        qmBotW := btW
+        qmTrigW := trW
+if showQMR and array.size(histTypeD) >= 3
+    [aD2, bD2, tpD2, btD2, trD2] = f_scanQM(histTypeD, histValD, histOCD)
+    if aD2
+        qmActiveD := true
+        qmBuyD := bD2
+        qmTopD := tpD2
+        qmBotD := btD2
+        qmTrigD := trD2
+if showQMR and array.size(histTypeH4) >= 3
+    [aH4b, bH4b, tpH4b, btH4b, trH4b] = f_scanQM(histTypeH4, histValH4, histOCH4)
+    if aH4b
+        qmActiveH4 := true
+        qmBuyH4 := bH4b
+        qmTopH4 := tpH4b
+        qmBotH4 := btH4b
+        qmTrigH4 := trH4b
+if showQMR and array.size(histTypeH1) >= 3
+    [aH1b, bH1b, tpH1b, btH1b, trH1b] = f_scanQM(histTypeH1, histValH1, histOCH1)
+    if aH1b
+        qmActiveH1 := true
+        qmBuyH1 := bH1b
+        qmTopH1 := tpH1b
+        qmBotH1 := btH1b
+        qmTrigH1 := trH1b
+
+// confirm on close crossing the trigger level, then create QMR zone and clear pending
+if qmActiveW
+    if qmBuyW and close > qmTrigW
+        f_addZone(zonesW, qmTopW, qmBotW, true, "QMR", "W", colW)
+        qmActiveW := false
+    if (not qmBuyW) and close < qmTrigW
+        f_addZone(zonesW, qmTopW, qmBotW, false, "QMR", "W", colW)
+        qmActiveW := false
+if qmActiveD
+    if qmBuyD and close > qmTrigD
+        f_addZone(zonesD, qmTopD, qmBotD, true, "QMR", "D", colD)
+        qmActiveD := false
+    if (not qmBuyD) and close < qmTrigD
+        f_addZone(zonesD, qmTopD, qmBotD, false, "QMR", "D", colD)
+        qmActiveD := false
+if qmActiveH4
+    if qmBuyH4 and close > qmTrigH4
+        f_addZone(zonesH4, qmTopH4, qmBotH4, true, "QMR", "H4", colH4)
+        qmActiveH4 := false
+    if (not qmBuyH4) and close < qmTrigH4
+        f_addZone(zonesH4, qmTopH4, qmBotH4, false, "QMR", "H4", colH4)
+        qmActiveH4 := false
+if qmActiveH1
+    if qmBuyH1 and close > qmTrigH1
+        f_addZone(zonesH1, qmTopH1, qmBotH1, true, "QMR", "H1", colH1)
+        qmActiveH1 := false
+    if (not qmBuyH1) and close < qmTrigH1
+        f_addZone(zonesH1, qmTopH1, qmBotH1, false, "QMR", "H1", colH1)
+        qmActiveH1 := false
+
+// ---------------- MITIGATION / RNS FLIP ----------------
+f_mitigate(zonesW, close, colRNS, "W")
+f_mitigate(zonesD, close, colRNS, "D")
+f_mitigate(zonesH4, close, colRNS, "H4")
+f_mitigate(zonesH1, close, colRNS, "H1")
+
+// ---------------- OPEN/CLOSE BIAS LEVELS ----------------
+wOpen  = request.security(syminfo.tickerid, "W", open, lookahead=barmerge.lookahead_off)
+dOpen  = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_off)
+wPrevClose = request.security(syminfo.tickerid, "W", close[1], lookahead=barmerge.lookahead_off)
+dPrevClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+
+plot(showOCLines ? wOpen : na, "Weekly Open", color=color.purple, style=plot.style_stepline, linewidth=1)
+plot(showOCLines ? dOpen : na, "Daily Open", color=color.blue, style=plot.style_stepline, linewidth=1)
+plot(showOCLines ? wPrevClose : na, "Prev Weekly Close", color=color.purple, style=plot.style_circles, linewidth=1)
+plot(showOCLines ? dPrevClose : na, "Prev Daily Close", color=color.blue, style=plot.style_circles, linewidth=1)
+
+biasBuyOK  = not useOpenCloseBias or (close > dOpen and close > wOpen)
+biasSellOK = not useOpenCloseBias or (close < dOpen and close < wOpen)
+
+// ---------------- SIGNAL / TRADE EXECUTION (all enabled timeframes) ----------------
+inDateRange = not useDateRange or (time >= startDate and time <= endDate)
+
+var bool barEntryTaken = false
+barEntryTaken := false
+var bool anyBuySignal = false
+var bool anySellSignal = false
+anyBuySignal := false
+anySellSignal := false
+
+// pure calculation only (no strategy.* calls) so it is safe to call from inside a function
+f_computeTrade(bool isBuy, Zone z, float entryPx) =>
+    float sl = na
+    float tp = na
+    float qty = na
+    bool valid = false
+    if isBuy
+        rawSL = useRefinedSL ? f_refineSLBuy(entryPx, lastSwingLowM15, lastSwingLowM30, lastSwingLowH1, z.bottom) : z.bottom
+        sl := rawSL - slBufferTicks * syminfo.mintick
+        risk = entryPx - sl
+        if risk > 0
+            tp := entryPx + rrTarget * risk
+            qty := (strategy.equity * riskPct / 100) / risk
+            valid := true
+    else
+        rawSL2 = useRefinedSL ? f_refineSLSell(entryPx, lastSwingHighM15, lastSwingHighM30, lastSwingHighH1, z.top) : z.top
+        sl := rawSL2 + slBufferTicks * syminfo.mintick
+        risk2 = sl - entryPx
+        if risk2 > 0
+            tp := entryPx - rrTarget * risk2
+            qty := (strategy.equity * riskPct / 100) / risk2
+            valid := true
+    [valid, sl, tp, qty]
+
+// ---- Weekly ----
+if useW and array.size(zonesW) > 0
+    for i = 0 to array.size(zonesW) - 1
+        z = array.get(zonesW, i)
+        if z.fresh and not z.broken and low <= z.top and high >= z.bottom
+            z.fresh := false
+            if inDateRange and not (oneTradeAtATime and (strategy.position_size != 0 or barEntryTaken))
+                cnt = f_countConfluence(z.top, z.bottom, "W", zonesW, zonesD, zonesH4, zonesH1)
+                if cnt >= minConfluence and (showSNR or showQMR or showRNS)
+                    if z.isSupport and biasBuyOK and f_rnsOk(z.kind, true)
+                        [ok, sl, tp, qty] = f_computeTrade(true, z, close)
+                        if ok
+                            strategy.entry("Long", strategy.long, qty=qty)
+                            strategy.exit("Long Exit", from_entry="Long", stop=sl, limit=tp)
+                            barEntryTaken := true
+                            anyBuySignal := true
+                            f_fireAlert("W", z.kind, true, close, sl, tp, cnt)
+                            if showArrows
+                                label.new(bar_index, low, "", style=label.style_arrowup, color=color.new(color.green, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, low, "W BUY " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl, format.mintick) + "  TP " + str.tostring(tp, format.mintick), style=label.style_label_up, color=color.new(color.green, 85), textcolor=color.green, size=size.tiny)
+                    if (not z.isSupport) and biasSellOK and f_rnsOk(z.kind, false)
+                        [ok2, sl2, tp2, qty2] = f_computeTrade(false, z, close)
+                        if ok2
+                            strategy.entry("Short", strategy.short, qty=qty2)
+                            strategy.exit("Short Exit", from_entry="Short", stop=sl2, limit=tp2)
+                            barEntryTaken := true
+                            anySellSignal := true
+                            f_fireAlert("W", z.kind, false, close, sl2, tp2, cnt)
+                            if showArrows
+                                label.new(bar_index, high, "", style=label.style_arrowdown, color=color.new(color.red, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, high, "W SELL " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl2, format.mintick) + "  TP " + str.tostring(tp2, format.mintick), style=label.style_label_down, color=color.new(color.red, 85), textcolor=color.red, size=size.tiny)
+
+// ---- Daily ----
+if useD and array.size(zonesD) > 0
+    for i = 0 to array.size(zonesD) - 1
+        z = array.get(zonesD, i)
+        if z.fresh and not z.broken and low <= z.top and high >= z.bottom
+            z.fresh := false
+            if inDateRange and not (oneTradeAtATime and (strategy.position_size != 0 or barEntryTaken))
+                cnt = f_countConfluence(z.top, z.bottom, "D", zonesW, zonesD, zonesH4, zonesH1)
+                if cnt >= minConfluence and (showSNR or showQMR or showRNS)
+                    if z.isSupport and biasBuyOK and f_rnsOk(z.kind, true)
+                        [ok, sl, tp, qty] = f_computeTrade(true, z, close)
+                        if ok
+                            strategy.entry("Long", strategy.long, qty=qty)
+                            strategy.exit("Long Exit", from_entry="Long", stop=sl, limit=tp)
+                            barEntryTaken := true
+                            anyBuySignal := true
+                            f_fireAlert("D", z.kind, true, close, sl, tp, cnt)
+                            if showArrows
+                                label.new(bar_index, low, "", style=label.style_arrowup, color=color.new(color.green, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, low, "D BUY " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl, format.mintick) + "  TP " + str.tostring(tp, format.mintick), style=label.style_label_up, color=color.new(color.green, 85), textcolor=color.green, size=size.tiny)
+                    if (not z.isSupport) and biasSellOK and f_rnsOk(z.kind, false)
+                        [ok2, sl2, tp2, qty2] = f_computeTrade(false, z, close)
+                        if ok2
+                            strategy.entry("Short", strategy.short, qty=qty2)
+                            strategy.exit("Short Exit", from_entry="Short", stop=sl2, limit=tp2)
+                            barEntryTaken := true
+                            anySellSignal := true
+                            f_fireAlert("D", z.kind, false, close, sl2, tp2, cnt)
+                            if showArrows
+                                label.new(bar_index, high, "", style=label.style_arrowdown, color=color.new(color.red, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, high, "D SELL " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl2, format.mintick) + "  TP " + str.tostring(tp2, format.mintick), style=label.style_label_down, color=color.new(color.red, 85), textcolor=color.red, size=size.tiny)
+
+// ---- H4 ----
+if useH4 and array.size(zonesH4) > 0
+    for i = 0 to array.size(zonesH4) - 1
+        z = array.get(zonesH4, i)
+        if z.fresh and not z.broken and low <= z.top and high >= z.bottom
+            z.fresh := false
+            if inDateRange and not (oneTradeAtATime and (strategy.position_size != 0 or barEntryTaken))
+                cnt = f_countConfluence(z.top, z.bottom, "H4", zonesW, zonesD, zonesH4, zonesH1)
+                if cnt >= minConfluence and (showSNR or showQMR or showRNS)
+                    if z.isSupport and biasBuyOK and f_rnsOk(z.kind, true)
+                        [ok, sl, tp, qty] = f_computeTrade(true, z, close)
+                        if ok
+                            strategy.entry("Long", strategy.long, qty=qty)
+                            strategy.exit("Long Exit", from_entry="Long", stop=sl, limit=tp)
+                            barEntryTaken := true
+                            anyBuySignal := true
+                            f_fireAlert("H4", z.kind, true, close, sl, tp, cnt)
+                            if showArrows
+                                label.new(bar_index, low, "", style=label.style_arrowup, color=color.new(color.green, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, low, "H4 BUY " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl, format.mintick) + "  TP " + str.tostring(tp, format.mintick), style=label.style_label_up, color=color.new(color.green, 85), textcolor=color.green, size=size.tiny)
+                    if (not z.isSupport) and biasSellOK and f_rnsOk(z.kind, false)
+                        [ok2, sl2, tp2, qty2] = f_computeTrade(false, z, close)
+                        if ok2
+                            strategy.entry("Short", strategy.short, qty=qty2)
+                            strategy.exit("Short Exit", from_entry="Short", stop=sl2, limit=tp2)
+                            barEntryTaken := true
+                            anySellSignal := true
+                            f_fireAlert("H4", z.kind, false, close, sl2, tp2, cnt)
+                            if showArrows
+                                label.new(bar_index, high, "", style=label.style_arrowdown, color=color.new(color.red, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, high, "H4 SELL " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl2, format.mintick) + "  TP " + str.tostring(tp2, format.mintick), style=label.style_label_down, color=color.new(color.red, 85), textcolor=color.red, size=size.tiny)
+
+// ---- H1 ----
+if useH1 and array.size(zonesH1) > 0
+    for i = 0 to array.size(zonesH1) - 1
+        z = array.get(zonesH1, i)
+        if z.fresh and not z.broken and low <= z.top and high >= z.bottom
+            z.fresh := false
+            if inDateRange and not (oneTradeAtATime and (strategy.position_size != 0 or barEntryTaken))
+                cnt = f_countConfluence(z.top, z.bottom, "H1", zonesW, zonesD, zonesH4, zonesH1)
+                if cnt >= minConfluence and (showSNR or showQMR or showRNS)
+                    if z.isSupport and biasBuyOK and f_rnsOk(z.kind, true)
+                        [ok, sl, tp, qty] = f_computeTrade(true, z, close)
+                        if ok
+                            strategy.entry("Long", strategy.long, qty=qty)
+                            strategy.exit("Long Exit", from_entry="Long", stop=sl, limit=tp)
+                            barEntryTaken := true
+                            anyBuySignal := true
+                            f_fireAlert("H1", z.kind, true, close, sl, tp, cnt)
+                            if showArrows
+                                label.new(bar_index, low, "", style=label.style_arrowup, color=color.new(color.green, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, low, "H1 BUY " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl, format.mintick) + "  TP " + str.tostring(tp, format.mintick), style=label.style_label_up, color=color.new(color.green, 85), textcolor=color.green, size=size.tiny)
+                    if (not z.isSupport) and biasSellOK and f_rnsOk(z.kind, false)
+                        [ok2, sl2, tp2, qty2] = f_computeTrade(false, z, close)
+                        if ok2
+                            strategy.entry("Short", strategy.short, qty=qty2)
+                            strategy.exit("Short Exit", from_entry="Short", stop=sl2, limit=tp2)
+                            barEntryTaken := true
+                            anySellSignal := true
+                            f_fireAlert("H1", z.kind, false, close, sl2, tp2, cnt)
+                            if showArrows
+                                label.new(bar_index, high, "", style=label.style_arrowdown, color=color.new(color.red, 0), size=f_arrowSize())
+                            if showSignalDetail
+                                label.new(bar_index, high, "H1 SELL " + z.kind + " x" + str.tostring(cnt) + "TF\nSL " + str.tostring(sl2, format.mintick) + "  TP " + str.tostring(tp2, format.mintick), style=label.style_label_down, color=color.new(color.red, 85), textcolor=color.red, size=size.tiny)
+
+// ---------------- STATIC ALERT CONDITIONS (for TradingView alert dialog) ----------------
+alertcondition(anyBuySignal, title="MSNR Confluence BUY", message="MSNR SNR/QMR/RNS confluence BUY signal on {{ticker}} {{interval}} [TnSovereignSnrQmrRnsV6]")
+alertcondition(anySellSignal, title="MSNR Confluence SELL", message="MSNR SNR/QMR/RNS confluence SELL signal on {{ticker}} {{interval}} [TnSovereignSnrQmrRnsV6]")
+
+// ---------------- STATS TABLE ----------------
+var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+if barstate.islast
+    winRate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100 : 0.0
+    table.cell(statsTable, 0, 0, "Total Trades", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(statsTable, 1, 0, str.tostring(strategy.closedtrades), text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(statsTable, 0, 1, "Wins (TP)", text_color=color.white)
+    table.cell(statsTable, 1, 1, str.tostring(strategy.wintrades), text_color=color.green)
+    table.cell(statsTable, 0, 2, "Losses (SL)", text_color=color.white)
+    table.cell(statsTable, 1, 2, str.tostring(strategy.losstrades), text_color=color.red)
+    table.cell(statsTable, 0, 3, "Win Rate", text_color=color.white)
+    table.cell(statsTable, 1, 3, str.tostring(winRate, "#.##") + "%", text_color=color.yellow)
+    table.cell(statsTable, 0, 4, "Profit Factor", text_color=color.white)
+    table.cell(statsTable, 1, 4, str.tostring(strategy.grossprofit > 0 and strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : na, "#.##"), text_color=color.white)
+    table.cell(statsTable, 0, 5, "Net Profit", text_color=color.white)
+    table.cell(statsTable, 1, 5, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.green : color.red)
+    table.cell(statsTable, 0, 6, "Version", text_color=color.white)
+    table.cell(statsTable, 1, 6, "v26.0909.1830", text_color=color.aqua)
