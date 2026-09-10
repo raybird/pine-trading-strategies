@@ -1,0 +1,250 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignReversalScoreV6
+// ============================================================================
+// Causal Audit: 2026-09-10 18:40 CST
+// Version: v26.0910.1830
+// Build: Reversal Engine Score Sovereign Port
+//
+// Source: casoon/pine-scripts (WavesUnchained)
+//         Reversal Engine Score Strategy v1.6.1
+//
+// Distinct from TnSovereignReversalEngineV6 (v26.0508, Fractal Entropy merge):
+// this build keeps the Score-Gate model from Reversal Engine Score — a signal
+// starts at Score A, then is promoted through hard gates (Sweep → Corridor →
+// HTF Trend → Structure → Wave-Trend confluence) to Score H before entry, with
+// an EMA-based investment curve refilling a filter capacitor.
+//
+// Core Thesis:
+//   流動性掃蕩反轉之「逐級評分」紀律：① 以 swing 高低與內/外側流動性池的
+//   「穿越並回收 (violate & reclaim)」開啟候選窗；② ATR corridor 排除低
+//   波動噪音與過度尖峰；③ HTF EMA 結構趨勢對位、Wave-Trend (MOM 9×12) 與
+//   K-ness/price-pressure 供應與需求整合；④ 每次通過一關即升一級
+//   (A→B→...→H)，最後以「質量打擊 (quality score)」與套利 R-multiple 確認
+//   進場。超過 1-R barrier（看他人的 loss barrier）即捨弃。精髓在於影片
+//   「Signal Score」不是一次性 boolean，而是隨條形演化、饋入 capacitor 的
+//   可退火評分斜坡。
+//
+// Sovereign Overlays:
+//   ✓ 流動性掃蕩（穿越再回收）relational sweep 偵測 + 防假突
+//   ✓ ATR corridor（ATR 百分位常態帶）過濾亂流
+//   ✓ HTF EMA (200/50) 趨勢地 ＋ Wave-Trend (9×12) 動量對位
+//   ✓ Structure/BOS 確認 + K-ness (wick/body) 供應需求整合
+//   ✓ Score A→H 逐級評分 + Quality Cap 進場門檻 (門檻 ≥ G)
+//   ✓ Signal capacitor（EMA 退火充值）+ 1-R loss barrier 放棄機制
+//   ✓ 0.75R SL / 1.5R TP bracket + 追蹤停損 + 版號鎖定
+// ============================================================================
+strategy("TeleNexus Sovereign Reversal-Score V6",
+     overlay                  = true,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.percent_of_equity,
+     default_qty_value        = 10,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     pyramiding               = 0,
+     calc_on_every_tick       = false,
+     max_labels_count         = 100,
+     max_lines_count          = 200,
+     max_boxes_count          = 200)
+
+// ============================================================================
+// NOTES ON DEFINITIONS
+//  Score   = the signal-quality ladder A..H. Each gate the price action
+//            satisfies promotes the candidate one or more grades.
+//  Sweep   = candle wicks beyond a swing extreme then the close reclaims the
+//            swing extreme (relational sweep). Mirrored for shorts.
+//  Corridor = ATR-band normalcy check; rejects compressed (low-vol) noise and
+//            spike extremes.
+//  Cap     = minimum required grade to open a position (default G).
+//  Capacitor = EMA-fit filter that has to be drained/recharged after each trade
+//            so the system cannot over-trade consecutive reversal setups.
+// ============================================================================
+
+// ---------------- INPUTS ----------------
+grpSweep = "Liquidity Sweep"
+swingLen       = input.int(10, "Sweep Swing Length", minval=2, group=grpSweep)
+sweepBuffPts   = input.float(0.0, "Sweep Buffer (points)", minval=0, group=grpSweep)
+useRelSweep    = input.bool(true, "Relational Sweep (violate & reclaim)", group=grpSweep)
+
+grpCorridor = "ATR Corridor"
+useCorridor   = input.bool(true, "Enable ATR Corridor", group=grpCorridor)
+atrCorrLen    = input.int(14, "ATR Length", minval=1, group=grpCorridor)
+corrLowMult   = input.float(0.5, "Lower Multiplier", minval=0.1, group=grpCorridor)
+corrHighMult  = input.float(3.5, "Upper Multiplier", minval=0.5, group=grpCorridor)
+
+grpHTF = "HTF Trend & Structure"
+useHtfTrend   = input.bool(true, "HTF EMA Trend Alignment", group=grpHTF)
+htfFastEma    = input.int(50, "HTF Fast EMA", minval=1, group=grpHTF)
+htfSlowEma    = input.int(200, "HTF Slow EMA", minval=1, group=grpHTF)
+useStructure  = input.bool(true, "Require Structure BOS confirmation", group=grpHTF)
+bosLen        = input.int(5, "BOS Pivot Length", minval=2, group=grpHTF)
+
+grpScore = "Score Ladder"
+minEntryGrade = input.string("G", "Minimum Entry Grade", options=["E","F","G","H"], group=grpScore)
+capLen        = input.int(9, "Signal Capacitor Length", minval=1, group=grpScore)
+useQualityCap = input.bool(true, "Quality-Capped Entry", group=grpScore)
+
+grpRisk = "Risk Management"
+slPts         = input.float(60.0, "Stop Loss (points)", minval=1, group=grpRisk)
+tpPts         = input.float(120.0, "Take Profit (points)", minval=1, group=grpRisk)
+useRRBracket  = input.bool(true, "Fixed 1R-2R Bracket", group=grpRisk)
+useTrailing   = input.bool(true, "Enable Trailing Stop", group=grpRisk)
+trailPct      = input.float(1.0, "Trailing Stop %", minval=0.1, step=0.1, group=grpRisk)
+useDateRange  = input.bool(false, "Limit backtest to date range below", group=grpRisk)
+startDate     = input.time(timestamp("2026-01-01T00:00"), "Start Date", group=grpRisk)
+endDate       = input.time(timestamp("2026-12-31T23:59"), "End Date", group=grpRisk)
+
+grpSignal = "Signal Display"
+showArrows = input.bool(true, "Show Buy/Sell Arrows", group=grpSignal)
+showScore  = input.bool(true, "Show Score Label", group=grpSignal)
+
+grpAlerts = "Webhook Alerts"
+useWebhookAlerts = input.bool(true, "Enable Webhook Alerts (JSON via alert())", group=grpAlerts)
+
+grpColor = "Colors"
+colBuy   = input.color(color.new(color.green, 0), "Buy Arrow", group=grpColor)
+colSell  = input.color(color.new(color.red, 0), "Sell Arrow", group=grpColor)
+
+// ---------------- CALCULATIONS ----------------
+atrV       = ta.atr(atrCorrLen)
+emaFast    = ta.ema(close, htfFastEma)
+emaSlow    = ta.ema(close, htfSlowEma)
+
+swingHi = ta.pivothigh(high, swingLen, swingLen)
+swingLo = ta.pivotlow(low, swingLen, swingLen)
+// recent swing levels (persistent)
+var float lastSwingHi = na
+var float lastSwingLo = na
+if not na(swingHi)
+    lastSwingHi := swingHi
+if not na(swingLo)
+    lastSwingLo := swingLo
+
+// --- sweep: wick beyond level then close reclaims ---
+sweepLong  = (not useRelSweep ? low <= (na(lastSwingLo) ? low : lastSwingLo - sweepBuffPts) and close > lastSwingLo
+                              : low  <= (na(lastSwingLo) ? low : lastSwingLo - sweepBuffPts) and close > lastSwingLo + sweepBuffPts and low < close)
+sweepShort = (not useRelSweep ? high >= (na(lastSwingHi) ? high : lastSwingHi + sweepBuffPts) and close < lastSwingHi
+                              : high >= (na(lastSwingHi) ? high : lastSwingHi + sweepBuffPts) and close < lastSwingHi - sweepBuffPts and high > close)
+
+// --- ATR corridor ---
+atrAvg = ta.sma(atrV, 20)
+inCorridor = not useCorridor or (atrV >= corrLowMult * atrAvg and atrV <= corrHighMult * atrAvg)
+
+// --- HTF trend + BOS ---
+htfUp  = close > emaSlow and emaFast > emaSlow
+htfDn  = close < emaSlow and emaFast < emaSlow
+
+var int  lastBOSDir = 0
+bos = ta.pivothigh(bosLen, bosLen, bosLen)
+bot = ta.pivotlow(bosLen, bosLen, bosLen)
+if not na(bos) and close > bos[bosLen]
+    lastBOSDir := 1
+if not na(bot) and close < bot[bosLen]
+    lastBOSDir := -1
+bosUp = (not useStructure or lastBOSDir == 1 or htfUp)
+bosDn = (not useStructure or lastBOSDir == -1 or htfDn)
+
+// --- Wave-Trend confluence (MOM 9×12) ---
+wvtd = ta.wma(hlc3, 9) - ta.wma(hlc3, 12)
+wtSmooth = ta.sma(wvtd, 4)
+wtConfluenceLong  = (close > open and wtSmooth > 0.0) or wvtd > 0.0
+wtConfluenceShort = (close < open and wtSmooth < 0.0) or wvtd < 0.0
+
+// --- Score ladder A..H (each fulfilled gate promotes grade) ---
+f_gradeIdx(grade) => grade == "E" ? 4 : grade == "F" ? 5 : grade == "G" ? 6 : 7
+minGrade = f_gradeIdx(minEntryGrade)
+
+// grade tracking
+var int  gradeLong  = 0
+var int  gradeShort = 0
+var bool doneLong   = false
+var bool doneShort  = false
+
+if not strategy.position_size == 0
+    doneLong  := true
+    doneShort := true
+
+// promote per gate
+if sweepLong and inCorridor
+    gradeLong := math.max(gradeLong, 1)
+if htfUp
+    gradeLong := math.max(gradeLong, 2)
+if bosUp
+    gradeLong := math.max(gradeLong, 3)
+if wtConfluenceLong
+    gradeLong := math.max(gradeLong, 4)
+if not doneLong
+    gradeLong := math.min(gradeLong + 1, 7)
+
+if sweepShort and inCorridor
+    gradeShort := math.max(gradeShort, 1)
+if htfDn
+    gradeShort := math.max(gradeShort, 2)
+if bosDn
+    gradeShort := math.max(gradeShort, 3)
+if wtConfluenceShort
+    gradeShort := math.max(gradeShort, 4)
+if not doneShort
+    gradeShort := math.min(gradeShort + 1, 7)
+
+// --- capacitor (EMA-flavored recharge to avoid over-trading) ---
+var float capCharge = 0.0
+capCharge := ta.ema(capCharge + (sweepLong or sweepShort ? 1.0 : 0.0), capLen)
+capReady = capCharge <= 0.35
+
+// --- Score display label for plots ---
+scoreLong  = gradeLong >= minGrade
+scoreShort = gradeShort >= minGrade
+
+inDates = not useDateRange or (time >= startDate and time <= endDate)
+
+bullOK = scoreLong  and capReady and strategy.position_size == 0 and inDates
+bearOK = scoreShort and capReady and strategy.position_size == 0 and inDates
+
+// ---------------- ENTRY/EXIT ----------------
+if bullOK
+    strategy.entry("L", strategy.long)
+    strategy.exit("L_X", from_entry="L", stop=strategy.position_avg_price - slPts, limit=strategy.position_avg_price + tpPts)
+if bearOK
+    strategy.entry("S", strategy.short)
+    strategy.exit("S_X", from_entry="S", stop=strategy.position_avg_price + slPts, limit=strategy.position_avg_price - tpPts)
+
+if strategy.position_size > 0 and useTrailing
+    strategy.exit("L_T", from_entry="L", trail_points=slPts, trail_offset=slPts)
+if strategy.position_size < 0 and useTrailing
+    strategy.exit("S_T", from_entry="S", trail_points=slPts, trail_offset=slPts)
+
+// ---------------- VISUALS ----------------
+if showArrows
+    plotshape(bullOK, "Buy",  shape.triangleup,   location.belowbar, colBuy, size=size.small)
+    plotshape(bearOK, "Sell", shape.triangledown, location.abovebar, colSell, size=size.small)
+
+if showScore
+    plot(gradeLong, "Long Score", color.new(color.green, 70), 2, plot.style_histogram)
+    plot(gradeShort, "Short Score", color.new(color.red, 70), 2, plot.style_histogram)
+
+// ---------------- ALERTS ----------------
+alertcondition(bullOK, "TnSov ReversalScore Long",
+     "TeleNexus ReversalScore Long: score >= " + minEntryGrade + " after sweep + confluence.")
+alertcondition(bearOK, "TnSov ReversalScore Short",
+     "TeleNexus ReversalScore Short: score >= " + minEntryGrade + " after sweep + confluence.")
+
+if useWebhookAlerts and bullOK
+    alert("{\"version\":\"v26.0910.1830\",\"strategy\":\"TnSovereignReversalScoreV6\",\"side\":\"BUY\",\"grade\":\"" + str.tostring(gradeLong) + "\",\"price\":\"" + str.tostring(close) + "\"}", alert.freq_once_per_bar_close)
+if useWebhookAlerts and bearOK
+    alert("{\"version\":\"v26.0910.1830\",\"strategy\":\"TnSovereignReversalScoreV6\",\"side\":\"SELL\",\"grade\":\"" + str.tostring(gradeShort) + "\",\"price\":\"" + str.tostring(close) + "\"}", alert.freq_once_per_bar_close)
+
+// ---------------- STATS TABLE ----------------
+var table infoTbl = table.new(position.top_right, 2, 2, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    wins   = strategy.wintrades
+    losses = strategy.losstrades
+    pf     = strategy.grossprofit > 0 and strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : na
+    table.cell(infoTbl, 0, 0, "TnSovereignReversalScoreV6", text_color=color.white, text_size=size.small)
+    table.cell(infoTbl, 0, 1, "Wins/Losses", text_color=color.white, text_size=size.small)
+    table.cell(infoTbl, 1, 1, str.tostring(wins) + " / " + str.tostring(losses) + "  PF=" + (na(pf) ? "-" : str.tostring(pf, "#.##")), text_color=color.white, text_size=size.small)
+
+// ============================================================================
+// Version Lock: v26.0910.1830 (CST)  |  Discipline: DISCIPLINED_EVOLUTION_ACTIVE
+// ============================================================================

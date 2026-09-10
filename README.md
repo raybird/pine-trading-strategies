@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 181 個已實體化主權策略，分 14 大類（v26.0909.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 183 個已實體化主權策略，分 14 大類（v26.0910.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -44,9 +44,9 @@
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 22 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回 |
-| **Mean Reversion & Oscillator** | 22 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI |
+| **Mean Reversion & Oscillator** | 23 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間 |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
-| **Market Structure & Price Action** | 37 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合 |
+| **Market Structure & Price Action** | 38 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡 |
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
@@ -56,7 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **181** | 主權策略矩陣（v26.0909.1830 更新） |
+| **Total** | **183** | 主權策略矩陣（v26.0910.1830 更新） |
+
+
+> **最新加入（v26.0910.1830）**: 獵頭審計 #138 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `created:>2026-08-24` + `strategy v6 PineScript`）。新檢索 repos 逐一深掃：**casoon/pine-scripts**（WavesUnchained 系列，200 commits 活躍維護，即時相較 #113 首次掃描）重新深掃其策略層，確認既有 `tn_chandelier_flip_radar_v6` / `tn_smooth_trend_radar_v6` / `TnSovereignMaRelationshipV6` 已覆蓋 Chandelier Flip Radar / Smooth Trend Radar / Market-Average Relationship，另發現 2 枚未覆蓋 strategy() 實體：**Oscillator Divergence Zones v1.2.2**（RSI/CCI/MFI 三振盪器各建 STDEV 3σ 動態區間【SMA ± σ×zDeviation，並以 ATR×scale 自適伸縮】→ pivot 背離偵測【price HH + osc LH 多、LL+HL 空】→ 收盤穿越 zone 外緣才成立訊號【非重繪】→ convergence 同向背離計數【1~3】→ 200 EMA 趨勢地板 + ATR corridor 造波濾網 → 0.75R/1.5R bracket + Trailing + JSON Webhook。現有庫 StochDivergence/CMO 為單一振盪器裸背離、無「統計外緣穿越 + ATR 自適區寬 + 三引擎一致性」完整紀律，移植為 `TnSovereignOscDivZonesV6`，歸 Mean Reversion & Oscillator 22→23）與 **Reversal Engine Score v1.6.1**（Score A→H 逐級評分斜坡：Relational Sweep 穿越再回收 → ATR corridor → HTF EMA 200/50 趨勢地 → BOS 結構確認 → Wave-Trend MOM 9×12 動量 → 每關升一級 → minEntryGrade【E~H】+ Quality Cap + EMA 退火 Signal Capacitor 防過度交易 + 0.75R/1.5R bracket + 1-R loss barrier。現有庫 TnSovereignReversalEngineV6 為 v26.0508 舊版 Reversal Engine 合併分形熵（非 Score 階梯模型），無「逐級評分 + Capacitor 冷卻 + 質量門檻」機制，移植為 `TnSovereignReversalScoreV6`，歸 Market Structure & Price Action 37→38）。其餘 repos（JoelPasapera / QuantForgeHQ / jayadevrana 系列 / Viprasol-Tech / thesenegalesehitch / ggamer5555 等）均於 #101–#137 審計覆蓋；TradingView 社群 pine-script-v6 頁面無法直接存取。本次按規訓新增 2 策略（181→183）：Mean Reversion & Oscillator 22→23、Market Structure & Price Action 37→38。Dashboard/README 完全對位。
 
 
 > **最新加入（v26.0909.1830）**: 獵頭審計 #137 — GitHub 全數檢索（跨 5 組關鍵詞交叉查詢：`pinescript v6 strategy` + `pinescript strategy created:>2026-08-20` + `tradingview pine v6` + `pine v6 strategy tradingview` + `pinescript v6 created:>2026-08-25` + `strategy v6 PineScript`，並以 `quasimodo/support-resistance/mean-reversion` 補集抽查）。新出現 repos 逐一深掃：唯一全新實體 **cuci1995/msnr-qmr-rns-strategy**（0★，2026-09-01 初始發佈，2026-09-03 更新，非 fork，未曾審計）含 **MSNR_QMR_RNS_Strategy_v2.pine**（~694 行 strategy() 自足無外部 lib：W/D/H4/H1 四時框 SNR 支撐阻力區【`ta.pivothigh/low` 樞軸影線外緣 ± buffer + 開/收實體內緣 + Fresh/已觸狀態】→ Quasimodo 三樞軸型態【Low→High→Low2 破 Low1 → 收盤站回 High1 確立 BUY 區於 Low1，賣方對稱 High→Low→High2 破高 → 收盤破 Low1 確立 SELL 區；僅收線穿越觸發線成立 = 非重繪】→ RNS 翻轉引擎【實體收線 mitigate 外緣 → 舊支→新阻再生，需吞噬/針棒確認】→ MSNR 共感計數【每時框新鮮·未破·重疊區 +1，須達 minConfluence≥3 含觸發時框】→ W/D Open-Close 偏見濾網 → LTF【H1/M30/M15】結構縮停 + SL buffer → 1:5 R:R bracket + 權益% 倉位 + oneTradeAtATime + JSON Webhook alert）。現有庫為單一時框 FVG/SMC/結構追蹤或單一樞軸反轉（ZoneFlow/PivotFade/IctLsReversal），無「四時框 SNR 區間 + Quasimodo 型態 + RNS 翻轉 + 共感計數門檻」合成紀律，移植為 `TnSovereignSnrQmrRnsV6`，歸 Market Structure & Price Action 36→37）。其餘排除：jonlink714-crypto（SOURCE-AVAILABLE 禁止衍生）、khadkaaayush941（ICT 邏輯重疊，#136 已覆蓋）、danielvngit PDArray（indicator() 18 模組 ICT PD 套件，無 strategy()）、mabdullahns007 ICC（indicator() 僅含 Indication→Correction→Continuation 結構敘事、無引擎、無授權）、Ye-Yu-Mo mean-reversion-t（indicator() 雙引擎 MR-T 訊號、MPL-2.0 但無 strategy() 實體）、mmgopi0702（22 檔無 .pine）、kurosakijin aurum-guard-trading（Next.js 儀表板，133 檔無 .pine）、ranjanpreetha11/varshini057（僅 README）；TradingView 社群 pine-script-v6 頁面經 agent-browser 可存取，僅見 Supply Demand AI(PickMyTrade)（indicator() 商用封閉、Lorentzian 鄰域評分與現庫 TnSovereignLorentzianV6 重疊）無可取 strategy() 實體。本次按規訓只新增 1 策略（180→181）：Market Structure & Price Action 36→37。Dashboard/README 完全對位。

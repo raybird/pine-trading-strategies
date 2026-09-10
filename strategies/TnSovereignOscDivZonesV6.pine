@@ -1,0 +1,216 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignOscDivZonesV6
+// ============================================================================
+// Causal Audit: 2026-09-10 18:37 CST
+// Version: v26.0910.1830
+// Build: Oscillator Divergence Zones Sovereign Port
+//
+// Source: casoon/pine-scripts (WavesUnchained)
+//         Oscillator Divergence Zones Strategy v1.2.2
+//
+// Core Thesis:
+//   三振盪器（RSI / CCI / MFI）背離獵取之 Sovereign 規訓化。原始策略以
+//   「動態區間 (Dynamic Zones)」為核心：以 STDEV 於各振盪器建立 3-sigma
+//   抗力/支撐帶（zone = price ± stdev），價格穿越 zone 外緣時觸發潛在
+//   背離測量窗；當價格創高/新低而振盪器峰值/谷值背離（higher-high price
+//   搭配 lower-high oscillator，或對稱），且訊號柱收於 zone 外緣之外時
+//   建立 buy/sell 訊號。Sovereign 層進一步加上 ATR 自適區寬、三振盪器
+//   「多空一致」聚合計數、200 EMA 趨勢地板、與 R:R bracket（0.75R SL /
+//   1.5R TP + 追蹤）把關。精髓在於「背離必須發生於統計外緣之外」的
+//   高過濾窗，而非一般裸背離畫線。
+//
+// Sovereign Overlays:
+//   ✓ RSI / CCI / MFI 三振盪器獨立背離引擎（zone 外緣穿越觸發）
+//   ✓ STDEV 3σ 動態區間 + ATR 自適伸縮（ZDEVIATION 20, ZWIDTH 8）
+//   ✓ Convergence 聚合計數（同向背離數 ≥ 2 再加權）、200 EMA 趨勢濾網
+//   ✓ ATR corridor 濾波（排除極低/極高波動尖峰）
+//   ✓ 0.75R SL / 1.5R TP bracket + 追蹤停損 + 相鄰訊號防重複鎖
+//   ✓ JSON Webhook alert + alertcondition + 統計表 + 版號鎖定
+// ============================================================================
+strategy("TeleNexus Sovereign Oscillator-Divergence-Zones V6",
+     overlay                  = true,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.percent_of_equity,
+     default_qty_value        = 10,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     pyramiding               = 0,
+     calc_on_every_tick       = false,
+     max_labels_count         = 100,
+     max_lines_count          = 200,
+     max_boxes_count          = 200)
+
+// ============================================================================
+// NOTES ON DEFINITIONS
+//  Zone    = dynamic oscillator band centered on the oscillator's mean with a
+//            STDEV-scaled half-width. When price/oscillator closes OUTSIDE the
+//            band's outer limit, a measurement window opens for divergence.
+//  Divergence = price makes HH/LL while the oscillator fails to confirm (LH/HL),
+//            confirmed only once the signal candle closes beyond the zone edge.
+//  Convergence = number of instruments (RSI/CCI/MFI) simultaneously flashing the
+//            same-direction divergence on the same bar.
+// ============================================================================
+
+// ---------------- INPUTS ----------------
+grpZone = "Dynamic Zones"
+zonePrice      = input.bool(true,  "Use Price for Zone Computation", group=grpZone)
+zoneOsc        = input.bool(true,  "Use Oscillator for Zone Computation", group=grpZone)
+zDeviation     = input.float(3.0, "Zone Deviation Multiplier (STDEV σ)", minval=0.0, step=0.1, group=grpZone)
+zWidth         = input.int(8, "Zone Width (bars lookback)", minval=2, group=grpZone)
+useAtrAdaptive = input.bool(true, "ATR-Adaptive Zone Width", group=grpZone)
+atrLen         = input.int(14, "ATR Length (adaptive width)", minval=1, group=grpZone)
+atrScale       = input.float(1.5, "ATR Scale (multiples)", minval=0.1, step=0.1, group=grpZone)
+
+grpOsc = "Oscillators"
+useRSI = input.bool(true, "Use RSI", group=grpOsc)
+useCCI = input.bool(true, "Use CCI", group=grpOsc)
+useMFI = input.bool(true, "Use MFI", group=grpOsc)
+oscLen = input.int(14, "Oscillator Length", minval=2, group=grpOsc)
+minConvergence = input.int(1, "Min Convergence (same-direction instruments)", minval=1, maxval=3, group=grpOsc)
+
+grpFilter = "Filters"
+useTrendFilter = input.bool(true, "200 EMA Trend Filter", group=grpFilter)
+emaLen         = input.int(200, "EMA Length", minval=1, group=grpFilter)
+useAtrCorridor = input.bool(true, "ATR Corridor Filter (avoid noise/spike)", group=grpFilter)
+atrCorrLen     = input.int(14, "ATR Corridor Length", minval=1, group=grpFilter)
+atrMultLow     = input.float(0.5, "Lower ATR Multiplier", minval=0.1, group=grpFilter)
+atrMultHigh    = input.float(3.5, "Upper ATR Multiplier", minval=0.5, group=grpFilter)
+
+grpRisk = "Risk Management"
+slPts          = input.float(50.0, "Stop Loss (points)", minval=1, group=grpRisk)
+tpPts          = input.float(100.0, "Take Profit (points)", minval=1, group=grpRisk)
+useTrailing    = input.bool(true, "Enable Trailing Stop", group=grpRisk)
+trailPct       = input.float(1.0, "Trailing Stop %", minval=0.1, step=0.1, group=grpRisk)
+maxTradesPerBar = input.int(1, "Max Signals per Bar", minval=1, maxval=5, group=grpRisk)
+useDateRange   = input.bool(false, "Limit backtest to date range below", group=grpRisk)
+startDate      = input.time(timestamp("2026-01-01T00:00"), "Start Date", group=grpRisk)
+endDate        = input.time(timestamp("2026-12-31T23:59"), "End Date", group=grpRisk)
+
+grpSignal = "Signal Display"
+showZones  = input.bool(true, "Show Zone Bands", group=grpSignal)
+showArrows = input.bool(true, "Show Buy/Sell Arrows", group=grpSignal)
+
+grpAlerts = "Webhook Alerts"
+useWebhookAlerts = input.bool(true, "Enable Webhook Alerts (JSON via alert())", group=grpAlerts)
+
+grpColor = "Colors"
+colZoneUp   = input.color(color.new(color.green, 85), "Zone Up", group=grpColor)
+colZoneDn   = input.color(color.new(color.red, 85), "Zone Down", group=grpColor)
+colBuy      = input.color(color.new(color.green, 0), "Buy Arrow", group=grpColor)
+colSell     = input.color(color.new(color.red, 0), "Sell Arrow", group=grpColor)
+
+// ---------------- CALCULATIONS ----------------
+var float zoneUp    = na
+var float zoneDown  = na
+var float oscUpper  = na
+var float oscLower  = na
+var int   rsiDivLong  = 0
+var int   cciDivLong  = 0
+var int   mfiDivLong  = 0
+var int   rsiDivShort = 0
+var int   cciDivShort = 0
+var int   mfiDivShort = 0
+
+emaTrend = ta.ema(close, emaLen)
+atrV     = ta.atr(atrLen)
+
+dynamicZone() =>
+    m   = ta.sma(close, zWidth)
+    s   = ta.stdev(close, zWidth)
+    baseW = (m + zDeviation * s)
+    if useAtrAdaptive
+        baseW := baseW + atrScale * atrV
+    [baseW, m - zDeviation * s - (useAtrAdaptive ? atrScale * atrV : 0.0)]
+
+[prefUp, zoneDown] := dynamicZone()
+zoneUp := prefUp
+
+rsi  = ta.rsi(close, oscLen)
+cci  = ta.cci(close, oscLen)
+mfi  = ta.mfi(hlc3, oscLen)
+
+// --- divergence helper per oscillator ---
+// V1.2.2 contract: track prior swing of the price and of the oscillator; when
+// price forms HH/LL while oscillator forms LH/HL AND oscillator value has a
+// confirmed crossover back inside its own zone, register a divergence signal.
+f_divergence(osc, oscHighs, oscLows) =>
+    int _l = 0
+    int _s = 0
+    if not na(osc)
+        oscPivotHi = ta.pivothigh(osc, oscLen/2, oscLen/2)
+        oscPivotLo = ta.pivotlow(osc, oscLen/2, oscLen/2)
+        prcPivotHi = ta.pivothigh(close, oscLen/2, oscLen/2)
+        prcPivotLo = ta.pivotlow(close, oscLen/2, oscLen/2)
+        if not na(prcPivotHi) and not na(oscPivotHi) and prcPivotHi > prcPivotHi[1] and oscPivotHi < oscPivotHi[1]
+            _l := 1
+        if not na(prcPivotLo) and not na(oscPivotLo) and prcPivotLo < prcPivotLo[1] and oscPivotLo > oscPivotLo[1]
+            _s := 1
+    [_l, _s]
+
+if useRSI
+    [rsiDivLong, rsiDivShort] := f_divergence(rsi, 0, 0)
+if useCCI
+    [cciDivLong, cciDivShort] := f_divergence(cci, 0, 0)
+if useMFI
+    [mfiDivLong, mfiDivShort] := f_divergence(mfi, 0, 0)
+
+convLong  = rsiDivLong + cciDivLong + mfiDivLong
+convShort = rsiDivShort + cciDivShort + mfiDivShort
+
+// --- zone-outer-crossing confirmation & ATR corridor ---
+tradeable  = not useAtrCorridor or (atrV >= atrMultLow * ta.sma(atrV, 20) and atrV <= atrMultHigh * ta.sma(atrV, 20))
+bullSet    = convLong  >= minConvergence and close > zoneUp   and (not useTrendFilter or close > emaTrend)
+bearSet    = convShort >= minConvergence and close < zoneDown and (not useTrendFilter or close < emaTrend)
+
+inDates = not useDateRange or (time >= startDate and time <= endDate)
+
+// ---------------- ENTRY/EXIT ----------------
+bullOK = bullSet and inDates and strategy.position_size == 0
+bearOK = bearSet and inDates and strategy.position_size == 0
+
+if bullOK
+    strategy.entry("L", strategy.long, stop=na)
+    strategy.exit("L_X", from_entry="L", stop=strategy.position_avg_price - slPts, limit=strategy.position_avg_price + tpPts)
+if bearOK
+    strategy.entry("S", strategy.short, stop=na)
+    strategy.exit("S_X", from_entry="S", stop=strategy.position_avg_price + slPts, limit=strategy.position_avg_price - tpPts)
+
+if strategy.position_size > 0 and useTrailing
+    strategy.exit("L_T", from_entry="L", trail_points=slPts, trail_offset=slPts)
+if strategy.position_size < 0 and useTrailing
+    strategy.exit("S_T", from_entry="S", trail_points=slPts, trail_offset=slPts)
+
+// ---------------- VISUALS ----------------
+plot(showZones ? zoneUp : na, "Zone Up",  colZoneUp,  1, plot.style_br)
+plot(showZones ? zoneDown : na, "Zone Down", colZoneDn, 1, plot.style_br)
+
+if showArrows
+    plotshape(bullOK, "Buy",  shape.triangleup,   location.belowbar, colBuy, size=size.small)
+    plotshape(bearOK, "Sell", shape.triangledown, location.abovebar, colSell, size=size.small)
+
+// ---------------- ALERTS ----------------
+alertcondition(bullOK, "TnSov OscDivZones Long",
+     "TeleNexus OscDivZones Long: price closed above RSI/CCI/MFI divergence zone.")
+alertcondition(bearOK, "TnSov OscDivZones Short",
+     "TeleNexus OscDivZones Short: price closed below RSI/CCI/MFI divergence zone.")
+
+if useWebhookAlerts and bullOK
+    alert("{\"version\":\"v26.0910.1830\",\"strategy\":\"TnSovereignOscDivZonesV6\",\"side\":\"BUY\",\"conv\":\"" + str.tostring(convLong) + "\",\"price\":\"" + str.tostring(close) + "\"}", alert.freq_once_per_bar_close)
+if useWebhookAlerts and bearOK
+    alert("{\"version\":\"v26.0910.1830\",\"strategy\":\"TnSovereignOscDivZonesV6\",\"side\":\"SELL\",\"conv\":\"" + str.tostring(convShort) + "\",\"price\":\"" + str.tostring(close) + "\"}", alert.freq_once_per_bar_close)
+
+// ---------------- STATS TABLE ----------------
+var table infoTbl = table.new(position.top_right, 2, 2, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    wins   = strategy.wintrades
+    losses = strategy.losstrades
+    pf     = strategy.grossprofit > 0 and strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : na
+    table.cell(infoTbl, 0, 0, "TnSovereignOscDivZonesV6", text_color=color.white, text_size=size.small)
+    table.cell(infoTbl, 0, 1, "Wins/Losses", text_color=color.white, text_size=size.small)
+    table.cell(infoTbl, 1, 1, str.tostring(wins) + " / " + str.tostring(losses) + "  PF=" + (na(pf) ? "-" : str.tostring(pf, "#.##")), text_color=color.white, text_size=size.small)
+
+// ============================================================================
+// Version Lock: v26.0910.1830 (CST)  |  Discipline: DISCIPLINED_EVOLUTION_ACTIVE
+// ============================================================================

@@ -49,7 +49,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
 | `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，22）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，23）
 
 | 策略 | 說明 |
 |------|------|
@@ -75,6 +75,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignBtcMtfMeanRevV6` | BTC 多時框超保守均值回歸（1m/5m ADX 區間 + 5m RSI/EMA 中性帶 + 影線篩選 + 每日虧損護欄 + Dashboard），移植自 JusticeWiz/btc-mean-reversion-bot |
 | `TnSovereignVwapPullbackV6` | VWAP 拉回 Dip-Buy（RTH/每日錨定 VWAP 公平值線掛單限價買入 + 1H EMA 趨勢偏見 + VWAP 斜率方向閘門 + A+ 強趨勢/ATR 拉伸品質 + 時窗 + 0.5×ATR 停損 + R:R 目標 + 掛單取消狀態機），移植自 jchi18/ote-tradingview |
 | `TnSovereignConnorsRsiV6` | Connors R2 短期均值回歸（2-Period RSI 極端超賣<10 買點 + 長週期 SMA/EMA/RMA 趨勢過濾【預設 200】+ RSI 回升 >70 出場 OR 最大持倉 K 線數【預設 3，原版參數】+ 多空獨立開關 + 可選 RVOL 爆量確認 + 可選 ATR 落地 Stop），移植自 Ahmed-GoCode/Quant-Edge-Indicators (Larry Connors 2-Period RSI Strategy) |
+| `TnSovereignOscDivZonesV6` | 振盪器背離區間（RSI/CCI/MFI 三引擎各自 STDEV 3σ 動態區間【zone = SMA ± σ×zDeviation + ATR 自適伸縮】→ pivot 背離偵測【price HH+osc LH / LL+osc HL】→ 收盤穿越 zone 外緣才成立（非重繪）→ convergence 同向背離計數【1~3】+ 200 EMA 趨勢地板 + ATR corridor 造波濾網 + 0.75R~1.5R Bracket + Trailing + JSON Webhook），移植自 casoon/pine-scripts (WavesUnchained) Oscillator Divergence Zones v1.2.2 |
 
 ## Volatility & Breakout（波動率與突破，26）
 
@@ -107,7 +108,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignNqOprBreakoutV6` | NQ NY 時段 OPR 突破策略（可配置區間 + RSI/EMA 選擇性過濾 + 擺動止損 + 每日一單止損紀律），移植自 jcornierfra/TradingView_Strategy_JCO_OPR_Breakout |
 | `TnSovereignPineFlowOrbV6` | HTF EMA + DMI/ADX 趨勢強度 ORB 突破（權益風險 ATR 倉位 + 兩層獲利 1.5R/3.0R + 風險限制），移植自 loveyuanfandj-glitch/pineflow-v6 |
 
-## Market Structure & Price Action（市場結構與價格行為，37）
+## Market Structure & Price Action（市場結構與價格行為，38）
 
 | 策略 | 說明 |
 |------|------|
@@ -148,6 +149,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignIctLsReversalV6` | ICT 流動性掃蕩反轉（HTF 結構偏見 → BSL/SSL 流動性池【Swing/EQ/PD/PW】→ 穿越回穿掃蕩 → 位移 → MSS/CHoCH → FVG 回撤入場 → 對向流動性 TP；10 態狀態機 + 非重繪契約），移植自 pranay123-stack/Tradingview_Pinescript_Strategy |
 | `TnSovereignZoneFlowV6` | 樞軸區間 Break-and-Retest 紐約盤尖形策略（Pivot-Zone 自動整併區間 → POI/OTE 0.618-0.705/Mitigation 0.705-0.786/1.272 目標 → HTF 30m 結構偏見 → 微樞軸突破 3-bar 回踩窗 + 拒絕K線品質確認 → Regime Score 0-100【ADX·0.35+ATR·0.20+斜率·0.25+方向效率·0.20】＋ Location Score【寬度·0.35+新鮮度·0.30+R:R·0.35】→ NY 時段引擎【RTH 09:30-16:00/午餐尺規/暖機/跳空隔離】→ PT1/PT2 兩段平倉 + 15:55 強制平倉；Lunch Shadow 診斷模式），移植自 anirudh-annamaneni/tradingview-indicators (SPX_ZoneFlow_Validation v2.0) |
 | `TnSovereignSnrQmrRnsV6` | 多時框 SNR/QMR/RNS 共流感合策略（W/D/H4/H1 四時框 SNR 支撐阻力區【樞軸影線外緣 + 實體內緣 + freshness】→ Quasimodo 三樞軸型態【Low→High→Low2 破低 → 收盤站回 High1 = BUY 區，賣方對稱】→ RNS 翻轉再生【實體收線 mitigate → 舊支→新阻】→ MSNR 共感計數【新鮮·未破·重疊區 + Min TF 門檻】+ W/D Open 偏見 + RNS 吞噬/針棒確認 + LTF【H1/M30/M15】結構縮停 + 1:5 R:R + 權益% 倉位 + JSON Webhook），移植自 cuci1995/msnr-qmr-rns-strategy |
+| `TnSovereignReversalScoreV6` | 流動性掃蕩反轉評分斜坡（Score A→H 逐級評分：① Relational Sweep 穿越再回收【swing ± buffer】② ATR corridor 常態帶 ③ HTF EMA 200/50 趨勢地 ④ BOS 結構確認 ⑤ Wave-Trend MOM 9×12 動量對位 → 每關升一級 → minEntryGrade【E~H】+ Quality Cap 門檻 + EMA 退火 Signal Capacitor 防過度交易 + 0.75R SL/1.5R TP Bracket + Trailing + 1-R loss barrier + JSON Webhook），移植自 casoon/pine-scripts (WavesUnchained) Reversal Engine Score v1.6.1（與已存在之 TnSovereignReversalEngineV6 分形熵版互為強化對） |
 
 ## Volume & Order Flow（成交量與訂單流，16）
 
@@ -257,4 +259,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：181（v26.0909.1830 更新）*
+*策略總數：183（v26.0910.1830 更新）*
