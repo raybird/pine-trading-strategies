@@ -1,0 +1,289 @@
+//@version=6
+// ============================================================================
+// TeleNexus Sovereign — TnSovereignRsiStateDivConfluenceV6
+// ============================================================================
+// Causal Audit: 2026-09-11 18:40 CST
+// Version: v26.0911.1830
+// Build: RSI-50 State Machine + Hidden Divergence + Triple-Confluence Port
+//
+// Source: moonyroy/trust-me-bro-strategy (MIT License, 2026-09-06)
+//         Trust Me Bro Strategy — Pine Script v6
+//
+// Distinct from existing library divergence entries (StochDivergenceV6 / CMO /
+// OScDivZonesV6 are single-oscillator bare divergences): this build keeps the
+// full RSI-Neutrality State Machine — ① RSI crosses the trigger level (default
+// 50) to arm a directional bias; ② price must then move away from the trigger
+// by a configurable buffer and retest it — a "pullback to RSI-neutrality"
+// cadence; ③ a *hidden divergence* on RSI confirms the continuation set-up
+// (price higher low + RSI lower low = bullish; price lower high + RSI higher
+// high = bearish); ④ the set-up is only fired when a stack of individually
+// toggleable confluence filters align (EMA touch, Fibonacci 0.5–0.618
+// retracement of the last swing leg, Ichimoku cloud side/touch).
+//
+// Core Thesis:
+//   交易者從 RSI 中性線 (50) 的「穿越 → 遠離 → 重測」三拍節奏中計時
+//   (timing)，只承接隱藏背離 (hidden divergence) 確認之延續；加入三重可
+//   切換匯流濾網 (EMA touch / Fib 黃金回撤帶 / Ichimoku Kumo) 提高 set-up
+//   的成熟度；停損鎖定最後擺盪點，獲利以 R:R 倍率 bracket 出場。
+//
+// Sovereign Overlays:
+//   ✓ RSI 四態狀態機 (State 0→1→2→3)＋設限逾時（set-up 30 bars 自動失效）
+//   ✓ 隱藏背離偵測（價位 HL＋RSI LL 多、價位 LH＋RSI HL 空，pivot 確認）
+//   ✓ 三濾網可切換匯流：EMA touch / Fib 0.5–0.618 / Ichimoku cloud side
+//   ✓ Pivot 陣列只收 ph/pl 唯一樞軸（重繪風險控管：pivot 於右側確認才成立）
+//   ✓ Swing SL + R:R bracket + 單向可開關 + 一單一倉 (pyramiding=0)
+//   ✓ JSON Webhook alert（Long/Short entry, SL/TP 帶價送出）
+// ============================================================================
+strategy("TeleNexus Sovereign RsiState Div-Confluence V6",
+     overlay                  = true,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.percent_of_equity,
+     default_qty_value        = 10,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     pyramiding               = 0,
+     calc_on_every_tick       = false,
+     max_labels_count         = 100,
+     max_lines_count          = 200,
+     max_boxes_count          = 200)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+use_ema      = input.bool(true,  "Use EMA Filter",    group = "Filters")
+use_fib      = input.bool(true,  "Use Fib Filter",    group = "Filters")
+use_ichimoku = input.bool(true,  "Use Ichimoku Filter", group = "Filters")
+
+ema_len      = input.int(20,  "EMA Length",   group = "EMA")
+rsi_len      = input.int(14,  "RSI Length",   group = "RSI")
+
+rsi_buff     = input.float(5.0, "RSI retest buffer",     group = "RSI")
+expiry_bars  = input.int(30, "Setup expiry",             group = "RSI")
+rsi_trig     = input.float(50.0, "RSI Trigger Level",    group = "RSI")
+
+piv_left     = input.int(5, "Pivot left bars")
+piv_right    = input.int(5, "Pivot right bars")
+
+fib_lvl_1    = input.float(0.5,   "Fib level 1", group = "Fibonacci")
+fib_lvl_2    = input.float(0.618, "Fib Level 2", group = "Fibonacci")
+
+rr           = input.float(2.0, "Reward : Risk")
+
+do_long      = input.bool(true, "Trade Long")
+do_short     = input.bool(true, "Trade Short")
+
+show_ema     = input.bool(true,  "Show EMA Line",      group = "Display")
+show_div     = input.bool(false, "Show Divergence Lines", group = "Display")
+show_leg     = input.bool(false, "Show Fib Leg",       group = "Display")
+show_fib     = input.bool(false, "Show Fib Bands",     group = "Display")
+show_cloud   = input.bool(false, "Show Ichimoku",      group = "Display")
+
+// ============================================================================
+// OSCILLATOR & EMA
+// ============================================================================
+rsi_val = ta.rsi(close, rsi_len)
+ema_val = ta.ema(close, ema_len)
+
+plot(rsi_val)
+plot(show_ema ? ema_val : na, title = "EMA", force_overlay = true)
+hline(rsi_trig)
+
+// ============================================================================
+// RSI NEUTRALITY STATE MACHINE (0 → 1 → 2 → 3)
+// ============================================================================
+cross_up = ta.crossover(rsi_val, rsi_trig)
+cross_dn = ta.crossunder(rsi_val, rsi_trig)
+
+var int   state      = 0
+var int   dir        = 0
+var int   state_bar  = na
+var bool  moved_away = false
+
+if state != 0 and bar_index - state_bar > expiry_bars
+    state := 0; dir := 0; moved_away := false
+
+if state == 0 and cross_up
+    dir := 1; state := 1; state_bar := bar_index; moved_away := false
+
+if state == 0 and cross_dn
+    dir := -1; state := 1; state_bar := bar_index; moved_away := false
+
+if state != 0 and ((dir == 1 and cross_dn) or (dir == -1 and cross_up))
+    state := 0; dir := 0; moved_away := false
+
+//  State 1 — RSI must move away by `rsi_buff`, then retest the trigger zone.
+if state == 1
+    bool away_now   = dir == 1 ? rsi_val > rsi_trig + rsi_buff : rsi_val < rsi_trig - rsi_buff
+    bool retest_now = dir == 1 ? rsi_val <= rsi_trig + rsi_buff : rsi_val >= rsi_trig - rsi_buff
+
+    if not moved_away and away_now
+        moved_away := true
+    if moved_away and retest_now
+        state := 2; state_bar := bar_index; moved_away := false
+
+// ============================================================================
+// PIVOT TRACKED ARRAY (only one pivot captured per new confirmed pivot)
+// ============================================================================
+float piv_low  = ta.pivotlow(low, piv_left, piv_right)
+bool  low_new  = not na(piv_low)
+
+var float prev_low     = na
+var float prev_low_rsi = na
+var float last_low     = na
+var float last_low_rsi = na
+var int   prev_low_bar = na
+var int   last_low_bar = na
+
+if low_new
+    prev_low     := last_low
+    prev_low_bar := last_low_bar
+    prev_low_rsi := last_low_rsi
+    last_low     := piv_low
+    last_low_bar := bar_index - piv_right
+    last_low_rsi := rsi_val[piv_right]
+
+bool have_lows    = not na(prev_low) and not na(last_low)
+bool low_price_up = last_low > prev_low
+bool low_rsi_dn   = last_low_rsi < prev_low_rsi
+bool bull_div     = have_lows and low_price_up and low_rsi_dn
+
+float piv_high = ta.pivothigh(high, piv_left, piv_right)
+bool  high_new = not na(piv_high)
+
+var float prev_high     = na
+var float prev_high_rsi = na
+var float last_high     = na
+var float last_high_rsi = na
+var int   prev_high_bar = na
+var int   last_high_bar = na
+
+if high_new
+    prev_high     := last_high
+    prev_high_bar := last_high_bar
+    prev_high_rsi := last_high_rsi
+    last_high     := piv_high
+    last_high_bar := bar_index - piv_right
+    last_high_rsi := rsi_val[piv_right]
+
+bool have_highs    = not na(prev_high) and not na(last_high)
+bool high_price_dn = last_high < prev_high
+bool high_rsi_up   = last_high_rsi > prev_high_rsi
+bool bear_div      = have_highs and high_price_dn and high_rsi_up
+
+//  State 2 → 3 — hidden divergence confirms the continuation set-up.
+if state == 2 and ((dir == 1 and bull_div) or (dir == -1 and bear_div))
+    state := 3; state_bar := bar_index
+    if show_div
+        if dir == 1
+            line.new(prev_low_bar, prev_low, last_low_bar, last_low, color = color.green, width = 2, force_overlay = true)
+        if dir == -1
+            line.new(prev_high_bar, prev_high, last_high_bar, last_high, color = color.red, width = 2, force_overlay = true)
+
+bgcolor(state == 1 ? color.new(#cf7bcc, 50) :
+        state == 2 ? color.new(#85337d, 50) :
+        state == 3 ? color.new(#ff00d4, 50) : na)
+
+// ============================================================================
+// CONF LUENCE — EMA TOUCH
+// ============================================================================
+bool ema_touch = low <= ema_val and high >= ema_val
+bool ema_hit   = (not use_ema) or (ema_touch and state == 3)
+
+// ============================================================================
+// CONF LUENCE — FIBONACCI RETRACEMENT (last swing leg 0.5–0.618)
+// ============================================================================
+bool have_leg = not na(last_low) and not na(last_high) and last_high > last_low
+
+float fib_rng  = last_high - last_low
+float fib_hi_1 = last_high - fib_rng * fib_lvl_1
+float fib_lo_2 = last_low  + fib_rng * fib_lvl_2
+float fib_hi_2 = last_high - fib_rng * fib_lvl_2
+float fib_lo_1 = last_low  + fib_rng * fib_lvl_1
+
+if show_leg and have_leg and (low_new or high_new)
+    line.new(last_low_bar, last_low, last_high_bar, last_high, color = color.rgb(236, 107, 236), style = line.style_dashed, width = 1, force_overlay = true)
+
+bool fib_hi_touch = low <= fib_hi_1 and high >= fib_hi_2   // long band (below high)
+bool fib_lo_touch = low <= fib_lo_2 and high >= fib_lo_1   // short band (above low)
+
+bool long_fib_hit  = (not use_fib) or (have_leg and fib_hi_touch and state == 3 and dir == 1)
+bool short_fib_hit = (not use_fib) or (have_leg and fib_lo_touch and state == 3 and dir == -1)
+
+plot((show_fib and have_leg and dir != -1) ? fib_hi_1 : na, title = "fib up 0.5",   color = color.aqua,    style = plot.style_linebr, force_overlay = true)
+plot((show_fib and have_leg and dir != -1) ? fib_hi_2 : na, title = "fib up 0.618", color = color.fuchsia, style = plot.style_linebr, force_overlay = true)
+plot((show_fib and have_leg and dir == -1) ? fib_lo_2 : na, title = "fib dn 0.618", color = color.orange,  style = plot.style_linebr, force_overlay = true)
+plot((show_fib and have_leg and dir == -1) ? fib_lo_1 : na, title = "fib dn 0.5",   color = color.yellow,  style = plot.style_linebr, force_overlay = true)
+
+// ============================================================================
+// CONF LUENCE — ICHIMOKU CLOUD
+// ============================================================================
+tenkan_len     = input.int(9,  minval = 1, title = "Conversion Line Length",   group = "Ichimoku")
+kijun_len      = input.int(26, minval = 1, title = "Base Line Length",         group = "Ichimoku")
+span_b_len     = input.int(52, minval = 1, title = "Leading Span B Length",    group = "Ichimoku")
+disp_len       = input.int(26, minval = 1, title = "Lagging Span",             group = "Ichimoku")
+cloud_touch_mode = input.bool(true, "Cloud Touch Mode (ON = enter on cloud touch, OFF = long only above cloud / short only below cloud)", group = "Ichimoku")
+
+donchian(len) => math.avg(ta.lowest(len), ta.highest(len))
+
+tenkan = donchian(tenkan_len)
+kijun  = donchian(kijun_len)
+
+span_a = donchian(span_b_len)[disp_len]
+span_b = (tenkan[kijun_len] + kijun[kijun_len]) / 2
+
+float cloud_top = math.max(span_a, span_b)
+float cloud_bot = math.min(span_a, span_b)
+
+bool have_cloud  = not na(cloud_top) and not na(cloud_bot)
+bool cloud_touch = low <= cloud_top and high >= cloud_bot
+
+bool cloud_above = close > cloud_top
+bool cloud_below = close < cloud_bot
+bool cloud_side_ok = cloud_touch_mode ? cloud_touch : (dir == 1 ? cloud_above : cloud_below)
+
+bool cloud_hit = (not use_ichimoku) or (have_cloud and cloud_side_ok and state == 3)
+
+plot(show_cloud ? tenkan : na, title = "Tenkan-sen", color = color.blue,   force_overlay = true)
+plot(show_cloud ? kijun  : na, title = "Kijun-sen",   color = color.maroon, force_overlay = true)
+plot_a = plot(show_cloud ? span_a : na, title = "Senkou Span A", color = color.purple, force_overlay = true)
+plot_b = plot(show_cloud ? span_b : na, title = "Senkou Span B", color = color.green,  force_overlay = true)
+fill(plot_a, plot_b, color = color.new(color.teal, 85), title = "Kumo Cloud")
+plot(show_cloud ? close : na, title = "Chikou Span", color = color.teal, offset = -disp_len, force_overlay = true)
+
+// ============================================================================
+// ENTRY / EXIT — ALL CONFLUENCES MUST CO-ALIGN AT STATE 3
+// ============================================================================
+bool any_hit     = ema_hit and cloud_hit and (long_fib_hit or short_fib_hit)
+bool long_sig    = state == 3 and dir == 1  and any_hit and do_long
+bool short_sig   = state == 3 and dir == -1 and any_hit and do_short
+
+if long_sig
+    float entry_price = close
+    float stop_price  = last_low
+    float risk_unit   = entry_price - stop_price
+    bool  risk_ok     = risk_unit > 0
+    if risk_ok
+        float tp_price = entry_price + risk_unit * rr
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Long Exit", from_entry = "Long", stop = stop_price, limit = tp_price)
+        alert('{"strategy":"TnSovereignRsiStateDivConfluenceV6","ticker":"' + syminfo.ticker + '","side":"LONG","entry":' + str.tostring(entry_price, format.mintick) + ',"stop":' + str.tostring(stop_price, format.mintick) + ',"tp":' + str.tostring(tp_price, format.mintick) + '}', alert.freq_once_per_bar_close)
+        state := 0; dir := 0; moved_away := false
+
+if short_sig
+    float entry_price = close
+    float stop_price  = last_high
+    float risk_unit   = stop_price - entry_price
+    bool  risk_ok     = risk_unit > 0
+    if risk_ok
+        float tp_price = entry_price - risk_unit * rr
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Short Exit", from_entry = "Short", stop = stop_price, limit = tp_price)
+        alert('{"strategy":"TnSovereignRsiStateDivConfluenceV6","ticker":"' + syminfo.ticker + '","side":"SHORT","entry":' + str.tostring(entry_price, format.mintick) + ',"stop":' + str.tostring(stop_price, format.mintick) + ',"tp":' + str.tostring(tp_price, format.mintick) + '}', alert.freq_once_per_bar_close)
+        state := 0; dir := 0; moved_away := false
+
+// ============================================================================
+// SIGNAL PLOT
+// ============================================================================
+plotshape(long_sig,  "Long",  shape.triangleup,   location.belowbar, color = color.new(#3fb950, 0),  size = size.small)
+plotshape(short_sig, "Short", shape.triangledown, location.abovebar, color = color.new(#f85149, 0), size = size.small)

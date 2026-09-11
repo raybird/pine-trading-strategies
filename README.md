@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 183 個已實體化主權策略，分 14 大類（v26.0910.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 184 個已實體化主權策略，分 14 大類（v26.0911.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -44,7 +44,7 @@
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 22 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回 |
-| **Mean Reversion & Oscillator** | 23 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間 |
+| **Mean Reversion & Oscillator** | 24 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間、RSI 狀態機隱藏背離匯流 |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 38 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡 |
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
@@ -56,7 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **183** | 主權策略矩陣（v26.0910.1830 更新） |
+| **Total** | **184** | 主權策略矩陣（v26.0911.1830 更新） |
+
+
+> **最新加入（v26.0911.1830）**: 獵頭審計 #139 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `"pinescript" "v6" strategy created:>2026-09-02` + GitHub API `"pine script" v6 strategy` 排序 by updated）。新檢索 repos 逐一深掃：唯一全新合格實體 **moonyroy/trust-me-bro-strategy**（MIT License，1★，2026-09-06 初始發佈，非 fork，未曾審計）含 **Trust Me Bro Strategy**（~330 行 strategy() 自足無外部 lib：RSI-50 中性線三拍狀態機【0→1 穿越→2 遠離≥buffer 重測→3 隱藏背離確認 + 30-bar 逾期重置 + 反向穿越重置】→ pivot 隱藏背離確認【多：價位 Higher Low＋RSI Lower Low；空：價位 Lower High＋RSI Higher High，pivot 右側確認非重繪】→ 三重可切換匯流濾網【EMA 20 touch / Fib 0.5–0.618 黃金回撤帶【swing leg】/ Ichimoku Kumo 觸雲或雲側】全數對位才進場 → Swing 停損 + R:R bracket + 多空獨立開關 + one-trade-at-a-time + 狀態背景色視覺化。現有庫 StochDivergence/CMO/OscDivZonesV6 為單一振盪器裸背離或統計外緣穿越，無「RSI 中性線時序狀態機 + 隱藏背離延續 + 三重匯流確認」完整紀律，移植為 `TnSovereignRsiStateDivConfluenceV6`，歸 Mean Reversion & Oscillator 23→24）。其餘排除：jonlink714-crypto/ninjascript-pinescript-dev（僅 code-review 商業樣本、LICENSE 為 DISCLAIMER 無開源授權）、vantradelabs/pine-script-collection（13 枚腳本但 LICENSE 為 All Rights Reserved 禁止衍生）、toniker10/prop-guardian-Strategy（PRIVATE README-only、無程式碼）、ArielPortfolio/StarReversalStrategy（無 LICENSE）guillemustafa-ux/ict-sweep-mss-fvg + brrc-pine-strategy（無 LICENSE）、mbharaniram/RAM-Combined-Setups-Fixed（indicator() 無 strategy()）、varshini057/smart-scalper-pro-india（README-only 無 .pine 檔）、Alaamo7 課程構（非策略）、davlacombe-collab/pine-scripts（無 LICENSE 待核）、ranjanpreetha11-dot/tradingview-pinescript-indicator（無 .pine）；其餘 repos（casoon/pine-scripts、JoelPasapera、QuantForgeHQ、jayadevrana 系列、Viprasol-Tech、thesenegalesehitch、ggamer5555、cuci1995 等）均於 #101–#138 審計覆蓋；TradingView 社群 pine-script-v6 頁面無法直接存取。本次按規訓新增 1 策略（183→184）：Mean Reversion & Oscillator 23→24。Dashboard/README 完全對位。
 
 
 > **最新加入（v26.0910.1830）**: 獵頭審計 #138 — GitHub 全數檢索（跨 3 組關鍵詞交叉查詢：`pinescript v6 strategy` + `created:>2026-08-24` + `strategy v6 PineScript`）。新檢索 repos 逐一深掃：**casoon/pine-scripts**（WavesUnchained 系列，200 commits 活躍維護，即時相較 #113 首次掃描）重新深掃其策略層，確認既有 `tn_chandelier_flip_radar_v6` / `tn_smooth_trend_radar_v6` / `TnSovereignMaRelationshipV6` 已覆蓋 Chandelier Flip Radar / Smooth Trend Radar / Market-Average Relationship，另發現 2 枚未覆蓋 strategy() 實體：**Oscillator Divergence Zones v1.2.2**（RSI/CCI/MFI 三振盪器各建 STDEV 3σ 動態區間【SMA ± σ×zDeviation，並以 ATR×scale 自適伸縮】→ pivot 背離偵測【price HH + osc LH 多、LL+HL 空】→ 收盤穿越 zone 外緣才成立訊號【非重繪】→ convergence 同向背離計數【1~3】→ 200 EMA 趨勢地板 + ATR corridor 造波濾網 → 0.75R/1.5R bracket + Trailing + JSON Webhook。現有庫 StochDivergence/CMO 為單一振盪器裸背離、無「統計外緣穿越 + ATR 自適區寬 + 三引擎一致性」完整紀律，移植為 `TnSovereignOscDivZonesV6`，歸 Mean Reversion & Oscillator 22→23）與 **Reversal Engine Score v1.6.1**（Score A→H 逐級評分斜坡：Relational Sweep 穿越再回收 → ATR corridor → HTF EMA 200/50 趨勢地 → BOS 結構確認 → Wave-Trend MOM 9×12 動量 → 每關升一級 → minEntryGrade【E~H】+ Quality Cap + EMA 退火 Signal Capacitor 防過度交易 + 0.75R/1.5R bracket + 1-R loss barrier。現有庫 TnSovereignReversalEngineV6 為 v26.0508 舊版 Reversal Engine 合併分形熵（非 Score 階梯模型），無「逐級評分 + Capacitor 冷卻 + 質量門檻」機制，移植為 `TnSovereignReversalScoreV6`，歸 Market Structure & Price Action 37→38）。其餘 repos（JoelPasapera / QuantForgeHQ / jayadevrana 系列 / Viprasol-Tech / thesenegalesehitch / ggamer5555 等）均於 #101–#137 審計覆蓋；TradingView 社群 pine-script-v6 頁面無法直接存取。本次按規訓新增 2 策略（181→183）：Mean Reversion & Oscillator 22→23、Market Structure & Price Action 37→38。Dashboard/README 完全對位。

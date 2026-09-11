@@ -49,7 +49,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
 | `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，23）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，24）
 
 | 策略 | 說明 |
 |------|------|
@@ -76,6 +76,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignVwapPullbackV6` | VWAP 拉回 Dip-Buy（RTH/每日錨定 VWAP 公平值線掛單限價買入 + 1H EMA 趨勢偏見 + VWAP 斜率方向閘門 + A+ 強趨勢/ATR 拉伸品質 + 時窗 + 0.5×ATR 停損 + R:R 目標 + 掛單取消狀態機），移植自 jchi18/ote-tradingview |
 | `TnSovereignConnorsRsiV6` | Connors R2 短期均值回歸（2-Period RSI 極端超賣<10 買點 + 長週期 SMA/EMA/RMA 趨勢過濾【預設 200】+ RSI 回升 >70 出場 OR 最大持倉 K 線數【預設 3，原版參數】+ 多空獨立開關 + 可選 RVOL 爆量確認 + 可選 ATR 落地 Stop），移植自 Ahmed-GoCode/Quant-Edge-Indicators (Larry Connors 2-Period RSI Strategy) |
 | `TnSovereignOscDivZonesV6` | 振盪器背離區間（RSI/CCI/MFI 三引擎各自 STDEV 3σ 動態區間【zone = SMA ± σ×zDeviation + ATR 自適伸縮】→ pivot 背離偵測【price HH+osc LH / LL+osc HL】→ 收盤穿越 zone 外緣才成立（非重繪）→ convergence 同向背離計數【1~3】+ 200 EMA 趨勢地板 + ATR corridor 造波濾網 + 0.75R~1.5R Bracket + Trailing + JSON Webhook），移植自 casoon/pine-scripts (WavesUnchained) Oscillator Divergence Zones v1.2.2 |
+| `TnSovereignRsiStateDivConfluenceV6` | RSI-50 狀態機 + 隱藏背離三重匯流（RSI 中性線三拍狀態機【穿越→遠離≥buffer→重測→State 3】+ pivot 隱藏背離確認【價位 HL＋RSI LL 多 / 價位 LH＋RSI HL 空】+ 30-bar 失效重置 + 三重可切換匯流濾網【EMA touch / Fib 0.5–0.618 黃金回撤帶 / Ichimoku Kumo 觸雲或雲側】+ Swing SL + R:R bracket + 單方向開關 + JSON Webhook），移植自 moonyroy/trust-me-bro-strategy |
 
 ## Volatility & Breakout（波動率與突破，26）
 
@@ -259,4 +260,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：183（v26.0910.1830 更新）*
+*策略總數：184（v26.0911.1830 更新）*
