@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 184 個已實體化主權策略，分 14 大類（v26.0915.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 184 個已實體化主權策略，分 14 大類（v26.1003.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -56,8 +56,10 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **184** | 主權策略矩陣（v26.0915.1830 更新） |
+| **Total** | **184** | 主權策略矩陣（v26.1003.0630 更新） |
 
+
+> **最新加入（v26.1003.0630）**: 獵頭審計 #144 — GitHub 全數檢索（`pinescript strategy v6 created:>2026-09-15` 2 結果 + `pine script v6 strategy created:>2026-09-15` 6 結果 + TradingView 社群 `pine-script-v6` 熱門頁，經 agent-browser 逐一深掃）。自 #143 後出線之全新倉庫，**無合格 strategy() 實體**：**jayadevrana/free-pine-script-indicators**（**MPL-2.0**，3 枚 strategy() 皆為初學者教育樣板【EMA 趨勢 + ATR SL/TP / 2% SL + 4% TP / 風險課程負期望示範】，已由 TnSovereignTripleEmaV6 / TnSovereignMaConfluenceV6 / TnSovereignVWAPV6 全面覆蓋，無移植價值）、**NBendtsen/spy-scalp-tool**（平行通道日內偵測 indicator + strategy 雙檔，**無 LICENSE** 依規訓排除，且作者自述未達預設績效閾值不主張 edge，通道邏輯已由 Donchian/Keltner 系列覆蓋）、**thangchelseakt95-boop/ema-9-45-200-trend-strategy**（基礎 EMA 9/45/200 Breakout/Pullback + ATR stop，已由 TnSovereignTripleEmaV6 覆蓋）、**jhonitoandres-debug/Futuros-algo**（**MIT** 但僅 EMA-crossover + RSI 過濾 + ATR SL/TP 基礎邏輯，已由現庫全面覆蓋）、**PineGen-AI/ICT-Daily-Liquidity-Sweep-PineGen-AI-**（僅 README 無 .pine 實體、無 LICENSE；亞洲時段掃蕩 + PDH/PDL + 1.5R/3.0R 邏輯已由 TnSovereignIctLsReversalV6 覆蓋）、**udaydeep1992/pinescript-agents-antigravity**（Agent 開發套件非策略實體）。TradingView 社群熱門頁仍為 3 枚 indicator()（Supply Demand AI / Account Guardian / Smart Weekly Lines），無 strategy() 實體。本次按規訓維持 184 策略（14 類）物理對位，無新增/修改；Dashboard/README 版本對位 v26.1003.0630。
 
 > **最新加入（v26.0915.1830）**: 獵頭審計 #143 — GitHub 全數檢索（6 組關鍵詞交叉查詢：`pinescript strategy v6 created:>2026-09-13` + `pine script v6 created:>2026-09-13` + `tradingview strategy created:>2026-09-13` + `pinescript strategy created:>2026-09-13` + `pine script strategies created:>2026-09-13` + `"@version=6" strategy created:>2026-09-13` + GitHub commits API 全域掃描（`extension:pine committer-date:>2026-09-13 strategy`）+ TradingView 社群頁面【熱門排序 + Script type 過濾嘗試】）。自 #142 後出線之全新倉庫逐一深掃，**無合格 strategy() 實體**：**tahatrashed80-tech/tradingview-multi-strategy-pine**（**MIT** 但倉內僅 README + RESEARCH_SUMMARY.md【"10-layer decision engine"純研究文件】**無 .pine** 排除）、**niraj7780/stock-market-trading-view-script-**（**MIT** 含 `trading.pine` v6 strategy()【EMA 20/50 交叉 + RSI>50 過濾 + ATR 1.5× SL + 兩段 1.5R/2.5R TP + 50/50 部分平倉】，但為基礎 EMA 交叉已由 TnSovereignTripleEmaV6 / EMA_Bars_v6 / TnSovereignMaRelationshipV6 全面覆蓋，無移植價值）、**purorahuyi-cmyk/Project-X**（`DVF_Pro_Elite_X_V4.pine` v6 多時框量能匯流 breakout，但**無 LICENSE** 依規訓排除）、**harishmuthyala21-droid/OI-Command-Center**（**MIT** 但為 OI/intraday multi-factor indicator() 無 strategy() 排除）、**Nadarisgetae/Bull-bear-Crypto-F-O-strategy**（6-EMA 結構 strategy/indicator 雙檔，**無 LICENSE** 排除）、**dgonnytramp-afk/trading-strategy-cvd-divergence**（README-only 無 .pine 排除）。TradingView 社群熱門頁前 6 枚全為 indicator()（Wyckoff [theUltimator5] / Trend Target Ribbon [BOSWaves] / HTF 3-Candle System [Zeiierman] / SMT Divergence / RedK_VARSI / Harmonic Lab），無 strategy() 實體。本次按規訓維持 184 策略（14 類）物理對位，無新增/修改；Dashboard/README 版本對位 v26.0915.1830。
 
