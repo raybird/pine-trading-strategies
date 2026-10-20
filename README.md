@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 184 個已實體化主權策略，分 14 大類（v26.1003.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 186 個已實體化主權策略，分 14 大類（v26.1020.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -43,10 +43,10 @@
 | 分類 | 數量 | 說明 |
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
-| **Trend & Momentum** | 22 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回 |
+| **Trend & Momentum** | 23 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回、商品期貨六類別多時框評分矩陣 |
 | **Mean Reversion & Oscillator** | 24 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間、RSI 狀態機隱藏背離匯流 |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
-| **Market Structure & Price Action** | 38 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡 |
+| **Market Structure & Price Action** | 39 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡、NY Killzone 跨資產 SMT+IFVG 回測 |
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
@@ -56,8 +56,15 @@
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **184** | 主權策略矩陣（v26.1003.0630 更新） |
+| **Total** | **186** | 主權策略矩陣（v26.1020.1830 更新） |
 
+
+> **最新加入（v26.1020.1830）**: 獵頭審計 #145 — 檢索途徑：GitHub 搜尋排序 by updated（`pine script v6 strategy` × 2 頁 + `pine script strategy created:>2026-10-03` × 28 筆／3 頁 + 多組 repo 關鍵詞 API）+ **GitHub commits API 全域掃描（`extension:pine committer-date:>2026-10-05`）** + TradingView `/scripts/?script_type=strategies` 與搜尋頁（agent-browser 點擊「Source code」抽出公開原始碼比對 `//@version=\d/`）。出線 **2 枚全新合格 strategy() 實體**（皆 **MIT**、自足無 `import`、括號完全配對）：
+>
+> 1. **Rakeshks7/ict-ny-smt-ifvg-pine-v6**（**MIT**，2026-10-18 建立/推送，379 行 v6 `strategy()` 自足、僅 2 個 `request.security`）`NY Open ICT: HTF Bias + SMT + IFVG Retrace`：NY Killzone 0935-1100 ET 時段紀律（每 session 限單 + 15:55 強制平倉）→ HTF 收線 EMA+結構偏見【`request.security([close[1],open[1],ema[1],hi[2],lo[2]], lookahead_on)` 非重繪】＋ VWAP 對齊 → **跨資產 SMT Divergence**【`ta.pivotlow/high` 右側確認，主標的掃流動性而相關標的守住＋拒絕收線，25-bar 有效窗】→ FVG（ATR 0.15 門檻）被位移 K（實體 ≥0.45）反轉為 IFVG → **反轉後回測觸及才進場**（`bar_index > ifvgBar`，不追當根）→ Swing SL + 1R 部停 60% + 0.05R 保本鎖 → 1:2 / 1:3 / 靜止流動性（1.5R–3R 界限）。**全庫 `SMT` 覆蓋數 = 0**（`grep -ril "SMT" *.pine` 零命中），判定為全新紀律，移除原作者 75% 勝率／4.17 PF 宣稱字串後主權化重寫，移植為 `TnSovereignNySmtIfvgV6`，歸 **Market Structure & Price Action 38→39**。
+> 2. **casoon/pine-scripts**（**MIT**）2026-10-12 提交 `strategies/commodity_pulse_matrix/commodity_pulse_matrix_v4_strategy.pine`（**5,502 行 / 242 KB**、v6、單一 `strategy()` 宣告、全檔僅 1 個 `request.security` 呼叫點【UDF 回傳 struct 取 TF1/TF2/TF3，圖表時框命中即重用不重複呼叫】、無 `import`、無 `input.symbol`）`Commodity Pulse Matrix v4 [WavesUnchained]`：**商品/期貨六類別多時框評分**【Flow / Momentum / Trend / Volatility / Structure / Divergence 標準化 → 總分 + **Heat Score 0–1**（pow 1.2，佔入場強度 25%）】→ Breakout / Pullback / Continuation 三家族入場狀態機（fresh trigger + cooldown + upgradeDelta 去重）→ Signal Boost（RSI 25/75、WaveTrend 外緣）→ ATR+成交量品質閘門 → Final Signal Gate 證據計數（預設 4）→ A-Setup 分級（heat≥0.65 且 strength≥0.70）+ Early Reversal 候選 + Diamond Zones 語境圖層 → ATR SL 1.5× + TP1/TP2/TP3（1.0/1.5/2.0 ATR）+ 併入單一 stop level 的保本（防 exit 競態）+ Session/DD/連虧風控濾網。**#138 首度覆蓋 casoon 時該檔尚未存在**（#144 前無此檔），全庫無 commodity pulse／六類別評分矩陣；Volume 缺失時 Flow 權重自動剔除重正規化。移植主權版號與資料契約註記、保留原邏輯，改名為 `TnSovereignCommodityPulseMatrixV6`，歸 **Trend & Momentum 22→23**。
+>
+> 其餘候選皆排除：**345-strategies/thestrat-suite**（MPL-2.0，28 檔 .pine 逐一查宣告，全為 `indicator()` / `library()`【TheStratSuite v3.1.1 / CrossLevels / Invalidation Stop / TheStratGrammar / PineDraw】**無 `strategy()`**）、**guillemustafa-ux/ict-sweep-mss-fvg**（MIT，sweep→位移→MSS→FVG + equal pools + daily loss lock 已由 `TnSovereignIctLsReversalV6` 覆蓋）、**CodeOfLive/multi-symbol-mtf-scanner**（MPL-2.0，`strategy.pine` 為 MA/RSI/MACD 基礎匯流，已由 MaConfluence / TripleEma / MacdV6 覆蓋）、**ambscripts/Pine-Script-Strategy-Screener**（`indicator()`）、**A1b3rtt/taiwan-stock-tradingview-bot**（僅 README 無 .pine）；**無 LICENSE 依規訓排除**：dhana5445/tradingview-strategy、drvesali1374-ai/divergence-fakebreakout-combo、Anish-Achar/no-candle-strategy、yewalesakshi/Trading-Indicator、Kai-shekk/tradingview-strategies、jcornierfra/OPR_Breakout、iashokkumar86/spx-pulse-v13、venkatalokeshanne/trading_strategies_indicators、ThyrexGG/Trade_Logger、blacktalenthubs/trading-mentorhub-insights、runFast123/quantplus_choice_kp 等新出線倉。**TradingView** 社群策略頁：GridTrader Pro（保護腳本）、Volatility Targeting QuantAlgo（invite-only）無法取得原始碼排除；`[DAOL] Compression Release` → 壓縮釋放已由 tn_compression_expansion_v6 / Compression-Release 家族覆蓋；`Tectonic Regime Protocol [JOAT]`、`ChronoPulse MS-MACD Resonance` → 體制/匯流/MACD 家族已覆蓋。本次按規訓**新增 2 策略（184→186）**：Market Structure & Price Action 38→39、Trend & Momentum 22→23。Dashboard（status-bar + 2 張卡片 `<ul>`）/ 首頁 README / strategies README 版本完全對位 v26.1020.1830。
 
 > **最新加入（v26.1003.0630）**: 獵頭審計 #144 — GitHub 全數檢索（`pinescript strategy v6 created:>2026-09-15` 2 結果 + `pine script v6 strategy created:>2026-09-15` 6 結果 + TradingView 社群 `pine-script-v6` 熱門頁，經 agent-browser 逐一深掃）。自 #143 後出線之全新倉庫，**無合格 strategy() 實體**：**jayadevrana/free-pine-script-indicators**（**MPL-2.0**，3 枚 strategy() 皆為初學者教育樣板【EMA 趨勢 + ATR SL/TP / 2% SL + 4% TP / 風險課程負期望示範】，已由 TnSovereignTripleEmaV6 / TnSovereignMaConfluenceV6 / TnSovereignVWAPV6 全面覆蓋，無移植價值）、**NBendtsen/spy-scalp-tool**（平行通道日內偵測 indicator + strategy 雙檔，**無 LICENSE** 依規訓排除，且作者自述未達預設績效閾值不主張 edge，通道邏輯已由 Donchian/Keltner 系列覆蓋）、**thangchelseakt95-boop/ema-9-45-200-trend-strategy**（基礎 EMA 9/45/200 Breakout/Pullback + ATR stop，已由 TnSovereignTripleEmaV6 覆蓋）、**jhonitoandres-debug/Futuros-algo**（**MIT** 但僅 EMA-crossover + RSI 過濾 + ATR SL/TP 基礎邏輯，已由現庫全面覆蓋）、**PineGen-AI/ICT-Daily-Liquidity-Sweep-PineGen-AI-**（僅 README 無 .pine 實體、無 LICENSE；亞洲時段掃蕩 + PDH/PDL + 1.5R/3.0R 邏輯已由 TnSovereignIctLsReversalV6 覆蓋）、**udaydeep1992/pinescript-agents-antigravity**（Agent 開發套件非策略實體）。TradingView 社群熱門頁仍為 3 枚 indicator()（Supply Demand AI / Account Guardian / Smart Weekly Lines），無 strategy() 實體。本次按規訓維持 184 策略（14 類）物理對位，無新增/修改；Dashboard/README 版本對位 v26.1003.0630。
 
