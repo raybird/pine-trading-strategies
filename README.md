@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 186 個已實體化主權策略，分 14 大類（v26.1020.1830 更新）
+- **[`/strategies`](./strategies/README.md)** — 188 個已實體化主權策略，分 14 大類（v26.1021.1830 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -43,7 +43,7 @@
 | 分類 | 數量 | 說明 |
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
-| **Trend & Momentum** | 23 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回、商品期貨六類別多時框評分矩陣 |
+| **Trend & Momentum** | 24 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回、商品期貨六類別多時框評分矩陣、ATR 單向棘輪帶趨勢追蹤（回測再進場 + R 倍數停利 + 風險距離定倉） |
 | **Mean Reversion & Oscillator** | 24 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間、RSI 狀態機隱藏背離匯流 |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 39 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡、NY Killzone 跨資產 SMT+IFVG 回測 |
@@ -52,12 +52,19 @@
 | **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
 | **Multi-Agent, Swarm & Macro** | 12 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散 |
 | **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
-| **DCA & Webhook** | 1 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接 |
+| **DCA & Webhook** | 2 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接、選擇權結構路由器（波動率體制引擎 → 跨式/價差/鐵鷹結構仲裁 → 多腳訂單負載 + 雙通道 Webhook） |
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **186** | 主權策略矩陣（v26.1020.1830 更新） |
+| **Total** | **188** | 主權策略矩陣（v26.1021.1830 更新） |
 
+
+> **最新加入（v26.1021.1830）**: 獵頭審計 #146 — 檢索途徑：GitHub Search API（`created` / `pushed` / `updated` 排序 × `pine script v6 strategy` / `pinescript strategy v6` / `tradingview strategy pine` 多組關鍵詞，tree API `git/trees/HEAD?recursive=1` 逐檔掃描）+ TradingView 社群策略頁（`/scripts/?script_type=strategies`，agent-browser 開啟 "Open-source only" 篩選，抽出公開原始碼比對 `//@version=\d/`）。出線 **2 枚全新合格 strategy() 實體**（皆具明確 OSS 授權、自足無 `import`、括號完全配對）：
+>
+> 1. **loctai/pinescript**（**MIT**）`src/scripts/trend_following.pine`（182 行，v6 `strategy()`）：EMA(21) 基底 + ATR(10)×2 **單向棘輪帶**（多頭支撐只上移、空頭阻力只下移，收盤越帶則重置）→ 收盤越帶即 **stop-and-reverse** → 趨勢中回測 EMA 基底再進場（**pullback re-entry**）→ 帶緣即真實盤中停損（棘輪只朝有利方向移動）→ **R 倍數停利**（R = 進場點到帶緣距離）→ **風險距離定倉**（風險金額 ÷ 停損距離，`syminfo.pointvalue` 換算合約乘數）並以**槓桿名目封頂**。庫內 Supertrend/Chandelier 系皆為**單向追蹤停損**、無「反手 + 回測再進場」二次建倉路徑，亦無以帶緣距離定義 R 者；`syminfo.pointvalue` 全庫僅 `TnSovereignPineFlowIctFvgV6` / `TnSovereignPineFlowOrbV6` 使用，本策略為**第三例**且額外加上槓桿封頂。移植為 `TnSovereignAtrBandRatchetTrendV6`，歸 **Trend & Momentum 23→24**。
+> 2. **stocks-developer/autotrader-tradingview-lib**（**MPL-2.0**，default branch `master`）`StocksDeveloperAlerts.pine`（498 行 v6 `library("StocksDeveloperAlerts")`）＋ `examples/long-straddle.pine`（68 行 v6 `strategy()`）：原專案為**純訊息組裝器**（收到訊號即組負載），**未處理「該佈哪種結構」的決策層** —— 本次主權化補上**四證據波動率體制引擎**（ATR 百分位 + BB 寬度百分位 + ADX 趨勢強度 + 區間位置）→ 結構仲裁【跨式 Long Straddle / 跨式價差 Long Strangle / 牛CALL價差 / 熊PUT價差 / 鐵鷹 Iron Condor】→ 多腳訂單負載建構【target・size・product・trade・order・validity・option・expiry・width・wing・leg・multiLeg(≤10 腳)・riskLimits(maxloss/forceexit/entrywindow/blockonexpiryday)】→ 事件券商 `key=value` 原生負載 ＋ 標準 JSON Webhook **雙通道**；並將原作者每根 K 棒重複觸發的 `runtime.error()` 改為嚴格且等價的守門判斷，另補受限風險代理部位回測與到期日封鎖。全庫 `grep -ril "straddle|strangle|iron condor" *.pine` **零命中** → 庫內**首例選擇權結構能力**（`TnSovereignIndiaCcfNiftyV6` 之 CE/PE 為期貨策略之模擬對沖，非選擇權多腳）。移植為 `TnSovereignOptionStructureRouterV6`，歸 **DCA & Webhook 1→2**。
+>
+> 其餘候選皆排除：**TradingView** 社群策略頁（已開 "Open-source only" 篩選，28 支公開原始碼）因 House Rules 明示 "republishing the code is subject to our House Rules" 且本庫歷次移植均來自具明確 OSS 授權之 GitHub 倉，予以排除 —— CNPS24_BASIS MEAN REVERSION（期現 basis z-score，1,509 行／34,271 字元）、CNPS25 FVG+BOS/CHOCH RETEST、CNPS23 VOLUME ORDER BLOCK、CNPS22 BASTION、DNSE VN301 三均線交叉、Sadashi Market Reversion Strategy（4-engine composite edge score）、Gold Trail XAUUSD、Focused STRAT+Volume v3、Z-Regime Switch、MACD Confluence 等；**GitHub 無 LICENSE 依規訓排除**：ricksimpsontrading/TradingView-PineScript（zigzag-orderblock-retracement.pine 126KB / medallion-cipher 89KB / comprehensive-market-analyzer 294KB）、moonyroy/just-developing、tlzkrh1029/pinescript、ksoruvka/congenial-pancake、Kai-shekk/tradingview-strategies、Anish-Achar/no-candle-strategy、dhana5445/tradingview-strategy、yewalesakshi/Trading-Indicator、drvesali1374-ai/divergence-fakebreakout-combo、amresh1065/quant-trading-strategies、FerAlvarez60/algorithmic-trading-strategy、AlgoTradesofficial/forex-trading-algorithm、dexWilder/algo-lab、petrjoe01/ema-pinescript、bunqi8/tradingview-indicators、claudioamati3-cmyk/humble-trading、BitCLI-io/bitcli-tv-webhooks、egade369/msc-indicator-tradingview、ay287203-hub/*；**全為 indicator() 無 strategy() 實體**：obekheet/pine-script-indicators（MPL-2.0，11 檔全 indicator）、piecioshka/tradingview-pine-scripts（MIT，全 indicator）、dufitimanafisher-source/STI-TradingView-Indicator（MIT）、ambscripts/Pine-Script-Strategy-Screener（MIT）、everget/tradingview-pinescript-indicators（GPL-3.0，210 檔全 v3 study()）；**工具/runtime 非策略實體**：n0n1m0us/pinebench（AGPL-3.0，僅範例）、udaydeep1992/pinescript-agents-antigravity（MIT，agent 套件）、kashifmughal61531/tradingview-optimizer（MIT，工具）、pineforge-4pass/pineforge-engine（Apache-2.0，C++ 引擎）、thangchelseakt95-boop/ema-9-45-200-trend-strategy（MPL-2.0，基礎 EMA 已覆蓋）；**已被現庫覆蓋**：casoon/pine-scripts（MIT，7 個策略全數已覆蓋，commit `d1af063b` "Trade Permission Engine" 為 skill/template 非 strategy）、jayadevrana/free-pine-script-indicators。本次按規訓**新增 2 策略（186→188）**：Trend & Momentum 23→24、DCA & Webhook 1→2。Dashboard（status-bar + 2 張卡片 `<ul>`）/ 首頁 README / strategies README 版本完全對位 v26.1021.1830。
 
 > **最新加入（v26.1020.1830）**: 獵頭審計 #145 — 檢索途徑：GitHub 搜尋排序 by updated（`pine script v6 strategy` × 2 頁 + `pine script strategy created:>2026-10-03` × 28 筆／3 頁 + 多組 repo 關鍵詞 API）+ **GitHub commits API 全域掃描（`extension:pine committer-date:>2026-10-05`）** + TradingView `/scripts/?script_type=strategies` 與搜尋頁（agent-browser 點擊「Source code」抽出公開原始碼比對 `//@version=\d/`）。出線 **2 枚全新合格 strategy() 實體**（皆 **MIT**、自足無 `import`、括號完全配對）：
 >

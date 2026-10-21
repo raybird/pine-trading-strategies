@@ -22,7 +22,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSessionQuantV6` | 時空對位開盤區間突破策略 |
 | `TnSovereignHFTEngineV6` | 機構級 HFT 機率評分引擎 |
 
-## Trend & Momentum（趨勢與動量，23）
+## Trend & Momentum（趨勢與動量，24）
 
 | 策略 | 說明 |
 |------|------|
@@ -49,6 +49,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignXauUsdOpt5mV6` | XAU/USD 優化 5 分鐘策略（EMA 交叉 + BB/RSI 匯流 + 精選 UTC 時段 + ATR Bracket + Max-Hold），移植自 Paulaustin3977/OANDA-XAUUSD-Optimized-5m |
 | `TnSovereignMaConfluenceV6` | MA 交叉匯流策略（EMA/SMA/WMA/RMA/HMA 五型 + HTF 趨勢 + RSI/ADX/Vol/Session 堆疊過濾 + ATR/百分比雙風險引擎），移植自 Viprasol-Tech/pine-script-strategy |
 | `TnSovereignCommodityPulseMatrixV6` | 商品/期貨六類別多時框評分矩陣（Flow/Mom/Trend/Vol/Struct/Div 跨 TF1/TF2/TF3 標準化 → 總分 + Heat Score 0-1 → Breakout/Pullback/Continuation 三家族入場狀態機 → ATR+成交量品質閘門 + Final Gate 證據計數 → A-Setup 分級 + Early Reversal 候選 + Diamond Zones 語境圖層 → ATR SL 與 TP1/TP2/TP3 三段停利 + 單一 stop level 保本防競態），移植自 casoon/pine-scripts (WavesUnchained) Commodity Pulse Matrix v4.2.1 |
+| `TnSovereignAtrBandRatchetTrendV6` | ATR 單向棘輪帶趨勢追蹤（EMA(21) 基底 + ATR(10)×2 單向棘輪支撐／阻力帶 → 收盤越帶即停損反手 → 趨勢中回測 EMA 基底再進場 → 帶緣即真實盤中停損 + R 倍數停利 → 風險距離定倉（syminfo.pointvalue 風險金額 ÷ 停損距離）並以槓桿名目封頂 + HTF 偏見閘門 + 時段/每日平倉紀律 + JSON Webhook），移植自 loctai/pinescript (MIT) trend_following.pine |
 
 ## Mean Reversion & Oscillator（均值回歸與振盪指標，24）
 
@@ -225,11 +226,12 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `volatility_regime_sovereign_v6` | 波動率體制策略 |
 | `yield_spread_sovereign_v6` | 美債收益率差監測 |
 
-## DCA & Webhook（DCA 網格與 Webhook 橋接，1）
+## DCA & Webhook（DCA 網格與 Webhook 橋接，2）
 
 | 策略 | 說明 |
 |------|------|
 | `TnSovereignDcaWebhookV6` | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 輸出（獵取自 ggamer5555） |
+| `TnSovereignOptionStructureRouterV6` | 選擇權結構路由器（四證據波動率體制引擎【ATR 百分位 + BB 寬度百分位 + ADX 趨勢強度 + 區間位置】→ 結構仲裁【跨式 / 跨式價差 / 牛CALL價差 / 熊PUT價差 / 鐵鷹】→ 多腳訂單負載建構【target/size/product/trade/order/validity/option/expiry/width/wing/leg/multiLeg≤10 腳/riskLimits】→ 事件券商 key=value 負載 + 標準 JSON Webhook 雙通道 + 受限風險代理部位回測 + 到期日封鎖 + 每日筆數/冷卻/時段濾網），移植自 stocks-developer/autotrader-tradingview-lib (MPL-2.0) StocksDeveloperAlerts + long-straddle |
 
 ## PropFirm / Challenge（自營與挑戰賽，2）
 
@@ -262,4 +264,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：186（v26.1020.1830 更新）*
+*策略總數：188（v26.1021.1830 更新）*

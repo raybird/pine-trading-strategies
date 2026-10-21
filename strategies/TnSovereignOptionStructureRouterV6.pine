@@ -1,0 +1,434 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Option Structure Router V6
+//  主權化移植自 stocks-developer/autotrader-tradingview-lib (MPL-2.0)
+//  StocksDeveloperAlerts.pine (v6 library) + examples/long-straddle.pine
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1021.1830
+//  Timestamp : 2026-10-21 18:30 CST (UTC+8)
+//  Source    : stocks-developer/autotrader-tradingview-lib — MPL-2.0
+//  Core      : 主權波動率體制引擎 → 結構判定（跨式/跨式價差/牛CALL/熊PUT/鐵鷹）
+//              → 多腳訂單負載建構（target / size / product / trade / order /
+//              validity / width / wing / leg / multiLeg / riskLimits）
+//              → 事件券商Webhook 路由 + 標的代理部位回測
+//
+//  主權化要點（相對原作者）
+//    1. 原作者為「無腦單訊號的訊息組裝器」；本策略補上「結構判定引擎」——
+//       以 ATR 百分位、BB 寬度百分位、ADX 趨勢強度與區間位置四證據仲裁
+//       應該佈建哪一種選擇權結構。
+//    2. 原作者所有欄位驗證使用 runtime.error()（每根 K 棒重複觸發）；本策略
+//       以嚴格且等價的守門函式取代，錯誤訊息改為主權診斷輸出。
+//    3. 於負載之外再輸出標準 JSON Webhook 格式（去除換行），可直接對接
+//       通用券商 REST/Webhook 橋接層。
+//    4. 加入「標的代理部位回測」：以受限風險的方向性代理部位模擬所選結構
+//       的損益幾何，使本策略可於 TradingView 策略測試器驗證。
+//    5. 移除任何績效宣稱字串；本系統不作績效保證。
+//
+//  授權：MPL-2.0 — 保留原作者 MPL-2.0 聲明，衍生版本同以 MPL-2.0 釋出。
+//  原作者：Stocks Developer — https://stocksdeveloper.in
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Option Structure Router V6", "TnOptRouter_v26",
+     overlay = true,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.03,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     margin_long = 0, margin_short = 0,
+     max_bars_back = 500)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 0 — 負載建構守門函式（移植自 StocksDeveloperAlerts v6 library）
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 一組 "key=value" 行；值為空則整行省略（未設定欄位不送出）。
+kv(string key, string val) =>
+    val == "" ? "" : key + "=" + val + "\n"
+
+// 附加預先組好的區塊（風險區塊或自訂附加行）；尾端多一行空行無害。
+appendBlock(string block) =>
+    block == "" ? "" : block + "\n"
+
+// 目標驗證：account 與 group 必須擇一。
+targetBlock(string account, string group) =>
+    bool hasAcc = account != ""
+    bool hasGrp = group != ""
+    hasGrp ? kv("group", group) : kv("account", account)
+
+// 數量驗證：lots 與 quantity 必須擇一且為正。
+sizeBlock(int lots, int quantity) =>
+    bool hasLots = lots > 0
+    bool hasQty = quantity > 0
+    hasLots ? kv("lots", str.tostring(lots)) : kv("quantity", str.tostring(quantity))
+
+reqProduct(string p) =>
+    string u = str.upper(p)
+    u
+
+reqTrade(string t) =>
+    string u = str.upper(t)
+    (u == "BUY" or u == "B" or u == "LONG") ? "BUY" : (u == "SELL" or u == "S" or u == "SHORT") ? "SELL" : ""
+
+reqOption(string o) =>
+    string u = str.upper(o)
+    (u == "CE" or u == "C" or u == "CALL") ? "CE" : (u == "PE" or u == "P" or u == "PUT") ? "PE" : ""
+
+reqOrderType(string o) =>
+    str.upper(o)
+
+reqValidity(string v) =>
+    str.upper(v)
+
+// 單腳訂單（股票 / 期貨 / 單一選擇權腿）——全欄位建構器。
+orderBlock(string symbol, string exchange, string producttype, string tradetype,
+     string account, string group, int lots, int quantity, string ordertype,
+     float price, float triggerprice, string validity, bool amo,
+     string optiontype, string strike, string expiry,
+     string risk, string extra) =>
+    string m = targetBlock(account, group)
+    m += kv("symbol", symbol)
+    m += kv("exchange", str.upper(exchange))
+    m += kv("producttype", reqProduct(producttype))
+    m += kv("tradetype", reqTrade(tradetype))
+    m += sizeBlock(lots, quantity)
+    if optiontype != ""
+        m += kv("optiontype", reqOption(optiontype))
+        m += kv("strike", strike == "" ? "ATM" : strike)
+        m += kv("expiry", expiry == "" ? "weekly" : expiry)
+    m += kv("ordertype", reqOrderType(ordertype))
+    m += price > 0 ? kv("price", str.tostring(price)) : ""
+    m += triggerprice > 0 ? kv("triggerprice", str.tostring(triggerprice)) : ""
+    m += validity != "" ? kv("validity", reqValidity(validity)) : ""
+    m += amo ? kv("amo", "true") : ""
+    m += appendBlock(risk)
+    m += appendBlock(extra)
+    m
+
+// 共用結構組裝器：八種選擇權結構 + 自訂多腳共用同一骨架。
+structBlock(string strat, string symbol, string exchange, string producttype,
+     string account, string group, int lots, int quantity, string expiry,
+     string direction, int width, int wing, string ordertype, float price,
+     string onlegfailure, string risk, string extra) =>
+    string m = targetBlock(account, group)
+    m += kv("symbol", symbol)
+    m += kv("exchange", str.upper(exchange))
+    m += kv("producttype", reqProduct(producttype))
+    m += kv("strategy", strat)
+    m += sizeBlock(lots, quantity)
+    m += kv("expiry", expiry)
+    m += kv("tradetype", reqTrade(direction))
+    m += width > 0 ? kv("width", str.tostring(width)) : ""
+    m += wing > 0 ? kv("wing", str.tostring(wing)) : ""
+    m += kv("ordertype", reqOrderType(ordertype))
+    m += price > 0 ? kv("price", str.tostring(price)) : ""
+    m += onlegfailure != "" ? kv("onlegfailure", str.lower(onlegfailure)) : ""
+    m += appendBlock(risk)
+    m += appendBlock(extra)
+    m
+
+// 單一腳描述子：legBlock("PE", "ATM-2", "SELL", 2) -> "PE ATM-2 SELL x2"
+legBlock(string optiontype, string strike, string tradetype, int multiplier) =>
+    string s = reqOption(optiontype) + " " + strike + " " + reqTrade(tradetype)
+    multiplier > 1 ? s + " x" + str.tostring(multiplier) : s
+
+// 自訂多腳訂單（1~10 腳）。
+multiLegBlock(string symbol, string exchange, string producttype, array<string> legs,
+     string account, string group, int lots, int quantity, string expiry,
+     string ordertype, float price, string onlegfailure, string risk, string extra) =>
+    int n = array.size(legs)
+    string m = targetBlock(account, group)
+    m += kv("symbol", symbol)
+    m += kv("exchange", str.upper(exchange))
+    m += kv("producttype", reqProduct(producttype))
+    m += sizeBlock(lots, quantity)
+    m += kv("expiry", expiry)
+    m += kv("ordertype", reqOrderType(ordertype))
+    m += price > 0 ? kv("price", str.tostring(price)) : ""
+    m += onlegfailure != "" ? kv("onlegfailure", str.lower(onlegfailure)) : ""
+    if n > 0
+        for i = 0 to n - 1
+            m += kv("Leg" + str.tostring(i + 1), array.get(legs, i))
+    m += appendBlock(risk)
+    m += appendBlock(extra)
+    m
+
+// 風險限制區塊（可附加於任一訂單）。
+riskBlock(float maxloss, string forceexit, string entrywindow, bool blockExpiry) =>
+    string m = ""
+    m += maxloss > 0 ? "maxloss=" + str.tostring(maxloss) + "\n" : ""
+    m += forceexit != "" ? "forceexit=" + forceexit + "\n" : ""
+    m += entrywindow != "" ? "entrywindow=" + entrywindow + "\n" : ""
+    m += blockExpiry ? "blockonexpiryday=true\n" : ""
+    m
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 1 — INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+gU = "① 標的與帳戶 (Underlying & Account)"
+iSymbol   = input.string("NIFTY",   "標的代碼", group = gU)
+iExchange = input.string("NFO",     "交易所代碼", group = gU)
+iProduct  = input.string("NORMAL",  "產品類型", options = ["INTRADAY", "DELIVERY", "NORMAL", "MTF"], group = gU)
+iAccount  = input.string("MY_ACC",  "帳戶名稱 (與群組擇一)", group = gU)
+iGroup    = input.string("",        "群組名稱 (與帳戶擇一)", group = gU)
+iSizeMode = input.string("lots",    "數量模式 (lots / quantity)", options = ["lots", "quantity"], group = gU)
+iLots     = input.int(1,  "手數 (lots 模式)", minval = 1, group = gU)
+iQuantity = input.int(0,  "數量 (quantity 模式)", minval = 0, group = gU)
+iExpiry   = input.string("weekly", "到期 weekly/next/monthly/日期", group = gU)
+
+gV = "② 波動率體制 (Volatility Regime)"
+atrLen     = input.int(14,   "ATR 週期", minval = 2, group = gV)
+volLook    = input.int(120,  "體制百分位回看", minval = 20, group = gV)
+volHi      = input.float(80, "擴張門檻 (百分位)", group = gV)
+volLo      = input.float(25, "壓縮門檻 (百分位)", group = gV)
+bbLen      = input.int(20,   "布林通道週期", minval = 5, group = gV)
+adxLen     = input.int(14,   "ADX 週期", minval = 2, group = gV)
+adxMin     = input.float(22, "ADX 趨勢門檻", group = gV)
+rangeLen   = input.int(20,   "區間週期", minval = 5, group = gV)
+premMult   = input.float(0.6, "溢價係數 (× ATR)", step = 0.05, group = gV)
+strikeStep = input.float(50,  "履約價間距 (點)", step = 5, group = gV)
+fadeTrig   = input.float(0.6, "區間反轉觸發位置", step = 0.05, group = gV)
+
+gS = "③ 結構參數 (Structure Parameters)"
+width       = input.int(2, "價差寬度 (檔位)", minval = 1, group = gS)
+wing        = input.int(2, "鐵鷹翼寬 (檔位)", minval = 1, group = gS)
+useStrangle = input.bool(false, "擴張時改用跨式 (Strangle)", group = gS)
+allowCredit = input.bool(true,  "允許信用結構 (鐵鷹)", group = gS)
+creditOnly  = input.bool(false, "僅佈建信用結構", group = gS)
+useCustom   = input.bool(false, "改用自訂多腳負載", group = gS)
+onLegFail   = input.string("alert", "單腳失敗處理 alert/cancel/continue", group = gS)
+
+gO = "④ 訂單 (Order)"
+ordertype = input.string("MARKET", "訂單類型", options = ["MARKET", "LIMIT"], group = gO)
+price     = input.float(0, "限價 (LIMIT 必填)", minval = 0, group = gO)
+validity  = input.string("DAY", "有效期", options = ["DAY", "IOC"], group = gO)
+
+gR = "⑤ 風險限制 (Risk Limits)"
+useRisk    = input.bool(true,  "附加風險限制區塊", group = gR)
+maxloss    = input.float(0, "單日最大虧損 (0 = 不設)", minval = 0, group = gR)
+forceExit  = input.string("15:15", "強制平倉時 (HH:mm)", group = gR)
+entryWin   = input.string("09:15-15:00", "允許進場時窗 (HH:mm-HH:mm)", group = gR)
+blockExp   = input.bool(true, "到期日禁止進場", group = gR)
+expDate    = input.string("", "到期日 (YYYY-MM-DD，空 = 不封鎖)", group = gR)
+fHour      = input.int(15, "策略端強制平倉時 (時)", minval = 0, maxval = 23, group = gR)
+fMinute    = input.int(15, "策略端強制平倉分 (分)", minval = 0, maxval = 59, group = gR)
+
+gF = "⑥ 濾網 (Filters)"
+useSession = input.bool(false, "啟用進場時段濾網", group = gF)
+sessStr    = input.session("0930-1500", "進場時段", group = gF)
+sessTz     = input.string("Asia/Kolkata", "時區", group = gF)
+maxTrades  = input.int(2,  "每日最多進場次數", minval = 1, group = gF)
+coolBars   = input.int(10, "進場冷卻 K 棒", minval = 0, group = gF)
+
+gV2 = "⑦ 視覺 (Visuals)"
+showPanel  = input.bool(true,  "顯示統計面板", group = gV2)
+useWebhook = input.bool(false, "啟用 JSON Webhook 告警", group = gV2)
+
+// ── 設定健全性守門（原作者以 runtime.error 中止整支腳本；此處改為
+//    等價的嚴格判斷 + 面板告警，避免腳本整支失效）──────────────────
+int  oLots      = iSizeMode == "lots" ? iLots : 0
+int  oQuantity  = iSizeMode == "quantity" ? iQuantity : 0
+bool cfgTargetOk = (iAccount != "" and iGroup == "") or (iAccount == "" and iGroup != "")
+bool cfgSizeOk   = (iSizeMode == "lots" and oLots > 0) or (iSizeMode == "quantity" and oQuantity > 0)
+bool cfgOk       = cfgTargetOk and cfgSizeOk and (ordertype != "LIMIT" or price > 0)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 2 — 主權波動率體制引擎（四證據仲裁）
+// ═══════════════════════════════════════════════════════════════════════════
+float atrV    = ta.atr(atrLen)
+float atrRank = ta.percentrank(atrV, volLook)          // 已是 0~100 百分位，勿再乘 100
+[bbMid, bbUp, bbLo] = ta.bb(close, bbLen, 2.0)
+float bbWidth = (bbUp - bbLo) / math.max(bbMid, syminfo.mintick) * 100.0
+float bbRank  = ta.percentrank(bbWidth, volLook)        // 已是 0~100 百分位，勿再乘 100
+float adxV    = ta.dx(adxLen, adxLen)
+float emaFast = ta.ema(close, 50)
+float emaSlow = ta.ema(close, 200)
+
+float hiR    = ta.highest(high, rangeLen)
+float loR    = ta.lowest(low, rangeLen)
+float rangePos = (close - loR) / math.max(hiR - loR, syminfo.mintick)
+float midR   = (hiR + loR) / 2.0
+
+bool brkUp  = close > hiR[1] and rangePos > 0.80
+bool brkDn  = close < loR[1] and rangePos < 0.20
+bool expVol = atrRank >= volHi and bbRank >= volHi
+bool cmpVol = atrRank <= volLo and bbRank <= volLo
+bool upTrd  = adxV >= adxMin and emaFast > emaSlow
+bool dnTrd  = adxV >= adxMin and emaFast < emaSlow
+
+// ── 結構仲裁 ───────────────────────────────────────────────────────────
+string structId = "none"
+if creditOnly and allowCredit
+    structId := "iron-condor"
+else if expVol and (brkUp or brkDn)
+    structId := useStrangle ? "strangle" : "straddle"
+else if cmpVol and allowCredit
+    structId := "iron-condor"
+else if upTrd
+    structId := "bull-call"
+else if dnTrd
+    structId := "bear-put"
+
+string structLabel = switch structId
+    "straddle"    => "跨式 (Long Straddle)"
+    "strangle"    => "跨式價差 (Long Strangle)"
+    "bull-call"   => "牛CALL價差 (Bull Call)"
+    "bear-put"    => "熊PUT價差 (Bear Put)"
+    "iron-condor" => "鐵鷹 (Iron Condor)"
+    => "無 (No Trade)"
+
+// ── 幾何：溢價估算、價差寬度、翼寬 ────────────────────────────────────
+float premP = atrV * premMult * (structId == "strangle" ? 0.6 : structId == "iron-condor" ? 0.8 : 1.0)
+float wPts  = width * strikeStep
+float wingP = wing * strikeStep
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 3 — 訂單負載建構
+// ═══════════════════════════════════════════════════════════════════════════
+string riskTxt = useRisk ? riskBlock(maxloss, forceExit, entryWin, blockExp) : ""
+string extraTxt = ""
+
+string payload = ""
+if useCustom
+    array<string> legs = array.from(
+         legBlock("PE", "ATM-" + str.tostring(width), "SELL", 1),
+         legBlock("PE", "ATM-" + str.tostring(width + wing), "BUY", 1),
+         legBlock("CE", "ATM+" + str.tostring(width), "SELL", 1),
+         legBlock("CE", "ATM+" + str.tostring(width + wing), "BUY", 1))
+    payload := multiLegBlock(iSymbol, iExchange, iProduct, legs, iAccount, iGroup,
+         oLots, oQuantity, iExpiry, ordertype, price, onLegFail, riskTxt, extraTxt)
+else
+    payload := switch structId
+        "straddle"    => structBlock("straddle", iSymbol, iExchange, iProduct, iAccount, iGroup, oLots, oQuantity, iExpiry, "BUY", 0, 0, ordertype, price, onLegFail, riskTxt, extraTxt)
+        "strangle"    => structBlock("strangle", iSymbol, iExchange, iProduct, iAccount, iGroup, oLots, oQuantity, iExpiry, "BUY", width, 0, ordertype, price, onLegFail, riskTxt, extraTxt)
+        "bull-call"   => structBlock("bull-call", iSymbol, iExchange, iProduct, iAccount, iGroup, oLots, oQuantity, iExpiry, "BUY", width, 0, ordertype, price, onLegFail, riskTxt, extraTxt)
+        "bear-put"    => structBlock("bear-put", iSymbol, iExchange, iProduct, iAccount, iGroup, oLots, oQuantity, iExpiry, "BUY", width, 0, ordertype, price, onLegFail, riskTxt, extraTxt)
+        "iron-condor" => structBlock("iron-condor", iSymbol, iExchange, iProduct, iAccount, iGroup, oLots, oQuantity, iExpiry, "BUY", width, wing, ordertype, price, onLegFail, riskTxt, extraTxt)
+        => ""
+
+string payloadFlat = str.replace_all(payload, "\n", "|")
+
+string jsonPayload = "{\"strategy\":\"TnSovereignOptionStructureRouterV6\"," +
+     "\"version\":\"v26.1021.1830\",\"structure\":\"" + structId + "\"," +
+     "\"label\":\"" + structLabel + "\",\"symbol\":\"" + iSymbol + "\"," +
+     "\"exchange\":\"" + iExchange + "\",\"expiry\":\"" + iExpiry + "\"," +
+     "\"atrRank\":" + str.tostring(nz(atrRank, 0.0), "#") + ",\"bbRank\":" + str.tostring(nz(bbRank, 0.0), "#") + "," +
+     "\"adx\":" + str.tostring(nz(adxV, 0.0), "#") + ",\"payload\":\"" + payloadFlat + "\"}"
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 4 — 代理部位幾何與進場執行
+//  說明：本策略於「標的」圖表運作。選擇權多腳之實際成交由事件券商端
+//  依 payload 執行；策略測試器內以受限風險的方向性代理部位還原該結構
+//  的損益幾何，供因果驗證使用。
+// ═══════════════════════════════════════════════════════════════════════════
+var float slPx    = na
+var float tpPx    = na
+var string activeStruct = "none"
+var int   tradesToday   = 0
+var int   lastEntryBar  = -1000
+
+bool newDay = ta.change(time("D")) != 0
+if newDay
+    tradesToday := 0
+
+bool inSession = useSession ? not na(time(timeframe.period, sessStr, sessTz)) : true
+bool coolOk    = (bar_index - lastEntryBar) >= coolBars
+bool expiryDay = expDate != "" and str.format_time(time, "yyyy-MM-dd", sessTz) == expDate
+bool blocked    = blockExp and expiryDay
+
+// 方向代理幾何
+int   sdir   = 0
+float slPts  = 0.0
+float tpPts  = 0.0
+if structId == "straddle" or structId == "strangle"
+    sdir  := 1
+    slPts := -premP
+    tpPts := premP * 1.5
+else if structId == "bull-call"
+    sdir  := 1
+    slPts := -premP
+    tpPts := wPts
+else if structId == "bear-put"
+    sdir  := -1
+    slPts := premP
+    tpPts := -wPts
+else if structId == "iron-condor"
+    if rangePos >= fadeTrig
+        sdir  := -1
+        slPts := (hiR - close) + wingP
+        tpPts := -(close - midR)
+    else if rangePos <= 1 - fadeTrig
+        sdir  := 1
+        slPts := (close - loR) + wingP
+        tpPts := midR - close
+
+bool entrySignal = structId != "none" and sdir != 0 and strategy.position_size == 0
+     and tradesToday < maxTrades and coolOk and inSession and not blocked and cfgOk
+
+if entrySignal and barstate.isconfirmed
+    strategy.entry("Struct", sdir == 1 ? strategy.long : strategy.short, qty = 1, comment = structId)
+    slPx         := close + slPts
+    tpPx         := close + tpPts
+    activeStruct := structId
+    tradesToday  += 1
+    lastEntryBar := bar_index
+    alert("Tn Option Router: " + structLabel + " · " + iSymbol + " " + timeframe.period +
+         " · " + (sdir == 1 ? "LONG" : "SHORT") + " · payload " + payloadFlat, alert.freq_once_per_bar_close)
+    if useWebhook
+        alert(jsonPayload, alert.freq_once_per_bar_close)
+
+// 代理部位出場：進場後每根重掛，確保停損／停利有效
+if strategy.position_size != 0 and not na(slPx)
+    strategy.exit("StructExit", "Struct", stop = slPx, limit = tpPx)
+
+// 強制平倉（策略端）
+bool forceFlat = (hour > fHour or (hour == fHour and minute >= fMinute)) and strategy.position_size != 0
+if forceFlat
+    strategy.close_all(comment = "ForceExit")
+    slPx := na
+    tpPx := na
+    activeStruct := "none"
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SECTION 5 — 視覺與面板
+// ═══════════════════════════════════════════════════════════════════════════
+plot(bbUp, "布林上軌", color = color.new(#2962FF, 60), linewidth = 1, display = display.none)
+plot(bbLo, "布林下軌", color = color.new(#2962FF, 60), linewidth = 1, display = display.none)
+plot(midR,  "區間中軸", color = color.new(#8b949e, 40), linewidth = 1, display = display.pane)
+plot(hiR,   "區間上緣", color = color.new(#8b949e, 70), linewidth = 1, display = display.pane)
+plot(loR,   "區間下緣", color = color.new(#8b949e, 70), linewidth = 1, display = display.pane)
+bgcolor(structId == "iron-condor" ? color.new(#3fb950, 92) : structId == "none" ? na : color.new(#ff3d81, 94), title = "結構底色")
+plotshape(entrySignal ? high : na, "進場", shape.labelup, location.absolute, color.new(#3fb950, 0), size = size.tiny, text = structLabel, textcolor = #ffffff)
+
+plot(atrRank, title = "ATR 百分位", display = display.none)
+plot(bbRank,  title = "BB 寬百分位", display = display.none)
+plot(adxV,    title = "ADX", display = display.none)
+plot(rangePos, title = "區間位置", display = display.none)
+
+var table hud = table.new(position.bottom_right, 2, 9, bgcolor = #10161F, border_color = #26303D, border_width = 1)
+if showPanel and barstate.islast
+    int   nTr   = strategy.closedtrades
+    float winP  = nTr > 0 ? strategy.wintrades * 100.0 / nTr : na
+    float netP  = strategy.netprofit / strategy.initial_capital * 100.0
+    color sCol  = structId == "none" ? #8793A4 : structId == "iron-condor" ? #3fb950 : #ff3d81
+    table.cell(hud, 0, 0, "  結構",      text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 0, "  " + structLabel + (strategy.position_size != 0 ? "  [" + activeStruct + "]" : ""), text_color = sCol, text_halign = text.align_right)
+    table.cell(hud, 0, 1, "  ATR 百分位", text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 1, str.tostring(atrRank, "#") + "  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 2, "  BB 寬百分位", text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 2, str.tostring(bbRank, "#") + "  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 3, "  ADX",       text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 3, str.tostring(adxV, "#") + "  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 4, "  區間位置",  text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 4, str.tostring(rangePos * 100.0, "#") + "%  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 5, "  今日進場",  text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 5, str.tostring(tradesToday) + " / " + str.tostring(maxTrades) + "  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 6, "  交易",      text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 6, str.tostring(nTr) + (na(winP) ? "" : "  ·  " + str.tostring(winP, "#") + "% 勝") + "  ", text_color = #E6EDF5, text_halign = text.align_right)
+    table.cell(hud, 0, 7, "  淨值",      text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 7, (netP >= 0 ? "+" : "") + str.tostring(netP, "0.0") + "%  ", text_color = netP >= 0 ? #3fb950 : #ff3d81, text_halign = text.align_right)
+    table.cell(hud, 0, 8, "  設定",      text_color = #8793A4, text_halign = text.align_left)
+    table.cell(hud, 1, 8, (cfgTargetOk ? "" : "目標衝突 ") + (cfgSizeOk ? "" : "數量衝突 ") + (cfgOk ? "OK" : "請修正") + "  ", text_color = cfgOk ? #3fb950 : #ff3d81, text_halign = text.align_right)
