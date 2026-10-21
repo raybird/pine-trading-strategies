@@ -51,7 +51,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignCommodityPulseMatrixV6` | 商品/期貨六類別多時框評分矩陣（Flow/Mom/Trend/Vol/Struct/Div 跨 TF1/TF2/TF3 標準化 → 總分 + Heat Score 0-1 → Breakout/Pullback/Continuation 三家族入場狀態機 → ATR+成交量品質閘門 + Final Gate 證據計數 → A-Setup 分級 + Early Reversal 候選 + Diamond Zones 語境圖層 → ATR SL 與 TP1/TP2/TP3 三段停利 + 單一 stop level 保本防競態），移植自 casoon/pine-scripts (WavesUnchained) Commodity Pulse Matrix v4.2.1 |
 | `TnSovereignAtrBandRatchetTrendV6` | ATR 單向棘輪帶趨勢追蹤（EMA(21) 基底 + ATR(10)×2 單向棘輪支撐／阻力帶 → 收盤越帶即停損反手 → 趨勢中回測 EMA 基底再進場 → 帶緣即真實盤中停損 + R 倍數停利 → 風險距離定倉（syminfo.pointvalue 風險金額 ÷ 停損距離）並以槓桿名目封頂 + HTF 偏見閘門 + 時段/每日平倉紀律 + JSON Webhook），移植自 loctai/pinescript (MIT) trend_following.pine |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，24）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，25）
 
 | 策略 | 說明 |
 |------|------|
@@ -79,6 +79,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignConnorsRsiV6` | Connors R2 短期均值回歸（2-Period RSI 極端超賣<10 買點 + 長週期 SMA/EMA/RMA 趨勢過濾【預設 200】+ RSI 回升 >70 出場 OR 最大持倉 K 線數【預設 3，原版參數】+ 多空獨立開關 + 可選 RVOL 爆量確認 + 可選 ATR 落地 Stop），移植自 Ahmed-GoCode/Quant-Edge-Indicators (Larry Connors 2-Period RSI Strategy) |
 | `TnSovereignOscDivZonesV6` | 振盪器背離區間（RSI/CCI/MFI 三引擎各自 STDEV 3σ 動態區間【zone = SMA ± σ×zDeviation + ATR 自適伸縮】→ pivot 背離偵測【price HH+osc LH / LL+osc HL】→ 收盤穿越 zone 外緣才成立（非重繪）→ convergence 同向背離計數【1~3】+ 200 EMA 趨勢地板 + ATR corridor 造波濾網 + 0.75R~1.5R Bracket + Trailing + JSON Webhook），移植自 casoon/pine-scripts (WavesUnchained) Oscillator Divergence Zones v1.2.2 |
 | `TnSovereignRsiStateDivConfluenceV6` | RSI-50 狀態機 + 隱藏背離三重匯流（RSI 中性線三拍狀態機【穿越→遠離≥buffer→重測→State 3】+ pivot 隱藏背離確認【價位 HL＋RSI LL 多 / 價位 LH＋RSI HL 空】+ 30-bar 失效重置 + 三重可切換匯流濾網【EMA touch / Fib 0.5–0.618 黃金回撤帶 / Ichimoku Kumo 觸雲或雲側】+ Swing SL + R:R bracket + 單方向開關 + JSON Webhook），移植自 moonyroy/trust-me-bro-strategy |
+| `TnSovereignCapitulationExhaustionV6` | 投降式耗竭反轉（深度定位【距 VWAP/布林下緣/前日低點/24 根低點/96 根低點 五項 OR】+ 耗竭證據【RSI≤41.1 / Stoch K≤35.7 / 單根報酬 Z≤−0.79 / 收盤復原位置 / 量能流動性 / 價量動能 Z 上限】+ 體制閘門【ADX 帶 / ATR 相對值帶 / 4H 與日線方向仲裁】→ 棘輪停損（2.20 ATR 與進場後最高點 0.82 ATR 取近者）+ ATR 目標 5.40 + VWAP 復原/RSI 高檔/動能見頂/持倉上限 多重出場 + 風險距離定倉與槓桿封頂 + JSON Webhook；原作者之 SciPy 事後標籤與最佳化日期窗已全數刪除），移植自 jnaggud/quant-research-lab (MIT) capitulation sleeve |
 
 ## Volatility & Breakout（波動率與突破，26）
 
@@ -197,7 +198,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignLorentzianV6` | Lorentzian 分類 + 多維特徵因果審計 |
 | `TnSovereignTopologicalSutureV6` | 拓撲連接性策略 |
 
-## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，12）
+## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，13）
 
 | 策略 | 說明 |
 |------|------|
@@ -213,6 +214,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSignalForgeV20` | 7 因子適應性集成 |
 | `TnSovereignSignalForgeV6` | ML 驅動多模型主權 |
 | `tn_pair_corr_divergence_v6` | 配對相關性背離偵測 |
+| `TnSovereignCrowdSentimentConsensusV6` | 群眾情緒共識（9 因子加權投票【EMA/Supertrend/ADX 體制/斜率/WaveTrend/StochRSI/背離/RS/ATR】→ 門禁矩陣【RVOL/波動帶/追價距離】→ CNN 風格 7 組分 Fear & Greed 量表【erf 近似常態 CDF】→ 群眾擁擠阻擋【極度貪婪禁多/極度恐慌禁空】+ VIX 平靜濾網 → 風險距離定倉 + 名目槓桿封頂 + 反向訊號出場 + ATR 停損 + JSON Webhook；原版 invalid symbol 錯誤修補、日頻序列去重繪、FG 時框錯配修正），移植自 kdricha0602/kernal-cipher (MIT) |
 
 ## Optimization & Portfolio（優化與組合，7）
 
@@ -264,4 +266,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：188（v26.1021.1830 更新）*
+*策略總數：190（v26.1022.0630 更新）*

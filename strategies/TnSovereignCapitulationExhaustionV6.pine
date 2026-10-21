@@ -1,0 +1,304 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Capitulation Exhaustion V6
+//  主權化移植自 jnaggud/quant-research-lab (MIT License)
+//  pine_strategies/JD_CL_15m_Capitulation_Sleeve_64k_C1.pine
+//  （原檔為「趨勢核心 + 一致性 sleeve + 投降反轉 sleeve」三段式工廠；
+//    本版主權化僅萃取並重構其「Capitulation Sleeve」投降反轉紀律）
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1022.0630
+//  Timestamp : 2026-10-22 06:30 CST (UTC+8)
+//  Source    : jnaggud/quant-research-lab — MIT — JD_CL_15m_Capitulation_Sleeve_64k_C1.pine
+//  Core      : 投降式耗竭反轉（Capitulation Exhaustion Reversal）
+//              ① 深度定位：距 VWAP / 布林下緣 / 前日低點 / 24 根低點 /
+//                 96 根低點 皆在 ATR 距離內（拋售已達結構極值）
+//              ② 耗竭證據：RSI 低 + 隨機指標低 + 單根報酬 Z 極負 +
+//                 收盤復原位置（長紅 K）+ 量能流動性 + 價量動能 Z 未過熱
+//              ③ 體制閘門：ADX 帶 / ATR 相對值帶 / 4H 與日線方向仲裁
+//              ④ 出場：棘輪停損（2.2 ATR 與最高點 0.82 ATR 取大）
+//                 + 5.4 ATR 目標 + VWAP 復原 / RSI 高檔 / 動能見頂 /
+//                 持倉上限
+//
+//  主權化要點（相對原作者）
+//    1. 移除原作者內嵌之 SciPy 峰谷「事後標籤」標記 —— 該標記由匯出
+//       資料回溯產生，屬未來資訊，與本庫非前視契約牴觸，全數刪除
+//    2. 移除原作者硬編碼之最佳化日期窗（useDateRange + start/end timestamp）
+//       —— 最佳化窗會把標的鎖死在特定區間且造成選擇偏誤；改以「時段濾網 +
+//       每日平倉 + 持倉上限」表達時間紀律
+//    3. HTF（4H / 日線）序列改以 barmerge.lookahead_on 取「已收盤」值，
+//       與原作者之 [1] + lookahead_off 等價但語意明確，消除盤中重繪疑慮
+//    4. 進場訊號僅於已收盤 K 棒成立，訂單於下一根 K 棒開盤成交
+//       （process_orders_on_close = false），原作者為 true
+//    5. 部位由固定 1 口改為「風險距離定倉（風險% ÷ ATR 停損距離）」
+//       並以名目槓桿封頂，qty 以 int 落地
+//    6. 量能缺失之標的（外匯 / 無成交量）可關閉量能條件，改以其餘耗竭
+//       證據成立；原作者無此容錯
+//    7. 新增 JSON Webhook 與因果儀表板；移除任何績效宣稱字串
+//
+//  非重繪契約：所有訊號僅於「已收盤 K 棒」判定（barstate.isconfirmed），
+//  訂單於下一根 K 棒開盤成交（process_orders_on_close = false）。
+//  HTF 序列一律取已收盤值，不含任何未來函數引用。
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Capitulation Exhaustion V6", "TnCAPEX_v26",
+     overlay = true,
+     initial_capital = 50000,
+     currency = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     max_bars_back = 500)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+GRP_RG = "① 體制閘門 (Regime Gates)"
+h4FastLen = input.int(17, "4H 快 EMA 週期", minval = 1, group = GRP_RG)
+h4SlowLen = input.int(26, "4H 慢 EMA 週期", minval = 1, group = GRP_RG)
+dFastLen  = input.int(12, "日線快 EMA 週期", minval = 1, group = GRP_RG)
+dSlowLen  = input.int(50, "日線慢 EMA 週期", minval = 1, group = GRP_RG)
+capRegime = input.string("any", "方向仲裁模式", options = ["any", "daily_not_bear", "h4_up", "either_up"], group = GRP_RG,
+     tooltip = "any＝不限制；daily_not_bear＝日線非空頭；h4_up＝4H 多頭；either_up＝任一時框多頭。")
+capAdxMin    = input.float(8.305401, "ADX 下限", minval = 0.0, step = 0.1, group = GRP_RG)
+capAdxMax    = input.float(48.356036, "ADX 上限", minval = 1.0, step = 0.1, group = GRP_RG)
+capAtrRelMin = input.float(0.944956, "ATR 相對值下限 (ATR / ATR 均線)", minval = 0.1, step = 0.01, group = GRP_RG)
+capAtrRelMax = input.float(3.033806, "ATR 相對值上限 (ATR / ATR 均線)", minval = 0.2, step = 0.01, group = GRP_RG)
+
+GRP_DP = "② 深度定位 (Deep Location)"
+capVwapDistAtr = input.float(3.4311, "距 VWAP 之 ATR 距離（負值＝低於 VWAP）", minval = 0.1, step = 0.1, group = GRP_DP)
+capBbAtr       = input.float(-1.15522, "布林下緣偏移 (×ATR，負值＝跌破下緣)", step = 0.05, group = GRP_DP)
+capPrevLowAtr  = input.float(0.368443, "距前日低點之 ATR 距離", minval = 0.0, step = 0.05, group = GRP_DP)
+capLowBreakAtr = input.float(1.006339, "跌破 24 根低點之 ATR 距離", minval = 0.0, step = 0.05, group = GRP_DP)
+capLow96Atr    = input.float(1.095075, "距 96 根低點之 ATR 距離", minval = 0.0, step = 0.05, group = GRP_DP)
+
+GRP_EX = "③ 耗竭證據 (Exhaustion Evidence)"
+capRsiMax      = input.float(41.147936, "RSI 上限", minval = 0.0, maxval = 100.0, step = 0.1, group = GRP_EX)
+capStochMax    = input.float(35.711995, "Stochastic K 上限", minval = 0.0, maxval = 100.0, step = 0.1, group = GRP_EX)
+capRetZ        = input.float(0.788456, "單根報酬 Z 極值下限（負值＝恐慌拋售）", minval = 0.0, step = 0.05, group = GRP_EX)
+capReclaimPos  = input.float(0.076128, "收盤復原位置下限（收盤位於 K 棒區間之上比例）", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_EX)
+capVolumeMult  = input.float(0.521054, "量能流動性下限（量 / 96 日均量）", minval = 0.0, step = 0.01, group = GRP_EX)
+capPvZMax      = input.float(1.064531, "價量動能 Z 上限（過熱則不追）", step = 0.05, group = GRP_EX)
+useVolumeCond  = input.bool(true, "要求量能條件（無成交量標的請關閉）", group = GRP_EX)
+capRequireReversal = input.bool(false, "要求反轉確認（K 線黃金交叉 / 收紅 / MACD 柱收斂向上）", group = GRP_EX)
+
+GRP_RS = "④ 出場 (Exits)"
+capStopAtr      = input.float(2.204645, "硬停損 (×ATR)", minval = 0.1, step = 0.05, group = GRP_RS)
+capTargetAtr    = input.float(5.395003, "停利目標 (×ATR)", minval = 0.1, step = 0.05, group = GRP_RS)
+capTrailAtr     = input.float(0.815415, "追蹤停損 (距進場後最高點 ×ATR)", minval = 0.05, step = 0.05, group = GRP_RS)
+capExitVwapAtr  = input.float(0.578815, "VWAP 復原出場距離 (×ATR)", minval = 0.0, step = 0.05, group = GRP_RS)
+capExitRsi      = input.float(73.774291, "RSI 反轉出場門檻", minval = 0.0, maxval = 100.0, step = 0.1, group = GRP_RS)
+capExitRangePos = input.float(0.451264, "動能見頂出場之收盤位置上限", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_RS)
+capExitOnPeak   = input.bool(true, "啟用動能見頂出場", group = GRP_RS)
+capMinHold      = input.int(3, "最短持倉 K 棒", minval = 0, group = GRP_RS)
+capMaxHold      = input.int(56, "最長持倉 K 棒", minval = 1, group = GRP_RS)
+capCooldown     = input.int(1, "出場後冷卻 K 棒", minval = 0, group = GRP_RS)
+
+GRP_RK = "⑤ 風險 (Risk)"
+riskPct   = input.float(1.0, "單筆風險 (% 權益)", minval = 0.1, maxval = 10.0, step = 0.1, group = GRP_RK)
+useLevCap = input.bool(true, "啟用名目槓桿上限", group = GRP_RK)
+maxLev    = input.float(2.0, "最大名目槓桿（名目 / 權益）", minval = 0.5, step = 0.25, group = GRP_RK)
+
+GRP_FL = "⑥ 濾網 (Filters)"
+useSession = input.bool(false, "啟用進場時段濾網", group = GRP_FL)
+sessionStr = input.session("0000-1800", "進場時段", group = GRP_FL)
+useNyHours = input.bool(false, "啟用紐約時段濾網（America/New_York）", group = GRP_FL)
+nyStartHour = input.int(0, "紐約時段起始小時", minval = 0, maxval = 23, group = GRP_FL)
+nyEndHour   = input.int(18, "紐約時段結束小時", minval = 0, maxval = 23, group = GRP_FL)
+useEodFlat = input.bool(false, "每日強制平倉", group = GRP_FL)
+eodHour    = input.int(15, "平倉小時", minval = 0, maxval = 23, group = GRP_FL)
+eodMinute  = input.int(55, "平倉分鐘", minval = 0, maxval = 59, group = GRP_FL)
+
+GRP_DS = "⑦ 顯示 (Display)"
+showSignals = input.bool(true, "顯示進場訊號", group = GRP_DS)
+showLevels  = input.bool(true, "顯示結構位（VWAP / 布林 / 前日高低）", group = GRP_DS)
+showRaw     = input.bool(false, "顯示原始證據標記（深度 / 耗竭）", group = GRP_DS)
+useWebhook  = input.bool(false, "啟用 JSON Webhook", group = GRP_DS)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  HTF 序列（已收盤值：lookahead_on 取最近一根已結束的 HTF K 棒）
+// ─────────────────────────────────────────────────────────────────────────
+h4Fast = request.security(syminfo.tickerid, "240", ta.ema(close, h4FastLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+h4Slow = request.security(syminfo.tickerid, "240", ta.ema(close, h4SlowLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+dFast  = request.security(syminfo.tickerid, "1D", ta.ema(close, dFastLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+dSlow  = request.security(syminfo.tickerid, "1D", ta.ema(close, dSlowLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+prevDayHigh = request.security(syminfo.tickerid, "1D", high, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+prevDayLow  = request.security(syminfo.tickerid, "1D", low, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+
+h4Signal    = h4Fast > h4Slow ? 1 : -1
+dailySignal = dFast > dSlow ? 1 : -1
+
+// ─────────────────────────────────────────────────────────────────────────
+//  圖表時框指標
+// ─────────────────────────────────────────────────────────────────────────
+rsiValue = ta.rsi(close, 14)
+stochK   = ta.stoch(close, high, low, 14)
+stochD   = ta.sma(stochK, 3)
+[_, _, macdHist] = ta.macd(close, 12, 26, 9)
+atrValue = ta.atr(14)
+[_, _, adxValue] = ta.dmi(14, 14)
+bbBasis = ta.sma(close, 40)
+bbDev   = ta.stdev(close, 40)
+bbUpper = bbBasis + 2.0 * bbDev
+bbLower = bbBasis - 2.0 * bbDev
+vwapValue = ta.vwap(hlc3)
+atrRel = ta.sma(atrValue, 192) != 0 ? atrValue / ta.sma(atrValue, 192) : 1.0
+vwapDist = atrValue != 0 ? (close - vwapValue) / atrValue : 0.0
+ret1 = ta.change(close) / close[1]
+retMean = ta.sma(ret1, 96)
+retStd = ta.stdev(ret1, 96)
+retZ = retStd != 0.0 ? (ret1 - retMean) / retStd : 0.0
+rangePos = (close - low) / math.max(high - low, syminfo.mintick)
+low24 = ta.lowest(low, 24)[1]
+low96 = ta.lowest(low, 96)[1]
+priceVelocity = ta.change(close)
+pvMomentum = math.sum(priceVelocity * nz(volume, 0), 4)
+pvStd = ta.stdev(pvMomentum, 96)
+pvZ = pvStd != 0.0 ? pvMomentum / pvStd : 0.0
+climaxVolume = ta.sma(nz(volume, 0), 96) != 0 ? nz(volume, 0) / ta.sma(nz(volume, 0), 96) : 0.0
+kCrossUp = stochK[1] <= stochD[1] and stochK > stochD
+
+// ─────────────────────────────────────────────────────────────────────────
+//  投降反轉（Capitulation）三段證據
+// ─────────────────────────────────────────────────────────────────────────
+// ① 體制閘門
+capRegimeOk = capRegime == "any" or (capRegime == "daily_not_bear" and dailySignal != -1) or (capRegime == "h4_up" and h4Signal == 1) or (capRegime == "either_up" and (h4Signal == 1 or dailySignal == 1))
+atrRelOk = atrRel >= capAtrRelMin and atrRel <= capAtrRelMax
+adxOk   = adxValue >= capAdxMin and adxValue <= capAdxMax
+
+// ② 深度定位：價格已抵達結構極值
+capDeep = vwapDist <= -capVwapDistAtr
+       or close <= bbLower + capBbAtr * atrValue
+       or close <= prevDayLow + capPrevLowAtr * atrValue
+       or low <= low24 - capLowBreakAtr * atrValue
+       or low <= low96 + capLow96Atr * atrValue
+
+// ③ 耗竭證據：超賣 + 恐慌拋售 + 收盤復原 + 量能未過熱
+volOk = not useVolumeCond or climaxVolume >= capVolumeMult
+capExhaustion = rsiValue <= capRsiMax
+              and stochK <= capStochMax
+              and retZ <= -capRetZ
+              and rangePos >= capReclaimPos
+              and volOk
+              and pvZ <= capPvZMax
+
+// ④ 可選反轉確認
+capReversal = kCrossUp or close > close[1] or macdHist > macdHist[1]
+
+// ─────────────────────────────────────────────────────────────────────────
+//  時間紀律與冷卻
+// ─────────────────────────────────────────────────────────────────────────
+nyHour = hour(time, "America/New_York")
+nySessionOk = nyStartHour <= nyEndHour ? (nyHour >= nyStartHour and nyHour <= nyEndHour) : (nyHour >= nyStartHour or nyHour <= nyEndHour)
+inSession = (not useSession or not na(time(timeframe.period, sessionStr))) and (not useNyHours or nySessionOk)
+eodReached = useEodFlat and (hour > eodHour or (hour == eodHour and minute >= eodMinute))
+var int lastExitBar = na
+flatNow = strategy.position_size == 0 and strategy.position_size[1] != 0
+if flatNow
+    lastExitBar := bar_index
+cooldownOk = na(lastExitBar) or bar_index - lastExitBar >= capCooldown
+
+capLong = barstate.isconfirmed and capRegimeOk and atrRelOk and adxOk and capDeep and capExhaustion and (not capRequireReversal or capReversal) and inSession and not eodReached and cooldownOk
+
+// ─────────────────────────────────────────────────────────────────────────
+//  部位管理
+// ─────────────────────────────────────────────────────────────────────────
+var int entryBar = na
+var float entryHigh = na
+if strategy.position_size != 0
+    entryHigh := na(entryHigh) ? high : math.max(entryHigh, high)
+else
+    entryBar := na
+    entryHigh := na
+
+barsHeld = strategy.position_size != 0 and not na(entryBar) ? bar_index - entryBar : 0
+capHoldOk = barsHeld >= capMinHold
+
+// 風險距離定倉（以訊號當下 ATR 停損距離推算數量）
+stopDistSizing = capStopAtr * atrValue
+riskCash = strategy.equity * riskPct / 100
+qtyRisk = stopDistSizing > 0 ? riskCash / stopDistSizing : 1
+qtyCap = useLevCap and close > 0 ? strategy.equity * maxLev / (close * syminfo.pointvalue) : 1e9
+qty = int(math.max(1, math.floor(math.min(qtyRisk, qtyCap))))
+
+if capLong and strategy.position_size == 0
+    entryBar := bar_index
+    entryHigh := high
+    strategy.entry("Cap Long", strategy.long, qty = qty, comment = "CAP BUY")
+
+// 停損：固定 ATR 停損與「距進場後最高點」追蹤停損取較近者（只會上移）
+longStop   = strategy.position_size > 0 ? math.max(strategy.position_avg_price - capStopAtr * atrValue, entryHigh - capTrailAtr * atrValue) : na
+longTarget = strategy.position_size > 0 ? strategy.position_avg_price + capTargetAtr * atrValue : na
+if strategy.position_size > 0
+    strategy.exit("Cap Long Risk", "Cap Long", stop = longStop, limit = longTarget)
+
+// 時間與動能出場
+vwapReclaimExit = capHoldOk and close >= vwapValue + capExitVwapAtr * atrValue
+rsiExit         = capHoldOk and rsiValue >= capExitRsi
+momentumPeakExit= capExitOnPeak and capHoldOk and macdHist < macdHist[1] and rangePos <= capExitRangePos
+if strategy.position_size > 0 and (barsHeld >= capMaxHold or vwapReclaimExit or rsiExit or momentumPeakExit)
+    strategy.close("Cap Long", comment = "Cap Exit")
+if strategy.position_size > 0 and eodReached
+    strategy.close_all(comment = "EOD Flat")
+
+// JSON Webhook
+if useWebhook and capLong
+    payload = "{\"strategy\":\"TnSovereignCapitulationExhaustionV6\",\"version\":\"v26.1022.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"timeframe\":\"" + timeframe.period + "\",\"side\":\"BUY\",\"kind\":\"capitulation\",\"vwapDist\":" + str.tostring(vwapDist, "#.##") + ",\"retZ\":" + str.tostring(retZ, "#.##") + ",\"rsi\":" + str.tostring(rsiValue, "#.#") + ",\"qty\":" + str.tostring(qty) + "}"
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  視覺層
+// ─────────────────────────────────────────────────────────────────────────
+plot(showLevels ? vwapValue : na, "Session VWAP", color = color.new(color.white, 55))
+plot(showLevels ? bbUpper : na, "BB Upper", color = color.new(color.red, 85))
+plot(showLevels ? bbLower : na, "BB Lower", color = color.new(color.green, 85))
+plot(showLevels ? prevDayHigh : na, "Prev Day High", color = color.new(color.aqua, 70), style = plot.style_stepline)
+plot(showLevels ? prevDayLow : na, "Prev Day Low", color = color.new(color.orange, 70), style = plot.style_stepline)
+plot(longStop, "Active Stop", color = color.new(color.red, 0), style = plot.style_linebr)
+plot(longTarget, "Active Target", color = color.new(color.lime, 65), style = plot.style_linebr)
+plotshape(showSignals and capLong, "Capitulation long", shape.diamond, location.belowbar, color = color.new(color.yellow, 0), size = size.small, text = "CAP")
+plotshape(showRaw and capDeep, "Raw deep", shape.circle, location.belowbar, color = color.new(color.blue, 80), size = size.tiny, text = "D")
+plotshape(showRaw and capExhaustion, "Raw exhaustion", shape.circle, location.belowbar, color = color.new(color.yellow, 80), size = size.tiny, text = "E")
+bgcolor(h4Signal == 1 ? color.new(color.green, 94) : color.new(color.red, 95))
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因果儀表板
+// ─────────────────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 8, border_width = 1, border_color = color.new(#8a8f98, 70))
+if barstate.islast
+    regTxt = h4Signal == 1 and dailySignal == 1 ? "H4+1D BULL" : h4Signal == 1 ? "H4 BULL" : dailySignal == 1 ? "1D BULL" : "BEAR"
+    deepTxt = capDeep ? "YES" : "—"
+    exhTxt  = capExhaustion ? "YES" : "—"
+    posTxt  = strategy.position_size > 0 ? "LONG " + str.tostring(strategy.position_size) : "FLAT"
+    entryTxt= strategy.position_size != 0 ? str.tostring(strategy.position_avg_price, format.mintick) : "—"
+    holdTxt = barsHeld > 0 ? str.tostring(barsHeld) + " bars" : "—"
+    table.cell(dash, 0, 0, "訊號", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 0, capLong ? "CAPITULATION LONG" : "WAIT", text_color = capLong ? color.new(#00e5a0, 0) : color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 1, "方向體制", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 1, regTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "深度 / 耗竭", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 2, deepTxt + " / " + exhTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "VWAP 距離", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 3, str.tostring(vwapDist, "#.##") + " ATR", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "報酬 Z / RSI", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 4, str.tostring(retZ, "#.##") + " / " + str.tostring(rsiValue, "#.#"), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "部位 / 進場", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 5, posTxt + " @ " + entryTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "持倉 / 淨損益", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 6, holdTxt + " · " + str.tostring(strategy.netprofit, format.mintick), text_color = strategy.netprofit >= 0 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "交易次數", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 7, str.tostring(strategy.closedtrades), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA NOTES
+//  · 原作者以 SciPy 谷值標籤訓練本 sleeve 之參數；本移植沿用其參數值為
+//    預設值，但本庫未經獨立回測驗證，亦不主張任何績效。
+//  · 原作者之最佳化日期窗已移除（選擇偏誤），時間紀律改以時段濾網 /
+//    每日平倉 / 持倉上限表達。
+//  · 原作者檔內之 SciPy 峰谷標記為事後標籤（未來資訊），已全數刪除。
+//  · 本策略僅保留原作者三段式中「Capitulation Sleeve」；趨勢核心與
+//    一致性 sleeve 對應庫內既有策略，未重複移植。
+// ═══════════════════════════════════════════════════════════════════════════

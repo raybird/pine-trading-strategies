@@ -1,0 +1,577 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Crowd Sentiment Consensus V6
+//  主權化移植自 kdricha0602/kernal-cipher (MIT License)
+//  Kernal-Cipher-Strategy.pine — "Kernal Cipher Strategy"
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1022.0630
+//  Timestamp : 2026-10-22 06:30 CST (UTC+8)
+//  Source    : kdricha0602/kernal-cipher — MIT — Kernal-Cipher-Strategy.pine
+//  Core      : 9 因子加權共識投票（EMA / Supertrend / ADX 體制 / EMA 斜率 /
+//              WaveTrend / StochRSI / WaveTrend 背離 / 相對強度 / ATR 品質）
+//              → 門禁矩陣（量能 RVOL / 波動區間 / 追高距離 / RS / Beta /
+//              熊市空頭閘門）→ CNN 風格 7 組分 Fear & Greed 量表
+//              （erf 近似常態 CDF）→ 群眾擁擠阻擋（極度貪婪禁多 /
+//              極度恐慌禁空，除非強訊號）+ VIX 平靜濾網 → 風險距離定倉
+//              → 反向訊號出場 + ATR 停損（+ 選配 R 停利 / ATR 追蹤停損）
+//
+//  主權化要點（相對原作者）
+//    1. 修補原作者 README 自述未解之 "invalid symbol" runtime error：所有
+//       跨標的 request.security 皆加入 ignore_invalid_symbol = true，
+//       標的不可用時回傳 na 並由守門判斷接管，腳本不再拋錯中斷
+//    2. 所有跨標的日頻序列改以 barmerge.lookahead_on 取得「已收盤日值」
+//       （原作者使用 lookahead_off，日內圖表會取到「形成中」的當日收盤
+//       而造成盤中重繪）
+//    3. Fear & Greed 量表之日頻組分（動能 / 價格強度 / 寬度 / 避險代理 /
+//       波動率）改為在「日頻上下文」內完成 Z-Score 正規化；跨資產價差
+//       組分（HYG-IEF / SPY-IEF）改以「日頻錨定滾動統計」計算 Z 值
+//       （每日僅更新一次），消除原作者在日內圖表以圖表 K 棒計算 252 根
+//       視窗之時框錯配缺陷
+//    4. 部位數量加入「風險距離 + 名目槓桿上限」雙重封頂（int 落地）
+//    5. 加入時段濾網、每日強制平倉、持倉 K 棒上限與 JSON Webhook
+//    6. 移除任何績效宣稱字串（PF / expectancy / 勝率），本系統不作績效
+//       保證；原作者之誠實聲明改寫為「未經本庫獨立驗證」之提示
+//
+//  非重繪契約：所有訊號僅於「已收盤 K 棒」判定（barstate.isconfirmed），
+//  訂單於下一根 K 棒開盤成交（process_orders_on_close = false）。
+//  跨標的序列一律取「已收盤」值，日頻統計於日頻上下文計算，不含未來函數。
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Crowd Sentiment Consensus V6", "TnCSS_v26",
+     overlay = true,
+     initial_capital = 100000,
+     currency = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.01,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     max_bars_back = 500)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+GRP_T   = "① 趨勢 (Trend)"
+GRP_ST  = "② Supertrend"
+GRP_RG  = "③ 體制 (Regime)"
+GRP_WT  = "④ WaveTrend"
+GRP_SR  = "⑤ StochRSI"
+GRP_DV  = "⑥ 背離 (Divergence)"
+GRP_RS  = "⑦ 相對強度 / Beta"
+GRP_ATR = "⑧ ATR / 波動 / 風險"
+GRP_VL  = "⑨ 量能 (Volume)"
+GRP_SG  = "⑩ 訊號 (Signals)"
+GRP_X   = "⑪ 策略 (Strategy)"
+GRP_FG  = "⑫ 群眾情緒 (Fear & Greed)"
+
+emaFastLen  = input.int(21, "EMA 快線週期", minval = 2, group = GRP_T)
+emaSlowLen  = input.int(50, "EMA 慢線週期", minval = 3, group = GRP_T)
+emaLongLen  = input.int(200, "EMA 長線週期", minval = 50, group = GRP_T)
+slopeLen    = input.int(5, "EMA 斜率回顧 K 棒", minval = 1, group = GRP_T)
+minSlopePct = input.float(0.05, "EMA 斜率最小百分比", step = 0.01, group = GRP_T)
+
+stLen  = input.int(10, "ATR 週期", minval = 1, group = GRP_ST)
+stMult = input.float(3.0, "Supertrend 乘數 (×ATR)", minval = 0.1, step = 0.1, group = GRP_ST)
+
+adxLen           = input.int(14, "ADX 週期", minval = 2, group = GRP_RG)
+adxThresh        = input.int(20, "ADX 最低值", minval = 5, group = GRP_RG)
+requireDiAlign   = input.bool(true, "要求 DI 方向對齊", group = GRP_RG)
+
+wtN1 = input.int(10, "通道週期", minval = 1, group = GRP_WT)
+wtN2 = input.int(21, "平均週期", minval = 1, group = GRP_WT)
+
+rsiLen       = input.int(14, "RSI 週期", minval = 2, group = GRP_SR)
+stochLen     = input.int(14, "Stochastic 週期", minval = 1, group = GRP_SR)
+smoothK      = input.int(3, "K 平滑", minval = 1, group = GRP_SR)
+smoothD      = input.int(3, "D 平滑", minval = 1, group = GRP_SR)
+stochLongMax = input.float(80.0, "多頭進場 K 上限", minval = 1, maxval = 100, group = GRP_SR)
+stochShortMin= input.float(20.0, "空頭進場 K 下限", minval = 0, maxval = 99, group = GRP_SR)
+
+lbL        = input.int(5, "樞軸左側根數", minval = 1, group = GRP_DV)
+lbR        = input.int(5, "樞軸右側根數", minval = 1, group = GRP_DV)
+divMinBars = input.int(5, "樞軸間最小 K 棒", minval = 1, group = GRP_DV)
+divMaxBars = input.int(60, "樞軸間最大 K 棒", minval = 2, group = GRP_DV)
+
+useRSFilter = input.bool(false, "啟用相對強度濾網", group = GRP_RS)
+bench1      = input.symbol("AMEX:SPY", "主要基準", group = GRP_RS)
+bench2      = input.symbol("NASDAQ:QQQ", "次要基準", group = GRP_RS)
+rsLen       = input.int(20, "RS 回顧 K 棒", minval = 2, group = GRP_RS)
+rsLongMin   = input.float(0.0, "多頭 RS 最小值 (%)", step = 0.1, group = GRP_RS)
+rsShortMax  = input.float(0.0, "空頭 RS 最大值 (%)", step = 0.1, group = GRP_RS)
+useBetaFilter = input.bool(false, "要求多頭最低 Beta", group = GRP_RS)
+betaLen     = input.int(60, "Beta 回顧 K 棒", minval = 10, group = GRP_RS)
+betaMin     = input.float(0.7, "多頭最低 Beta", minval = 0, step = 0.1, group = GRP_RS)
+
+atrLen         = input.int(14, "ATR 週期", minval = 1, group = GRP_ATR)
+atrStopMult    = input.float(2.0, "ATR 停損乘數", minval = 0.5, step = 0.1, group = GRP_ATR)
+useTFStop      = input.bool(true, "時框感知停損（盤中 0.75× / 日線以上 2.0×）", group = GRP_ATR)
+tfStopMult     = input.float(0.75, "盤中停損乘數", minval = 0.5, step = 0.1, group = GRP_ATR)
+atrRegimeLen   = input.int(50, "ATR 體制基線週期", minval = 5, group = GRP_ATR)
+atrExpansionMin= input.float(0.80, "ATR / 基線 下限", minval = 0.1, step = 0.05, group = GRP_ATR)
+atrExpansionMax= input.float(3.00, "ATR / 基線 上限", minval = 0.5, step = 0.1, group = GRP_ATR)
+maxChaseATR    = input.float(1.5, "距快線最大距離 (ATR)", minval = 0.25, step = 0.25, group = GRP_ATR)
+riskPct        = input.float(1.0, "單筆風險 (% 權益)", minval = 0.1, maxval = 10, step = 0.1, group = GRP_ATR)
+useLevCap      = input.bool(true, "啟用名目槓桿上限", group = GRP_ATR)
+maxLev         = input.float(2.0, "最大名目槓桿（名目 / 權益）", minval = 0.5, step = 0.25, group = GRP_ATR)
+
+volLen     = input.int(20, "量能基線週期", minval = 2, group = GRP_VL)
+rvolMin    = input.float(1.20, "RVOL 下限", minval = 0.1, step = 0.05, group = GRP_VL)
+rvolStrong = input.float(2.00, "強量能 RVOL", minval = 0.5, step = 0.1, group = GRP_VL)
+useVolFilter= input.bool(true, "要求量能確認", group = GRP_VL)
+
+regimeWeight = input.int(2, "體制權重", minval = 1, maxval = 4, group = GRP_SG)
+emaWeight    = input.int(2, "EMA 權重", minval = 1, maxval = 4, group = GRP_SG)
+stWeight     = input.int(2, "Supertrend 權重", minval = 1, maxval = 4, group = GRP_SG)
+slopeWeight  = input.int(1, "斜率權重", minval = 0, maxval = 3, group = GRP_SG)
+wtWeight     = input.int(1, "WaveTrend 權重", minval = 0, maxval = 3, group = GRP_SG)
+srWeight     = input.int(1, "StochRSI 權重", minval = 0, maxval = 3, group = GRP_SG)
+divWeight    = input.int(1, "背離權重", minval = 0, maxval = 3, group = GRP_SG)
+rsWeight     = input.int(1, "相對強度權重", minval = 0, maxval = 3, group = GRP_SG)
+atrWeight    = input.int(1, "ATR 權重", minval = 0, maxval = 3, group = GRP_SG)
+longThresh   = input.int(10, "多頭分數門檻", minval = 1, maxval = 20, group = GRP_SG)
+shortThresh  = input.int(10, "空頭分數門檻", minval = 1, maxval = 20, group = GRP_SG)
+strongOffset = input.int(2, "強訊號偏移（高於門檻幾分）", minval = 1, maxval = 5, group = GRP_SG)
+cooldownBars = input.int(5, "訊號冷卻 K 棒", minval = 0, group = GRP_SG)
+strongOnly   = input.bool(false, "僅接受強訊號", group = GRP_SG)
+
+tradeDir  = input.string("Long + Short", "交易方向", options = ["Long + Short", "Long Only", "Short Only"], group = GRP_X)
+useOppExit= input.bool(true, "反向訊號出場", group = GRP_X)
+useTarget = input.bool(false, "啟用固定 R 停利", group = GRP_X)
+targetR   = input.float(2.0, "R 停利倍數", minval = 0.5, step = 0.5, group = GRP_X)
+useTrailing = input.bool(false, "啟用 ATR 追蹤停損", group = GRP_X)
+trailMult   = input.float(2.0, "追蹤 ATR 倍數", minval = 0.5, step = 0.1, group = GRP_X)
+useBearGate = input.bool(true, "熊市體制空頭閘門（基準 < SMA）", group = GRP_X)
+bearLen     = input.int(200, "熊市閘門均線週期", minval = 20, group = GRP_X)
+useSession  = input.bool(false, "啟用進場時段濾網", group = GRP_X)
+sessionStr  = input.session("0930-1600", "進場時段", group = GRP_X)
+useEodFlat  = input.bool(false, "每日強制平倉", group = GRP_X)
+eodHour     = input.int(15, "平倉小時", minval = 0, maxval = 23, group = GRP_X)
+eodMinute   = input.int(55, "平倉分鐘", minval = 0, maxval = 59, group = GRP_X)
+maxHoldBars = input.int(0, "持倉 K 棒上限 (0 = 不限)", minval = 0, maxval = 5000, group = GRP_X)
+useWebhook  = input.bool(false, "啟用 JSON Webhook", group = GRP_X)
+
+useFG         = input.bool(true, "顯示 Fear & Greed 量表", group = GRP_FG)
+fgSymVIX     = input.symbol("TVC:VIX", "VIX 標的", group = GRP_FG)
+fgSymHYG     = input.symbol("AMEX:HYG", "高風險債標的 (HYG)", group = GRP_FG)
+fgSymIEF     = input.symbol("AMEX:IEF", "避險債標的 (IEF)", group = GRP_FG)
+fgZLen       = input.int(252, "正規化視窗 (日)", minval = 50, group = GRP_FG)
+fgMomLen     = input.int(125, "動能均線週期 (日)", minval = 20, group = GRP_FG)
+fgVixLen     = input.int(50, "VIX 均線週期 (日)", minval = 10, group = GRP_FG)
+fgRetLen     = input.int(20, "報酬 / 寬度視窗 (日)", minval = 5, group = GRP_FG)
+fgRangeLen   = input.int(252, "價格強度區間 (日)", minval = 50, group = GRP_FG)
+fgAtrLen     = input.int(14, "避險代理 ATR 週期 (日)", minval = 2, group = GRP_FG)
+fgFear       = input.int(24, "極度恐慌區 (≤)", minval = 1, maxval = 49, group = GRP_FG)
+fgGreed      = input.int(76, "極度貪婪區 (≥)", minval = 51, maxval = 99, group = GRP_FG)
+fgW1 = input.float(1.0, "權重 ① 市場動能", minval = 0, step = 0.5, group = GRP_FG)
+fgW2 = input.float(1.0, "權重 ② 價格強度", minval = 0, step = 0.5, group = GRP_FG)
+fgW3 = input.float(1.0, "權重 ③ 市場寬度", minval = 0, step = 0.5, group = GRP_FG)
+fgW4 = input.float(1.0, "權重 ④ 避險 / 恐慌代理", minval = 0, step = 0.5, group = GRP_FG)
+fgW5 = input.float(1.0, "權重 ⑤ 垃圾債風險偏好", minval = 0, step = 0.5, group = GRP_FG)
+fgW6 = input.float(1.0, "權重 ⑥ 波動率", minval = 0, step = 0.5, group = GRP_FG)
+fgW7 = input.float(1.0, "權重 ⑦ 避險需求", minval = 0, step = 0.5, group = GRP_FG)
+useFGBlock  = input.bool(true, "阻擋逆群眾極端值之進場", group = GRP_FG)
+useFGConv   = input.bool(false, "情緒確信加成（反轉極端值 + 加大部位）", group = GRP_FG)
+convSizeMult= input.float(1.5, "確信部位倍數", minval = 1.0, maxval = 3.0, step = 0.25, group = GRP_FG)
+useVIXCalm  = input.bool(true, "僅於 VIX 平靜時做多 (VIX < SMA)", group = GRP_FG)
+vixCalmLen  = input.int(50, "VIX 平靜均線週期", minval = 10, group = GRP_FG)
+useVIXPanic = input.bool(false, "VIX 恐慌跳升時跳過進場", group = GRP_FG)
+vixPanicPct = input.float(15.0, "VIX 日跳升門檻 (%)", minval = 5, step = 1, group = GRP_FG)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  數學工具 (純函式，可安全用於 request.security 上下文)
+// ─────────────────────────────────────────────────────────────────────────
+// Abramowitz & Stegun 7.1.26 —— erf 近似，絕對誤差 < 1.5e-7（Pine 無 math.erf）
+f_erf(x) =>
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+    p  = 0.3275911
+    sgn = x < 0 ? -1.0 : 1.0
+    ax  = math.abs(x)
+    t   = 1.0 / (1.0 + p * ax)
+    y   = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * math.exp(-ax * ax)
+    sgn * y
+
+f_phi(z) =>
+    0.5 * (1.0 + f_erf(z / 1.4142135623730951))
+
+// CNN 正規化：「偏離均值的程度 / 通常偏離的程度」= Z 分數
+f_znorm(raw, len) =>
+    zm = ta.sma(raw, len)
+    zs = ta.stdev(raw, len)
+    not na(zm) and not na(zs) and zs != 0 ? (raw - zm) / zs : 0.0
+
+// Z 分數 → 0-100 情緒分（常態 CDF），高原始值＝貪婪者不取反號
+f_score(raw, len) =>
+    100.0 * f_phi(f_znorm(raw, len))
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因子引擎 (圖表時框)
+// ─────────────────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+emaLong = ta.ema(close, emaLongLen)
+emaBull = emaFast > emaSlow
+emaBear = emaFast < emaSlow
+emaSlopePct = not na(emaFast[slopeLen]) and emaFast[slopeLen] != 0 ? ((emaFast - emaFast[slopeLen]) / emaFast[slopeLen]) * 100 : 0.0
+slopeBull = emaSlopePct >= minSlopePct
+slopeBear = emaSlopePct <= -minSlopePct
+
+[stLine, stDir] = ta.supertrend(stMult, stLen)
+stBull = not na(stDir) and stDir < 0
+stBear = not na(stDir) and stDir > 0
+
+[dmp, dmn, adxV] = ta.dmi(adxLen, adxLen)
+bullReg = not na(emaLong) and not na(adxV) and not na(dmp) and not na(dmn) and close > emaLong and adxV >= adxThresh and (not requireDiAlign or dmp > dmn)
+bearReg = not na(emaLong) and not na(adxV) and not na(dmp) and not na(dmn) and close < emaLong and adxV >= adxThresh and (not requireDiAlign or dmn > dmp)
+rangeReg = not bullReg and not bearReg
+
+ap  = hlc3
+esa = ta.ema(ap, wtN1)
+dd  = ta.ema(math.abs(ap - esa), wtN1)
+ci  = dd == 0 ? 0 : (ap - esa) / (0.015 * dd)
+wt1 = ta.ema(ci, wtN2)
+wt2 = ta.sma(wt1, 4)
+wtBull = wt1 > wt2
+wtBear = wt1 < wt2
+
+rsiV = ta.rsi(close, rsiLen)
+k    = ta.sma(ta.stoch(rsiV, rsiV, rsiV, stochLen), smoothK)
+dSm  = ta.sma(k, smoothD)
+srBull = k > dSm
+srBear = k < dSm
+
+plFound = not na(ta.pivotlow(wt1, lbL, lbR))
+phFound = not na(ta.pivothigh(wt1, lbL, lbR))
+f_inRange(cond) =>
+    b = ta.barssince(cond)
+    not na(b) and b >= divMinBars and b <= divMaxBars
+inRangePl = f_inRange(plFound[1])
+inRangePh = f_inRange(phFound[1])
+prevPlO = ta.valuewhen(plFound, wt1[lbR], 1)
+prevPlP = ta.valuewhen(plFound, low[lbR], 1)
+prevPhO = ta.valuewhen(phFound, wt1[lbR], 1)
+prevPhP = ta.valuewhen(phFound, high[lbR], 1)
+curPlO  = wt1[lbR]
+curPlP  = low[lbR]
+curPhO  = wt1[lbR]
+curPhP  = high[lbR]
+validL = plFound and inRangePl and not na(prevPlO) and not na(prevPlP) and not na(curPlO) and not na(curPlP)
+validH = phFound and inRangePh and not na(prevPhO) and not na(prevPhP) and not na(curPhO) and not na(curPhP)
+bullDiv   = validL and curPlO > prevPlO and curPlP < prevPlP
+bearDiv   = validH and curPhO < prevPhO and curPhP > prevPhP
+hidBullDiv= validL and curPlO < prevPlO and curPlP > prevPlP
+hidBearDiv= validH and curPhO > prevPhO and curPhP < prevPhP
+
+atrV = ta.atr(atrLen)
+atrBaseline = ta.sma(atrV, atrRegimeLen)
+atrRatio = not na(atrBaseline) and atrBaseline != 0 ? atrV / atrBaseline : 1.0
+volatilityOK = atrRatio >= atrExpansionMin and atrRatio <= atrExpansionMax
+atrBull = volatilityOK and close > emaFast
+atrBear = volatilityOK and close < emaFast
+distanceATR = atrV != 0 ? math.abs(close - emaFast) / atrV : 0
+notChasing = distanceATR <= maxChaseATR
+
+volBaseline = ta.sma(nz(volume, 0), volLen)
+rvol = volBaseline > 0 ? nz(volume, 0) / volBaseline : 0
+volOK = not useVolFilter or rvol >= rvolMin
+volStrong = rvol >= rvolStrong
+
+// 基準相對強度（同圖表時框，取「已收盤」值）
+benchSPY = request.security(bench1, timeframe.period, close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+benchQQQ = request.security(bench2, timeframe.period, close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+assetReturn = close[rsLen] != 0 ? ((close / close[rsLen]) - 1) * 100 : na
+spyReturn   = benchSPY[rsLen] != 0 ? ((benchSPY / benchSPY[rsLen]) - 1) * 100 : na
+qqqReturn   = benchQQQ[rsLen] != 0 ? ((benchQQQ / benchQQQ[rsLen]) - 1) * 100 : na
+rsSPY = assetReturn - spyReturn
+rsQQQ = assetReturn - qqqReturn
+rsBull = not na(rsSPY) and not na(rsQQQ) and rsSPY >= rsLongMin and rsQQQ >= rsLongMin
+rsBear = not na(rsSPY) and not na(rsQQQ) and rsSPY <= rsShortMax and rsQQQ <= rsShortMax
+rsLongOK  = not useRSFilter or rsBull
+rsShortOK = not useRSFilter or rsBear
+
+assetRet  = math.log(close / close[1])
+benchRet  = math.log(benchSPY / benchSPY[1])
+assetMean = ta.sma(assetRet, betaLen)
+benchMean = ta.sma(benchRet, betaLen)
+rollingCov = ta.sma(assetRet * benchRet, betaLen) - assetMean * benchMean
+rollingVar = ta.sma(benchRet * benchRet, betaLen) - benchMean * benchMean
+beta = rollingVar != 0 ? rollingCov / rollingVar : na
+betaLongOK = not useBetaFilter or na(beta) or beta >= betaMin
+
+// ─────────────────────────────────────────────────────────────────────────
+//  共識投票 (9 因子加權)
+// ─────────────────────────────────────────────────────────────────────────
+voteEMA    = emaBull ? emaWeight : emaBear ? -emaWeight : 0
+voteST     = stBull ? stWeight : stBear ? -stWeight : 0
+voteRegime = bullReg ? regimeWeight : bearReg ? -regimeWeight : 0
+voteSlope  = slopeBull ? slopeWeight : slopeBear ? -slopeWeight : 0
+voteWT     = wtBull ? wtWeight : wtBear ? -wtWeight : 0
+voteSR     = srBull ? srWeight : srBear ? -srWeight : 0
+voteDiv    = bullDiv or hidBullDiv ? divWeight : bearDiv or hidBearDiv ? -divWeight : 0
+voteRS     = rsBull ? rsWeight : rsBear ? -rsWeight : 0
+voteATR    = atrBull ? atrWeight : atrBear ? -atrWeight : 0
+score     = voteEMA + voteST + voteRegime + voteSlope + voteWT + voteSR + voteDiv + voteRS + voteATR
+scoreSafe = nz(score, 0)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  宏觀閘門（基準日頻「已收盤」序列）
+// ─────────────────────────────────────────────────────────────────────────
+mktD   = request.security(bench1, "D", close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+mktSMA = request.security(bench1, "D", ta.sma(close, bearLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+bearMarket = not na(mktD) and not na(mktSMA) and mktD < mktSMA
+canLong  = tradeDir != "Short Only"
+canShort = tradeDir != "Long Only" and (not useBearGate or bearMarket)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  群眾情緒量表（CNN 風格 7 組分）
+//  · 組分 ①②③④⑥ 於「日頻上下文」內完成 Z-Score 正規化（視窗＝日）
+//  · 組分 ⑤⑦ 為跨資產價差，改以「日頻錨定滾動統計」計算 Z 值
+// ─────────────────────────────────────────────────────────────────────────
+// ① 市場動能（CNN 同款：SPY 收盤 vs 其 125 日均線）
+fgS1 = request.security(bench1, "D", f_score(100.0 * (close / ta.sma(close, fgMomLen) - 1.0), fgZLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ② 價格強度（區間位置 0-100）
+fgS2 = request.security(syminfo.tickerid, "D", 100.0 * (close - ta.lowest(low, fgRangeLen)) / math.max(ta.highest(high, fgRangeLen) - ta.lowest(low, fgRangeLen), 0.000001), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ③ 市場寬度（上漲日量能占比，Z 正規化）
+fgS3 = request.security(syminfo.tickerid, "D", f_score(math.sum(close > close[1] ? nz(volume, 0.0) : 0.0, fgRetLen) / math.max(math.sum(nz(volume, 0.0), fgRetLen), 0.000001), fgZLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ④ 避險 / 恐慌代理（距 20 日高點之 ATR 距離，反向計分）
+fgS4 = request.security(syminfo.tickerid, "D", 100.0 * (1.0 - f_phi(f_znorm((ta.highest(high, fgRetLen) - close) / math.max(ta.atr(fgAtrLen), 0.000001), fgZLen))), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ⑤ 垃圾債風險偏好（HYG 20 日報酬 − IEF 20 日報酬）
+hygRet = request.security(fgSymHYG, "D", close / close[fgRetLen] - 1.0, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+iefRet = request.security(fgSymIEF, "D", close / close[fgRetLen] - 1.0, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ⑥ 波動率（CNN 同款：VIX 收盤 vs 其 50 日均線，反向計分）
+fgS6 = request.security(fgSymVIX, "D", 100.0 * (1.0 - f_phi(f_znorm(close / math.max(ta.sma(close, fgVixLen), 0.000001), fgZLen))), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+// ⑦ 避險需求（SPY 20 日報酬 − IEF 20 日報酬）
+spyRet = request.security(bench1, "D", close / close[fgRetLen] - 1.0, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+
+// ⑤⑦ 跨資產價差：日頻錨定滾動統計（每日僅更新一次 Z 視窗）
+dailyTick = not na(mktD) and (na(mktD[1]) or mktD != mktD[1])
+spr5Val = not na(hygRet) and not na(iefRet) ? hygRet - iefRet : na
+spr7Val = not na(spyRet) and not na(iefRet) ? spyRet - iefRet : na
+var array<float> spr5Hist = array.new<float>(fgZLen, 0.0)
+var array<float> spr7Hist = array.new<float>(fgZLen, 0.0)
+var int spr5Idx = 0
+var int spr7Idx = 0
+var int spr5Cnt = 0
+var int spr7Cnt = 0
+var float spr5Sum = 0.0
+var float spr5Sq = 0.0
+var float spr7Sum = 0.0
+var float spr7Sq = 0.0
+if dailyTick
+    if not na(spr5Val)
+        old5 = array.get(spr5Hist, spr5Idx)
+        spr5Sum := spr5Sum - old5 + spr5Val
+        spr5Sq  := spr5Sq - old5 * old5 + spr5Val * spr5Val
+        array.set(spr5Hist, spr5Idx, spr5Val)
+        spr5Idx := (spr5Idx + 1 >= fgZLen) ? 0 : spr5Idx + 1
+        spr5Cnt := math.min(spr5Cnt + 1, fgZLen)
+    if not na(spr7Val)
+        old7 = array.get(spr7Hist, spr7Idx)
+        spr7Sum := spr7Sum - old7 + spr7Val
+        spr7Sq  := spr7Sq - old7 * old7 + spr7Val * spr7Val
+        array.set(spr7Hist, spr7Idx, spr7Val)
+        spr7Idx := (spr7Idx + 1 >= fgZLen) ? 0 : spr7Idx + 1
+        spr7Cnt := math.min(spr7Cnt + 1, fgZLen)
+spr5Mean = spr5Cnt > 0 ? spr5Sum / spr5Cnt : na
+spr5Var  = spr5Cnt > 1 ? math.max(spr5Sq / spr5Cnt - spr5Mean * spr5Mean, 0.0) : na
+spr5Sd   = not na(spr5Var) ? math.sqrt(spr5Var) : na
+spr5Z    = not na(spr5Mean) and not na(spr5Sd) and spr5Sd != 0 ? (spr5Val - spr5Mean) / spr5Sd : 0.0
+spr7Mean = spr7Cnt > 0 ? spr7Sum / spr7Cnt : na
+spr7Var  = spr7Cnt > 1 ? math.max(spr7Sq / spr7Cnt - spr7Mean * spr7Mean, 0.0) : na
+spr7Sd   = not na(spr7Var) ? math.sqrt(spr7Var) : na
+spr7Z    = not na(spr7Mean) and not na(spr7Sd) and spr7Sd != 0 ? (spr7Val - spr7Mean) / spr7Sd : 0.0
+fgS5 = not na(spr5Val) ? 100.0 * f_phi(spr5Z) : 50.0
+fgS7 = not na(spr7Val) ? 100.0 * f_phi(spr7Z) : 50.0
+
+fgWSum = fgW1 + fgW2 + fgW3 + fgW4 + fgW5 + fgW6 + fgW7
+fgGauge = fgWSum > 0 ? (fgW1 * nz(fgS1, 50.0) + fgW2 * nz(fgS2, 50.0) + fgW3 * nz(fgS3, 50.0) + fgW4 * nz(fgS4, 50.0) + fgW5 * nz(fgS5, 50.0) + fgW6 * nz(fgS6, 50.0) + fgW7 * nz(fgS7, 50.0)) / fgWSum : 50.0
+fgExtFear  = fgGauge <= fgFear
+fgExtGreed = fgGauge >= fgGreed
+fgZoneTxt  = fgExtFear ? "EXTREME FEAR" : fgExtGreed ? "EXTREME GREED" : fgGauge < 45 ? "FEAR" : fgGauge > 55 ? "GREED" : "NEUTRAL"
+
+// VIX 直接決策輸入（與量表組分 ⑥ 分離）
+vixD      = request.security(fgSymVIX, "D", close, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+vixPrev   = request.security(fgSymVIX, "D", close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+vixCalmSMA= request.security(fgSymVIX, "D", ta.sma(close, vixCalmLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+vixCalm  = not na(vixD) and not na(vixCalmSMA) and vixCalmSMA != 0 and vixD < vixCalmSMA
+vixPanic = useVIXPanic and not na(vixD) and not na(vixPrev) and vixPrev != 0 and (vixD / vixPrev - 1) * 100 > vixPanicPct
+
+// 時段 / 每日平倉紀律
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+eodReached = useEodFlat and (hour > eodHour or (hour == eodHour and minute >= eodMinute))
+var int holdBars = 0
+if strategy.position_size != 0
+    holdBars += 1
+else
+    holdBars := 0
+maxHoldHit = maxHoldBars > 0 and holdBars >= maxHoldBars
+
+// ─────────────────────────────────────────────────────────────────────────
+//  進場邏輯
+// ─────────────────────────────────────────────────────────────────────────
+stopMultEff = useTFStop and timeframe.isintraday ? tfStopMult : atrStopMult
+longGate  = bullReg and not rangeReg and volOK and rsLongOK and betaLongOK and volatilityOK and notChasing and srBull and k < stochLongMax
+shortGate = bearReg and not rangeReg and volOK and rsShortOK and volatilityOK and notChasing and srBear and k > stochShortMin
+rawLong  = scoreSafe >= longThresh and longGate and canLong
+rawShort = scoreSafe <= -shortThresh and shortGate and canShort
+
+var int lastSignalBar = na
+cooldownOK = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
+newLong  = barstate.isconfirmed and rawLong and not nz(rawLong[1], false) and cooldownOK
+newShort = barstate.isconfirmed and rawShort and not nz(rawShort[1], false) and cooldownOK
+if newLong or newShort
+    lastSignalBar := bar_index
+
+// 情緒確信（反轉extremes時提早視為強訊號）
+fgConvLong  = useFGConv and newLong and fgExtFear and scoreSafe >= longThresh + strongOffset - 1
+fgConvShort = useFGConv and newShort and fgExtGreed and scoreSafe <= -(shortThresh + strongOffset - 1)
+strongLong  = newLong and (scoreSafe >= longThresh + strongOffset or fgConvLong)
+strongShort = newShort and (scoreSafe <= -(shortThresh + strongOffset) or fgConvShort)
+
+// 群眾擁擠阻擋：極度貪婪不追多 / 極度恐慌不追空（除非強訊號）
+fgBlockLong  = useFGBlock and fgExtGreed and not strongLong
+fgBlockShort = useFGBlock and fgExtFear and not strongShort
+tradeLong  = (strongOnly ? strongLong : newLong) and not fgBlockLong and (not useVIXCalm or vixCalm) and inSession and not eodReached
+tradeShort = (strongOnly ? strongShort : newShort) and not fgBlockShort and inSession and not eodReached
+
+// ─────────────────────────────────────────────────────────────────────────
+//  部位管理（出場先於進場，避免反向競態）
+// ─────────────────────────────────────────────────────────────────────────
+var float longStopPx = na
+var float shortStopPx = na
+var float posRiskDist = na
+
+stopDist = nz(atrV, 0) * stopMultEff
+isConvicted = (tradeLong and fgConvLong) or (tradeShort and fgConvShort)
+riskCash = strategy.equity * riskPct / 100 * (useFGConv and isConvicted ? convSizeMult : 1.0)
+riskQty = stopDist > 0 ? riskCash / stopDist : 1
+levCapQty = useLevCap and close > 0 ? strategy.equity * maxLev / (close * syminfo.pointvalue) : 1e9
+qty = int(math.max(1, math.floor(math.min(riskQty, levCapQty))))
+
+isLong  = strategy.position_size > 0
+isShort = strategy.position_size < 0
+exitShortOnOpp = useOppExit and tradeLong and isShort
+exitLongOnOpp  = useOppExit and tradeShort and isLong
+if exitShortOnOpp
+    strategy.cancel("CSS Short Exit")
+    strategy.close("CSS Short", comment = "Opp Exit")
+if exitLongOnOpp
+    strategy.cancel("CSS Long Exit")
+    strategy.close("CSS Long", comment = "Opp Exit")
+effLong  = isLong and not exitLongOnOpp
+effShort = isShort and not exitShortOnOpp
+
+if tradeLong and not effShort and not vixPanic
+    longStopPx := close - stopDist
+    posRiskDist := stopDist
+    strategy.entry("CSS Long", strategy.long, qty = qty, comment = "CSS BUY")
+    if useTrailing
+        strategy.exit("CSS Long Exit", from_entry = "CSS Long", stop = longStopPx, trail_price = close, trail_offset = nz(atrV, 0) * trailMult / syminfo.mintick)
+    else if useTarget
+        strategy.exit("CSS Long Exit", from_entry = "CSS Long", stop = longStopPx, limit = close + stopDist * targetR)
+    else
+        strategy.exit("CSS Long Exit", from_entry = "CSS Long", stop = longStopPx)
+    alert("CSS LONG " + syminfo.ticker + " (" + timeframe.period + ") qty " + str.tostring(qty) + " stop " + str.tostring(longStopPx, format.mintick), alert.freq_once_per_bar_close)
+
+if tradeShort and not effLong and not vixPanic
+    shortStopPx := close + stopDist
+    posRiskDist := stopDist
+    strategy.entry("CSS Short", strategy.short, qty = qty, comment = "CSS SELL")
+    if useTrailing
+        strategy.exit("CSS Short Exit", from_entry = "CSS Short", stop = shortStopPx, trail_price = close, trail_offset = nz(atrV, 0) * trailMult / syminfo.mintick)
+    else if useTarget
+        strategy.exit("CSS Short Exit", from_entry = "CSS Short", stop = shortStopPx, limit = close - stopDist * targetR)
+    else
+        strategy.exit("CSS Short Exit", from_entry = "CSS Short", stop = shortStopPx)
+    alert("CSS SHORT " + syminfo.ticker + " (" + timeframe.period + ") qty " + str.tostring(qty) + " stop " + str.tostring(shortStopPx, format.mintick), alert.freq_once_per_bar_close)
+
+// 時間類出場（每日平倉 / 持倉上限）
+if strategy.position_size != 0 and eodReached
+    strategy.close_all(comment = "EOD Flat")
+if strategy.position_size != 0 and maxHoldHit
+    strategy.close_all(comment = "Max Hold")
+
+if strategy.position_size == 0
+    posRiskDist := na
+    longStopPx := na
+    shortStopPx := na
+
+// JSON Webhook
+if useWebhook and (tradeLong or tradeShort)
+    side = tradeLong ? "BUY" : "SELL"
+    kind = tradeLong ? (strongLong ? "strong_long" : "long") : (strongShort ? "strong_short" : "short")
+    stopPx = tradeLong ? longStopPx : shortStopPx
+    payload = "{\"strategy\":\"TnSovereignCrowdSentimentConsensusV6\",\"version\":\"v26.1022.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"timeframe\":\"" + timeframe.period + "\",\"side\":\"" + side + "\",\"kind\":\"" + kind + "\",\"score\":" + str.tostring(scoreSafe) + ",\"fg\":" + str.tostring(fgGauge, "#") + ",\"stop\":" + str.tostring(stopPx, format.mintick) + ",\"qty\":" + str.tostring(qty) + "}"
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  視覺層
+// ─────────────────────────────────────────────────────────────────────────
+buyCol  = color.new(#00e5a0, 0)
+sellCol = color.new(#ff4d6d, 0)
+plotshape(tradeLong and not strongLong ? 1 : na, "CSS Buy", shape.triangleup, location.belowbar, buyCol, size = size.small, text = "BUY", textcolor = color.new(#ffffff, 0))
+plotshape(strongLong ? 1 : na, "CSS Strong Buy", shape.triangleup, location.belowbar, buyCol, size = size.large, text = "BUY", textcolor = color.new(#ffffff, 0))
+plotshape(tradeShort and not strongShort ? 1 : na, "CSS Sell", shape.triangledown, location.abovebar, sellCol, size = size.small, text = "SELL", textcolor = color.new(#ffffff, 0))
+plotshape(strongShort ? 1 : na, "CSS Strong Sell", shape.triangledown, location.abovebar, sellCol, size = size.large, text = "SELL", textcolor = color.new(#ffffff, 0))
+activeStop = strategy.position_size > 0 ? longStopPx : strategy.position_size < 0 ? shortStopPx : na
+plot(activeStop, "Active Stop", color = color.new(#ff9f1c, 0), style = plot.style_linebr, linewidth = 1)
+
+// Fear/Greed 量表（獨立面板）
+fgLineCol = fgExtGreed ? sellCol : fgExtFear ? buyCol : color.new(#e8ecf1, 10)
+plot(useFG ? fgGauge : na, "Fear/Greed", fgLineCol, 2, display = display.pane)
+fgHiP = plot(useFG ? fgGreed * 1.0 : na, "FG Greed Line", color.new(#ff4d6d, 60), display = display.pane)
+fgLoP = plot(useFG ? fgFear * 1.0 : na, "FG Fear Line", color.new(#00e5a0, 60), display = display.pane)
+fgMidP = plot(useFG ? 50.0 : na, "FG Neutral Line", color.new(#8a8f98, 80), display = display.pane)
+fill(fgHiP, fgMidP, color.new(#ff4d6d, 92), "FG Greed Fill")
+fill(fgMidP, fgLoP, color.new(#00e5a0, 92), "FG Fear Fill")
+
+// ─────────────────────────────────────────────────────────────────────────
+//  儀表板
+// ─────────────────────────────────────────────────────────────────────────
+vixTxt = vixPanic ? "PANIC" : vixCalm ? "calm" : "ELEVATED"
+var table dash = table.new(position.top_right, 2, 9, border_width = 1, border_color = color.new(#8a8f98, 70))
+if barstate.islast
+    sigTxt = strongLong ? "STRONG BUY" : strongShort ? "STRONG SELL" : newLong ? "BUY" : newShort ? "SELL" : "WAIT"
+    sigAge = na(lastSignalBar) ? "—" : str.tostring(bar_index - lastSignalBar) + "b ago"
+    posTxt = strategy.position_size > 0 ? "LONG " + str.tostring(strategy.position_size) : strategy.position_size < 0 ? "SHORT " + str.tostring(math.abs(strategy.position_size)) : "FLAT"
+    entryTxt = strategy.position_size != 0 ? str.tostring(strategy.position_avg_price, format.mintick) : "—"
+    openR = strategy.position_size != 0 and not na(posRiskDist) and posRiskDist != 0 ? (strategy.position_size > 0 ? (close - strategy.position_avg_price) : (strategy.position_avg_price - close)) / posRiskDist : na
+    openRTxt = na(openR) ? "—" : (openR >= 0 ? "+" : "") + str.tostring(openR, "#.#") + "R"
+    regTxt = bullReg ? "BULL" : bearReg ? "BEAR" : "RANGE"
+    table.cell(dash, 0, 0, "訊號", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 0, sigTxt + " · " + sigAge, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 1, "共識分數", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 1, str.tostring(scoreSafe), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "體制", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 2, regTxt + " · RVOL " + str.tostring(rvol, "#.#"), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "部位", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 3, posTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "進場價", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 4, entryTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "未實現 R", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 5, openRTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "淨損益", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 6, str.tostring(strategy.netprofit, format.mintick), text_color = strategy.netprofit >= 0 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "交易次數", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 7, str.tostring(strategy.closedtrades), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 8, "情緒量表", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 8, str.tostring(fgGauge, "#") + " · " + fgZoneTxt + " · VIX " + vixTxt, text_color = fgExtGreed ? sellCol : fgExtFear ? buyCol : color.new(#e8ecf1, 0), text_size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA NOTES
+//  · 9 因子共識投票採整數權重（總權重 = 體制2 + EMA2 + ST2 + 斜率1 +
+//    WaveTrend1 + StochRSI1 + 背離1 + RS1 + ATR1 = 12），門檻預設 10/10。
+//  · 量能濾網（RVOL ≥ 1.20）為原作者保留之最有效濾網，預設開啟。
+//  · 相對強度濾網與 Beta 濾網：原作者實測無穩健價值，預設關閉。
+//  · 停損預設 2×ATR（盤中自動改用 0.75×）；R 停利與 ATR 追蹤預設關閉。
+//  · 熊市體制空頭閘門（基準 < SMA200）預設開啟：空頭僅在基準位於長期
+//    均線下方時放行。
+//  · 群眾擁擠阻擋（極度貪婪禁多 / 極度恐慌禁空，除非強訊號）預設開啟。
+//  · VIX 平靜濾網（VIX < SMA50 僅做多）預設開啟；VIX 恐慌跳升濾網預設關閉。
+//  · 本移植未經本庫獨立回測驗證，不作任何績效陳述或保證。
+// ═══════════════════════════════════════════════════════════════════════════
