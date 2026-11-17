@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 190 個已實體化主權策略，分 14 大類（v26.1022.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 192 個已實體化主權策略，分 14 大類（v26.1118.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -44,21 +44,28 @@
 |------|------|------|
 | **Sovereign Core** | 13 | 基礎主權框架與多時框日內系統 |
 | **Trend & Momentum** | 24 | 趨勢追蹤、動量振盪、均線系統、WaveTrend v4、XAU/USD 優化 5m、MA 交叉匯流、印度 NSE 客製匯流期貨、日曆排程擺盪、MA 關係六維診斷引擎、Donchian 突破拉回、商品期貨六類別多時框評分矩陣、ATR 單向棘輪帶趨勢追蹤（回測再進場 + R 倍數停利 + 風險距離定倉） |
-| **Mean Reversion & Oscillator** | 25 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間、RSI 狀態機隱藏背離匯流、投降式耗竭反轉（深度定位 × 耗竭證據 × 體制閘門） |
+| **Mean Reversion & Oscillator** | 26 | 均值回歸、超買超賣反轉、Z-Score 波動率反轉、PDH/PDL 反轉、IB 均值回歸、樞軸 SuperTrend Fade、BTC 多時框均值回歸、VWAP 拉回 Dip-Buy、Connors R2 短週期 RSI、振盪器背離區間、RSI 狀態機隱藏背離匯流、投降式耗竭反轉（深度定位 × 耗竭證據 × 體制閘門）、IBS 內部 K 棒強度均值回歸（收盤位置 × 拉回帶 × ATR 風險護欄） |
 | **Volatility & Breakout** | 26 | 波動率突破、壓縮釋放、通道策略、多時段 ORB、體制自適應、NQ NY OPR 突破、PineFlow ORB |
 | **Market Structure & Price Action** | 39 | SMC/ICT、波段結構、FVG/IFVG、訂單塊、CISD 結構破壞、反轉品質分級、價值區拒絕、Melgo 六態分類、PO3 三相位引擎、IB+VWAP 匯流、黃金 IB 突破拉回、PineFlow ICT 三層執行、ICT/SMC M1 CRT 狙擊、ICT 流動性掃蕩反轉、樞軸區間 Break-and-Retest ZoneFlow、多時框 SNR/QMR/RNS 共流感合、反轉引擎評分斜坡、NY Killzone 跨資產 SMT+IFVG 回測 |
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
-| **Matrix & Machine Learning** | 10 | KNN、OLS、因果權重、蒙地卡羅 |
+| **Matrix & Machine Learning** | 11 | KNN、OLS、因果權重、蒙地卡羅、歷史相似態 k-NN 交易重播（同設定鄰居 × R 倍數下界 × 成本門檻） |
 | **Multi-Agent, Swarm & Macro** | 13 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散、群眾情緒共識（9 因子加權投票 + CNN 風格 Fear & Greed 量表作為進場閘門） |
 | **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
 | **DCA & Webhook** | 2 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接、選擇權結構路由器（波動率體制引擎 → 跨式/價差/鐵鷹結構仲裁 → 多腳訂單負載 + 雙通道 Webhook） |
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **190** | 主權策略矩陣（v26.1022.0630 更新） |
+| **Total** | **192** | 主權策略矩陣（v26.1118.0630 更新） |
 
 
+> **最新加入（v26.1118.0630）**: 獵頭審計 #148 — 檢索途徑：`date` 物理時間 2026-11-18 06:30 CST（版號 `v26.1118.0630`，無小時偏移）+ GitHub Search API（7 組關鍵詞：`pine script v6 strategy created:>2026-10-20` / `pinescript strategy v6 created:>2026-10-20` / `tradingview pine strategy created:>2026-10-20` / `"@version=6" strategy created:>2026-10-20` / `pine script strategy pushed:>2026-11-01` / `pinescript strategy updated:>2026-11-01` / `tradingview strategy created:>2026-11-01`，64 個去重候選）+ tree API `git/trees/<branch>?recursive=1` 逐檔掃描 `//@version=6` 與 `strategy()` + agent-browser 檢索 GitHub repositories 頁與 TradingView `/scripts/?script_type=strategies`（Open-source only）。出線 **2 枚全新合格 strategy() 實體**（皆具明確 MIT 授權、自足無 `import`、v6）：
+>
+> 1. **casoon/pine-scripts**（**MIT**，Copyright 2026 WavesUnchained）`strategies/similar_market_states/similar_market_states_strategy.pine` v1.1.0（500 行 v6 `strategy()`）：**歷史相似態 k-NN 交易重播** —【四維特徵（RSI / 動量÷ATR / EMA 距離÷ATR / 相對波動率）逐維以自身滾動 stdev 正規化 → 基礎設定（EMA 趨勢 + 同向動量）限制鄰居只來自同設定歷史 K 棒 → 非重疊、絕對 bar_index 錨定取樣，最新案例 s+horizon ≤ bar_index−1 → 距離 = 四維 `log(1+|Δ|/sd)` 平均 → 保留 k 個最近鄰】→ **以真實交易條件重播**（進場 open[s+1]、停損 close[s]∓2ATR、持有 4 根收盤出場、跳空以開價格承接，換算 R 倍數）→ **決策下界**（均值 − 1 SE > 成本 R + 安全邊際，且有利比例 ≥60%）→ 風險距離定倉 + 槓桿封頂 + 日線體制 + RVOL + JSON Webhook。全庫既有 kNN 檔皆為 Lorentzian 距離 + 收盤方向標籤，`grep -ril "similar market states"` 零命中 → 判定全新。主權化修補原作者 `atr≤0` 除零、`array.indexof(array.max())` 重複距離錯配 outcome、移除展示性成本／隨機基準表與全部績效宣稱。移植為 `TnSovereignSimilarMarketStatesV6`，歸 **Matrix & Machine Learning 10→11**。
+> 2. **Aitradingroom/ai-trading-room**（**MIT**，Copyright 2026 AI Trading Room）`strategies/ibs-mean-reversion/ibs_mean_reversion.pine`（28 行 v6 `strategy()`）：**IBS 內部 K 棒強度均值回歸**（IBS=(close−low)/(high−low) 低檔 + 收盤低於「10 日高點 − 2.5×25 日平均區間」拉回帶進場，收盤突破前日高點出場）。全庫 `grep -il "ibs"` 既有命中皆為 `i_ibStartHour`（Initial Balance）或 Fibonacci 子串，無以 IBS 為進場證據者 → 判定全新維度。主權化補 ATR 硬停損 / 2.5R 停利 / 1R 保本 / 10 根持倉上限（原作者無停損）、移除 `startYear/endYear` 日期窗改為時段／每日平倉／冷卻紀律、`process_orders_on_close` 由 true 改 false 且僅已收盤 K 棒判定、風險距離定倉 + 槓桿封頂、日線 EMA 體制 + RVOL、選配空頭鏡像、JSON Webhook，並移除全部績效宣稱字串。移植為 `TnSovereignIbsMeanReversionV6`，歸 **Mean Reversion & Oscillator 25→26**。
+>
+> 其餘候選皆排除：**TradingView** 社群策略頁（agent-browser 開啟 "Open-source only"，本窗可見 Gaussian Trend Targets 3R Exits / Volume Z-Score / Hour-Open Maker Scalper / EURUSD London Sweep 等）因 House Rules 明示 republishing 須遵守其條款，且本庫歷次移植均來自具明確 OSS 授權之 GitHub 倉，予以排除；**GitHub 無 LICENSE 依規訓排除**：kaile-liu/Trade-Execution-Management-System、pwintsan4238/gold-ai-trading-bot、DexWilder/algo-lab、shoujiaxin/tradingview-scripts、Aksee123/nq1_Scalping_Strategy、Mark-quantcode/pine-rsi-bollinger 等；**工具／runtime 非策略實體**：pineforge-4pass/pineforge-engine（Apache-2.0 C++ 引擎）、PyneSys/pynecore、be-thomas/OpenPineScript、ricksimpsontrading/Pine-Workspace、AKIBUZZAMAN-AKIB/pine-alpha、FaustoS88/Pydantic-AI-Pinescript-Expert；**v5 且高度依賴外部 library 或 indicator()**：dr-lobo/open-harmonics-pine（MPL-2.0，`import HeWhoMustNotBeNamed/rzigzag/10` 且為 v5，和諧形態命題雖新但不符自足 v6 規訓）；**已被現庫覆蓋**：WickCheck/pine-strategies（MIT，RSI2 / FVG / London breakout 皆已覆蓋）、TradingSignalBot/tradingview-strategies（MIT，ORB / break-and-retest / Supertrend / EMA 已覆蓋）、jayadevrana 系列（Supertrend / EMA / Supertrend+RSI 等已覆蓋）、casoon 其餘新策略（wavetrend v4 / overextension reversion / chandelier flip radar / MA relationship / oscillator divergence zones 已由 `tn_wavetrend_v4_v6` / `TnSovereignWaveTrendV20` / `tn_chandelier_flip_radar_v6` / `TnSovereignMaRelationshipV6` / `TnSovereignOscDivZonesV6` 覆蓋；kestrel opportunity lens 為 evaluation harness 非實際交易策略）。本次按規訓**新增 2 策略（190→192）**：Matrix & Machine Learning 10→11、Mean Reversion & Oscillator 25→26。Dashboard（status-bar + 2 張卡片 `<ul>`）/ 首頁 README / strategies README 版本完全對位 v26.1118.0630。
+>
 > **最新加入（v26.1022.0630）**: 獵頭審計 #147 — 檢索途徑：GitHub Search API（repository search 多組關鍵詞 `pine script v6 strategy` / `pinescript strategy v6` / `tradingview pine strategy` / `sentiment pine script` / `capitulation pine script`，tree API `git/trees/HEAD?recursive=1` 逐檔掃描 `//@version=6` 與 `strategy()` 宣告；**code search API 未認證回 `401 Requires authentication`**，改以 repository search + tree API 繞過）+ TradingView 社群策略頁（`/scripts/?script_type=strategies`，agent-browser 點選 "Open-source only" 篩選，取得 27 支公開原始碼逐支比對 `//@version=\d/` 與 `strategy()`）。出線 **2 枚全新合格 strategy() 實體**（皆具明確 OSS 授權、自足無 `import`、括號完全配對）：
 >
 > 1. **kdricha0602/kernal-cipher**（**MIT**，Copyright 2026 Korben Richards）`Kernal-Cipher-Strategy.pine`（518 行，v6 `strategy()`）：**9 因子加權共識投票**【EMA 方向 / Supertrend / ADX 體制 / EMA 斜率 / WaveTrend / StochRSI / WaveTrend 樞軸背離（含隱藏背離）/ 相對強度（雙基準）/ ATR 波動品質】整數權重加總為共識分數（門檻 10／總權重 12，偏移 2 為強訊號）→ **門禁矩陣**【量能 RVOL ≥ 1.20 / ATR 相對值帶 0.80–3.00 / 追價距離 ≤ 1.5 ATR / StochRSI 外緣限制 / RS 與 Beta 濾網（預設關閉）/ 熊市體制空頭閘門：基準日收盤 < SMA(200)】→ **CNN 風格 7 組分 Fear & Greed 量表**【① 市場動能（SPY vs 其 125 日均線）/ ② 價格強度（252 日區間位置）/ ③ 市場寬度（上漲日量能占比）/ ④ 避險恐慌代理（距 20 日高點之 ATR 距離，反號）/ ⑤ 垃圾債風險偏好（HYG−IEF 20 日報酬）/ ⑥ 波動率（VIX vs 其 50 日均線，反號）/ ⑦ 避險需求（SPY−IEF 20 日報酬）】，Z 正規化以 Abramowitz & Stegun 7.1.26 erf 近似常態 CDF】→ **群眾擁擠阻擋**（極度貪婪區禁多、極度恐慌區禁空，除非強訊號）+ **VIX 平靜濾網**（VIX < SMA(50) 僅做多）→ **風險距離定倉**（風險金額 ÷ ATR 停損距離）+ **反向訊號出場** + ATR 停損（選配 R 停利 / ATR 追蹤停損）。**全庫 `grep -ril "fear" *.pine` 零命中**（`sentiment_macro_sovereign_v6` 使用付費 `request.seed()` 取外部情緒，免費環境不可用）→ 判定為**庫內首個「情緒量表直接作為進場閘門」**之策略。主權化重寫並修補原作者 README 自述未解之 **`invalid symbol` runtime error**（全部 `request.security` 加入 `ignore_invalid_symbol = true`，標的不可用時回傳 `na` 由守門判斷接管）、日頻序列改 `lookahead_on` 取已收盤值以消除盤中重繪、FG 量表時框錯配修正（組分 ①②③④⑥ 改於日頻上下文內正規化、跨資產價差組分 ⑤⑦ 改以日頻錨定滾動統計計算 Z 值）、名目槓桿封頂、時段／每日平倉／持倉上限紀律、JSON Webhook 與因果儀表板，並移除全部績效宣稱字串。移植為 `TnSovereignCrowdSentimentConsensusV6`，歸 **Multi-Agent, Swarm & Macro 12→13**。

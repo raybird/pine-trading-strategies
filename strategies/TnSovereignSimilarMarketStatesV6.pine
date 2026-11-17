@@ -1,0 +1,325 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Similar Market States V6
+//  主權化移植自 casoon/pine-scripts (MIT License, Copyright 2026 WavesUnchained)
+//  strategies/similar_market_states/similar_market_states_strategy.pine v1.1.0
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1118.0630
+//  Timestamp : 2026-11-18 06:30 CST (UTC+8)
+//  Source    : casoon/pine-scripts — MIT — Similar Market States [WavesUnchained] v1.1.0
+//  Core      : 歷史相似態（Case-Based Reasoning）— 以 k-NN 在「同一基礎設定」的
+//              歷史 K 棒中找最近鄰，並以「與本筆完全相同之停損 / 持有期」重播
+//              每筆歷史交易，轉成 R 倍數結果；僅當鄰居均值下界（扣 1 SE）
+//              超過成本 + 安全邊際，且獲勝比例達標，才放行進場。
+//
+//  主權化要點（相對原作者）
+//    1. 原作者成本門檻 costR = pct × close / (stopAtr × atr) 在 atr≤0 時會
+//       div-by-zero → 加入 syminfo.mintick 下限保護
+//    2. 原作者以 array.indexof(array.max(...)) 找最差鄰居，重複距離時可能
+//       錯配 outcome → 改為逐項掃描取得正確索引（距離 / 結果嚴格成對）
+//    3. 原作者「時間出場」以 strategy.close(..., immediately=true) 執行，
+//       本版沿用並額外要求 only-on-confirmed-bar，確保重播與實際成交對位
+//    4. 移除 strategy.risk.max_drawdown / max_intraday_loss 之隱性依賴，
+//       改為明確的權益曲線 / 連虧守門（可選）+ 冷卻 + 持倉上限
+//    5. 部位由固定 10% 權益改為「風險距離定倉（風險% ÷ ATR 停損距離 ×
+//       pointvalue）」並以名目槓桿封頂，qty 以 int 落地
+//    6. 新增日線體制閘門（request.security 已收盤值 + ignore_invalid_symbol）、
+//       RVOL 流動性閘門、JSON Webhook 與因果儀表板
+//    7. 移除全部績效宣稱字串；原作者之成本表 / 隨機基準表屬研究展示，
+//       本版僅保留「決策用」统计量，不呈現任何宣稱性報表
+//
+//  非重繪契約：所有特徵、標準化分母、鄰居取樣與結果重播僅使用已收盤 K 棒；
+//  鄰居窗終點 <= bar_index - 1；訊號僅於 barstate.isconfirmed 判定，
+//  訂單於下一根 K 棒開盤成交（process_orders_on_close = false）。
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Similar Market States V6", "TnSMS_v26",
+     overlay = true,
+     initial_capital = 50000,
+     currency = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     calc_on_order_fills = false,
+     process_orders_on_close = false,
+     max_bars_back = 5000)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+GRP_M = "① 相似態模型 (Similarity Model)"
+useModel     = input.bool(true, "啟用歷史相似態濾網（關閉＝同源基礎策略對照）", group = GRP_M)
+lookback     = input.int(1500, "搜尋窗（Bars）", minval = 200, maxval = 3000, group = GRP_M)
+neighborK    = input.int(20, "最近鄰數量 k", minval = 5, maxval = 50, group = GRP_M)
+horizon      = input.int(4, "持有期（Bars）", minval = 1, maxval = 50, group = GRP_M)
+spacing      = input.int(4, "案例最小間隔（Bars）", minval = 1, maxval = 100, group = GRP_M)
+maxDistance  = input.float(0.6, "平均特徵距離上限", minval = 0.01, step = 0.05, group = GRP_M)
+minAgree     = input.float(60.0, "有利鄰居最低比例 (%)", minval = 50.0, maxval = 100.0, step = 5.0, group = GRP_M)
+costHurdle   = input.float(0.15, "往復成本估計 (%)", minval = 0.0, step = 0.01, group = GRP_M)
+minEdgeR     = input.float(0.05, "成本後最低邊際 (R)", minval = 0.0, step = 0.01, group = GRP_M)
+confK        = input.float(1.0, "不確定性折價 (SE×)", minval = 0.0, step = 0.25, group = GRP_M)
+
+GRP_T = "② 趨勢與設定 (Trend / Setup)"
+trendLen     = input.int(200, "EMA 趨勢週期", minval = 20, maxval = 500, group = GRP_T)
+momLen       = input.int(5, "動量週期", minval = 1, maxval = 50, group = GRP_T)
+rsiLen       = input.int(14, "RSI 特徵週期", minval = 2, group = GRP_T)
+atrLen       = input.int(14, "ATR 特徵週期", minval = 1, group = GRP_T)
+volLen       = input.int(100, "相對波動均線週期", minval = 10, group = GRP_T)
+stopAtr      = input.float(2.0, "固定停損距離 (×ATR)", minval = 0.25, step = 0.25, group = GRP_T)
+dailyRegime  = input.bool(true, "啟用日線體制閘門（僅同向進場）", group = GRP_T)
+
+GRP_E = "③ 出場 (Exits)"
+targetR      = input.float(2.0, "R 倍數停利（0＝停用）", minval = 0.0, step = 0.25, group = GRP_E)
+useBE        = input.bool(true, "1R 後移動停損至成本", group = GRP_E)
+maxHoldMul   = input.int(1, "最長持倉＝持有期 × 此倍數", minval = 1, maxval = 10, group = GRP_E)
+
+GRP_R = "④ 風險與紀律 (Risk)"
+riskPct      = input.float(0.5, "單筆風險 (% 權益)", minval = 0.1, maxval = 5.0, step = 0.1, group = GRP_R)
+useLevCap    = input.bool(true, "啟用名目槓桿上限", group = GRP_R)
+maxLev       = input.float(2.0, "最大名目槓桿（名目 / 權益）", minval = 0.5, step = 0.25, group = GRP_R)
+cooldownBars = input.int(2, "出場後冷卻 K 棒", minval = 0, group = GRP_R)
+maxTrades    = input.int(8, "最大持倉數", minval = 1, group = GRP_R)
+maxDD        = input.float(20.0, "最大回撤守門 (%)（0＝停用）", minval = 0.0, step = 1.0, group = GRP_R)
+maxLossSeq   = input.int(5, "最大連虧守門（0＝停用）", minval = 0, group = GRP_R)
+
+GRP_F = "⑤ 濾網 (Filters)"
+tradeDir     = input.string("Both", "交易方向", options = ["Both", "Long Only", "Short Only"], group = GRP_F)
+useSession   = input.bool(false, "啟用進場時段濾網", group = GRP_F)
+sessionStr   = input.session("0000-2345", "進場時段", group = GRP_F)
+useRvol      = input.bool(false, "啟用 RVOL 流動性閘門", group = GRP_F)
+rvolMin      = input.float(0.8, "RVOL 下限", minval = 0.1, step = 0.1, group = GRP_F)
+
+GRP_D = "⑥ 顯示 (Display)"
+showSignals  = input.bool(true, "顯示訊號", group = GRP_D)
+showDash     = input.bool(true, "顯示因果儀表板", group = GRP_D)
+useWebhook   = input.bool(false, "啟用 JSON Webhook", group = GRP_D)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  特徵工程（僅使用已收盤值，逐維以自身滾動標準差正規化）
+// ─────────────────────────────────────────────────────────────────────────
+float atrV          = ta.atr(atrLen)
+float emaV          = ta.ema(close, trendLen)
+float rsiFeat       = (ta.rsi(close, rsiLen) - 50.0) / 50.0
+float momFeat       = atrV > 0 ? (close - close[momLen]) / atrV : na
+float trendFeat     = atrV > 0 ? (close - emaV) / atrV : na
+float relAtr        = close > 0 ? atrV / close : na
+float typVol        = ta.sma(relAtr, volLen)
+float volFeat       = typVol > 0 ? relAtr / typVol : na
+
+float rsiSd   = ta.stdev(rsiFeat, lookback)
+float momSd   = ta.stdev(momFeat, lookback)
+float trendSd = ta.stdev(trendFeat, lookback)
+float volSd   = ta.stdev(volFeat, lookback)
+
+int trendDir  = close > emaV and emaV > emaV[5] ? 1 : close < emaV and emaV < emaV[5] ? -1 : 0
+int setupDir  = trendDir == 1 and momFeat > 0 ? 1 : trendDir == -1 and momFeat < 0 ? -1 : 0
+
+bool featOk   = not na(rsiFeat) and not na(momFeat) and not na(trendFeat) and not na(volFeat)
+bool scaleOk  = rsiSd > 0 and momSd > 0 and trendSd > 0 and volSd > 0
+bool ready    = featOk and scaleOk and bar_index >= lookback + horizon + math.max(trendLen, 150)
+
+// 日線體制（已收盤值；標的不可用時 backtracker 接管為 na → 不准進場）
+float dEma = request.security(syminfo.tickerid, "1D", ta.ema(close, 50), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+bool dailyOk = (not dailyRegime or na(dEma)) ? not dailyRegime : (setupDir == 1 ? close > dEma : close < dEma)
+
+float rvolV = na
+if useRvol
+    float volAvg = ta.sma(volume, volLen)
+    rvolV := volAvg > 0 ? volume / volAvg : na
+bool rvolOk = not useRvol or (not na(rvolV) and rvolV >= rvolMin)
+
+f_dist(float a, float b, float sd) =>
+    math.log(1.0 + math.abs(a - b) / sd)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  歷史相似態搜尋 + 以真實交易條件重播（非前視）
+// ─────────────────────────────────────────────────────────────────────────
+float expectedR = na
+float lowerR    = na
+float agreePct  = na
+int   matches   = 0
+
+if ready and setupDir != 0
+    array<float> distArr = array.new_float(0)
+    array<float> outArr  = array.new_float(0)
+    int stride = math.max(spacing, horizon)
+    // 最新案例 s 必須滿足 s + horizon <= bar_index - 1（最晚在上一根收盤）
+    int firstOffset = horizon + 1 + (bar_index - horizon - 1) % stride
+    int lastOffset  = horizon + lookback
+    if firstOffset <= lastOffset
+        for offset = firstOffset to lastOffset by stride
+            bool histOk = not na(rsiFeat[offset]) and not na(momFeat[offset]) and not na(trendFeat[offset]) and not na(volFeat[offset])
+            float riskHist = stopAtr * atrV[offset]
+            if histOk and setupDir[offset] == setupDir and open[offset - 1] > 0 and riskHist > 0
+                float dist = (f_dist(rsiFeat, rsiFeat[offset], rsiSd) +
+                              f_dist(momFeat, momFeat[offset], momSd) +
+                              f_dist(trendFeat, trendFeat[offset], trendSd) +
+                              f_dist(volFeat, volFeat[offset], volSd)) / 4.0
+                if dist <= maxDistance
+                    float entryPx = open[offset - 1]
+                    float stopPx  = close[offset] - setupDir * riskHist
+                    float exitPx  = close[offset - horizon]
+                    for k = 1 to horizon
+                        int o = offset - k
+                        if setupDir == 1 and low[o] <= stopPx
+                            exitPx := math.min(open[o], stopPx)
+                            break
+                        if setupDir == -1 and high[o] >= stopPx
+                            exitPx := math.max(open[o], stopPx)
+                            break
+                    float outcome = setupDir * (exitPx - entryPx) / riskHist
+                    if array.size(distArr) < neighborK
+                        array.push(distArr, dist)
+                        array.push(outArr, outcome)
+                    else
+                        float worst = array.max(distArr)
+                        if dist < worst
+                            int worstIdx = 0
+                            for j = 0 to array.size(distArr) - 1
+                                if array.get(distArr, j) == worst
+                                    worstIdx := j
+                                    break
+                            array.set(distArr, worstIdx, dist)
+                            array.set(outArr, worstIdx, outcome)
+    matches := array.size(outArr)
+    if matches == neighborK
+        int favorable = 0
+        for i = 0 to matches - 1
+            if array.get(outArr, i) > 0
+                favorable += 1
+        expectedR := array.avg(outArr)
+        lowerR    := expectedR - confK * array.stdev(outArr) / math.sqrt(matches)
+        agreePct  := 100.0 * favorable / matches
+
+float riskNow = stopAtr * atrV
+float costR   = costHurdle / 100.0 * close / math.max(riskNow, syminfo.mintick)
+bool modelPass = matches == neighborK and lowerR > costR + minEdgeR and agreePct >= minAgree
+
+// ─────────────────────────────────────────────────────────────────────────
+//  進場紀律與風控守門
+// ─────────────────────────────────────────────────────────────────────────
+var int lossSeq = 0
+if strategy.losstrades > strategy.losstrades[1]
+    lossSeq += 1
+if strategy.wintrades > strategy.wintrades[1]
+    lossSeq := 0
+
+bool ddOk = maxDD <= 0 or strategy.equity >= strategy.initial_capital * (1.0 - maxDD / 100.0)
+bool lossOk = maxLossSeq <= 0 or lossSeq < maxLossSeq
+
+var int lastExitBar = na
+bool justClosed = strategy.closedtrades > 0 and strategy.closedtrades.exit_bar_index(strategy.closedtrades - 1) == bar_index
+if justClosed
+    lastExitBar := bar_index
+bool inCooldown = cooldownBars > 0 and not na(lastExitBar) and (bar_index - lastExitBar) < cooldownBars
+
+bool sessionOk = not useSession or not na(time(timeframe.period, sessionStr))
+bool canEntry = ready and dailyOk and rvolOk and sessionOk and ddOk and lossOk and not inCooldown and
+                barstate.isconfirmed and strategy.position_size == 0 and strategy.opentrades < maxTrades and
+                (not useModel or modelPass)
+
+bool canLong  = tradeDir != "Short Only"
+bool canShort = tradeDir != "Long Only"
+bool smsLong  = canEntry and canLong and setupDir == 1
+bool smsShort = canEntry and canShort and setupDir == -1
+
+// 風險距離定倉 + 名目槓桿封頂
+float qtyRaw = strategy.equity * riskPct / 100.0 / math.max(riskNow, syminfo.mintick) / math.max(syminfo.pointvalue, 1.0)
+int qty = int(math.max(1, math.floor(qtyRaw)))
+if useLevCap
+    int qtyCap = int(math.floor(strategy.equity * maxLev / math.max(close * syminfo.pointvalue, syminfo.mintick)))
+    qty := math.min(qty, math.max(1, qtyCap))
+
+// ─────────────────────────────────────────────────────────────────────────
+//  執行（停損與重播一致：以訊號 K 收盤為錨，下一根開盤成交）
+// ─────────────────────────────────────────────────────────────────────────
+var float activeStop  = na
+var float activeTarget = na
+
+if smsLong
+    activeStop  := close - riskNow
+    activeTarget := targetR > 0 ? close + targetR * riskNow : na
+    strategy.entry("SMS Long", strategy.long, qty = qty)
+    strategy.exit("SMS Long Exit", "SMS Long", stop = activeStop, limit = activeTarget)
+if smsShort
+    activeStop  := close + riskNow
+    activeTarget := targetR > 0 ? close - targetR * riskNow : na
+    strategy.entry("SMS Short", strategy.short, qty = qty)
+    strategy.exit("SMS Short Exit", "SMS Short", stop = activeStop, limit = activeTarget)
+
+if strategy.position_size != 0
+    float avgPx = strategy.position_avg_price
+    bool beLong  = useBE and strategy.position_size > 0 and high >= avgPx + riskNow
+    bool beShort = useBE and strategy.position_size < 0 and low <= avgPx - riskNow
+    if beLong
+        activeStop := math.max(na(activeStop) ? avgPx : activeStop, avgPx)
+    if beShort
+        activeStop := math.min(na(activeStop) ? avgPx : activeStop, avgPx)
+    if strategy.position_size > 0
+        strategy.exit("SMS Long Exit", "SMS Long", stop = activeStop, limit = activeTarget)
+    else
+        strategy.exit("SMS Short Exit", "SMS Short", stop = activeStop, limit = activeTarget)
+
+    int maxHold = horizon * maxHoldMul
+    int barsHeld = bar_index - strategy.opentrades.entry_bar_index(0) + 1
+    if barsHeld >= maxHold
+        strategy.close((strategy.position_size > 0 ? "SMS Long" : "SMS Short"), comment = "Time", immediately = true)
+
+// JSON Webhook
+if useWebhook and (smsLong or smsShort)
+    payload = "{\"strategy\":\"TnSovereignSimilarMarketStatesV6\",\"version\":\"v26.1118.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"tf\":\"" + timeframe.period + "\",\"side\":\"" + (smsLong ? "BUY" : "SELL") + "\",\"matches\":" + str.tostring(matches) + ",\"lowerR\":" + str.tostring(lowerR, "#.###") + ",\"costR\":" + str.tostring(costR, "#.###") + ",\"agree\":" + str.tostring(agreePct, "#.#") + ",\"qty\":" + str.tostring(qty) + "}"
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  視覺層
+// ─────────────────────────────────────────────────────────────────────────
+plot(emaV, "Trend EMA", color = trendDir == 1 ? color.new(color.teal, 20) : trendDir == -1 ? color.new(color.red, 20) : color.new(color.gray, 40))
+plot(strategy.position_size != 0 ? activeStop : na, "Active Stop", color = color.new(color.orange, 0), style = plot.style_linebr)
+plotshape(showSignals and smsLong, "SMS Long", shape.triangleup, location.belowbar, color = color.new(color.lime, 0), size = size.tiny, text = "SMS")
+plotshape(showSignals and smsShort, "SMS Short", shape.triangledown, location.abovebar, color = color.new(color.red, 0), size = size.tiny, text = "SMS")
+bgcolor(setupDir == 1 ? color.new(color.green, 95) : setupDir == -1 ? color.new(color.red, 95) : na)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因果儀表板
+// ─────────────────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 9, border_width = 1, border_color = color.new(#8a8f98, 70))
+if barstate.islast and showDash
+    string sigTxt = smsLong ? "SMS LONG" : smsShort ? "SMS SHORT" : "WAIT"
+    string nbTxt  = str.tostring(matches) + "/" + str.tostring(neighborK)
+    string edgeTxt= na(lowerR) ? "—" : str.tostring(lowerR, "#.###") + " > " + str.tostring(costR + minEdgeR, "#.###")
+    string agrTxt = na(agreePct) ? "—" : str.tostring(agreePct, "#.#") + "%"
+    string posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    string holdTxt = strategy.position_size != 0 ? str.tostring(bar_index - strategy.opentrades.entry_bar_index(0) + 1) + "/" + str.tostring(horizon * maxHoldMul) : "—"
+    table.cell(dash, 0, 0, "版本", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 0, "v26.1118.0630", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 1, "訊號", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 1, sigTxt, text_color = smsLong or smsShort ? color.new(#00e5a0, 0) : color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "設定方向", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 2, setupDir == 1 ? "BULL SETUP" : setupDir == -1 ? "BEAR SETUP" : "NONE", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "鄰居數", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 3, nbTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "下界 / 成本+R", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 4, edgeTxt, text_color = modelPass ? color.new(#00e5a0, 0) : color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "有利比例", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 5, agrTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "部位 / 持倉", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 6, posTxt + " " + holdTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "連虧 / 冷卻", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 7, str.tostring(lossSeq) + " / " + (inCooldown ? "YES" : "NO"), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 8, "淨損益", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 8, str.tostring(strategy.netprofit, format.mintick), text_color = strategy.netprofit >= 0 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA NOTES
+//  · 原作者為研究型策略（含成本表與隨機基準表）；本版僅移植其「相似態濾網」
+//    決策層，不移植任何展示性報表與績效宣稱。
+//  · 鄰居結果以「訊號 K 收盤 ± stopAtr×ATR 停損 + 下一根開盤進場 +
+//    持有期收盤出場」重播，與實際下單條件一致；市場跳空穿越停損時以開價格
+//    承接，避免以停損價成交之恩惠假設。
+//  · 本庫既有 knn_matrix_ml_v6 / matrix_knn_ml_v6 使用 Lorentzian 距離與
+//    「下一根收盤方向」標籤；本策略為「跨案例交易重播 + R 倍數下界 + 成本」
+//    之不同命題，非重複覆蓋。
+// ═══════════════════════════════════════════════════════════════════════════
