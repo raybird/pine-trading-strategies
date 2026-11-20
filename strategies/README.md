@@ -51,7 +51,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignCommodityPulseMatrixV6` | 商品/期貨六類別多時框評分矩陣（Flow/Mom/Trend/Vol/Struct/Div 跨 TF1/TF2/TF3 標準化 → 總分 + Heat Score 0-1 → Breakout/Pullback/Continuation 三家族入場狀態機 → ATR+成交量品質閘門 + Final Gate 證據計數 → A-Setup 分級 + Early Reversal 候選 + Diamond Zones 語境圖層 → ATR SL 與 TP1/TP2/TP3 三段停利 + 單一 stop level 保本防競態），移植自 casoon/pine-scripts (WavesUnchained) Commodity Pulse Matrix v4.2.1 |
 | `TnSovereignAtrBandRatchetTrendV6` | ATR 單向棘輪帶趨勢追蹤（EMA(21) 基底 + ATR(10)×2 單向棘輪支撐／阻力帶 → 收盤越帶即停損反手 → 趨勢中回測 EMA 基底再進場 → 帶緣即真實盤中停損 + R 倍數停利 → 風險距離定倉（syminfo.pointvalue 風險金額 ÷ 停損距離）並以槓桿名目封頂 + HTF 偏見閘門 + 時段/每日平倉紀律 + JSON Webhook），移植自 loctai/pinescript (MIT) trend_following.pine |
 
-## Mean Reversion & Oscillator（均值回歸與振盪指標，26）
+## Mean Reversion & Oscillator（均值回歸與振盪指標，27）
 
 | 策略 | 說明 |
 |------|------|
@@ -81,6 +81,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignRsiStateDivConfluenceV6` | RSI-50 狀態機 + 隱藏背離三重匯流（RSI 中性線三拍狀態機【穿越→遠離≥buffer→重測→State 3】+ pivot 隱藏背離確認【價位 HL＋RSI LL 多 / 價位 LH＋RSI HL 空】+ 30-bar 失效重置 + 三重可切換匯流濾網【EMA touch / Fib 0.5–0.618 黃金回撤帶 / Ichimoku Kumo 觸雲或雲側】+ Swing SL + R:R bracket + 單方向開關 + JSON Webhook），移植自 moonyroy/trust-me-bro-strategy |
 | `TnSovereignCapitulationExhaustionV6` | 投降式耗竭反轉（深度定位【距 VWAP/布林下緣/前日低點/24 根低點/96 根低點 五項 OR】+ 耗竭證據【RSI≤41.1 / Stoch K≤35.7 / 單根報酬 Z≤−0.79 / 收盤復原位置 / 量能流動性 / 價量動能 Z 上限】+ 體制閘門【ADX 帶 / ATR 相對值帶 / 4H 與日線方向仲裁】→ 棘輪停損（2.20 ATR 與進場後最高點 0.82 ATR 取近者）+ ATR 目標 5.40 + VWAP 復原/RSI 高檔/動能見頂/持倉上限 多重出場 + 風險距離定倉與槓桿封頂 + JSON Webhook；原作者之 SciPy 事後標籤與最佳化日期窗已全數刪除），移植自 jnaggud/quant-research-lab (MIT) capitulation sleeve |
 | `TnSovereignIbsMeanReversionV6` | IBS 內部 K 棒強度均值回歸（IBS=(close−low)/(high−low) 低檔進場 + 收盤低於「N 日高點 − k×平均真實區間」拉回帶 + 原作者之前日高點出場 → 主權化補 ATR 硬停損 / R 倍數停利 / 1R 保本 / 持倉上限 + 風險距離定倉與槓桿封頂 + 日線 EMA 體制 + RVOL 閘門 + JSON Webhook），移植自 Aitradingroom/ai-trading-room (MIT) IBS Mean Reversion |
+| `TnSovereignLaguerreRsiRegimeV6` | Laguerre RSI 低延遲體制策略（四階 Laguerre 全通 IIR 級聯 L0..L3 + 相鄰級差 cu/cd 重構 RSI + gamma 阻尼 + LRSI 穿越 0.2/0.8 進場 + L0>L1/L0<L1 級聯斜率確認 → 主權化補 ATR 硬停損 / R 倍數停利 / 1R 保本 / 8 根上限 + 風險距離定倉與槓桿封頂 + 日線 EMA200 方向與斜率雙閘門【前根已收盤值】+ RVOL / 時段 / 每日平倉 / 冷卻 / DD 守門 + JSON Webhook），移植自 mihakralj/pinescript (MIT) LRSI: Laguerre RSI |
 
 ## Volatility & Breakout（波動率與突破，26）
 

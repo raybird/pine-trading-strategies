@@ -1,0 +1,225 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Laguerre RSI Regime V6
+//  主權化移植自 mihakralj/pinescript (MIT License, Copyright 2025 Miha Kralj)
+//  indicators/oscillators/lrsi.pine @ 0e91e5cfbcd5af47f0aa483fa86dcb0d5a7f471b
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1121.0630
+//  Timestamp : 2026-11-21 06:30 CST (UTC+8)
+//  Source    : mihakralj/pinescript — MIT — LRSI: Laguerre RSI
+//  Core      : 四階 Laguerre 全通 IIR 級聯（gamma 阻尼）取代固定週期 RSI：
+//              L0..L3 逐階以 nz(L[1], src) 初始化，cu/cd 由相鄰級差累加，
+//              LRSI = cu/(cu+cd)，平坦市場合回 0.5。低 gamma 反應快、
+//              高 gamma 平滑；屬「低延遲信號處理」維度，與本庫既有
+//              Wilder RSI / Stoch / Connors R2 / WaveTrend 皆不同。
+//
+//  主權化要點（相對原指標）
+//    1. 原作 solely indicator() → 改寫為 strategy()，以 LRSI 穿越 0.2/0.8
+//       為進場主證據，並要求 L0>L1（多）/L0<L1（空）之級聯斜率確認
+//    2. 加入 ATR 硬停損 + R 倍數停利 + 1R 保本 + 最長持倉，封閉無限風險
+//    3. 風險距離定倉 + 名目槓桿封頂，qty 以 int 落地
+//    4. 日線 EMA200 體制閘門（取前一根已收盤日線值、ignore_invalid_symbol）
+//       + 選配 RVOL / 時段 / 每日平倉 / 冷卻 / DD 守門
+//    5. process_orders_on_close=false、barstate.isconfirmed，訊號僅已收盤判定
+//    6. JSON Webhook 與因果儀表板；移除任何績效宣稱
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Laguerre RSI Regime V6", "TnLagRsi_v26",
+     overlay = true,
+     initial_capital = 50000,
+     currency = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     max_bars_back = 500)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+GRP_L = "① Laguerre 引擎 (LRSI)"
+src        = input.source(close, "來源序列", group = GRP_L)
+gamma      = input.float(0.50, "Gamma 阻尼 (0=快, 0.99=平滑)", minval = 0.0, maxval = 0.99, step = 0.01, group = GRP_L)
+loLevel    = input.float(0.20, "超賣進場線", minval = 0.05, maxval = 0.49, step = 0.05, group = GRP_L)
+hiLevel    = input.float(0.80, "超買進場線", minval = 0.51, maxval = 0.95, step = 0.05, group = GRP_L)
+allowShort = input.bool(false, "啟用空頭鏡像", group = GRP_L)
+
+GRP_E = "② 出場 (Exits)"
+useAtrStop = input.bool(true, "啟用 ATR 硬停損（強烈建議）", group = GRP_E)
+stopAtr    = input.float(2.0, "停損距離 (×ATR)", minval = 0.25, step = 0.25, group = GRP_E)
+targetR    = input.float(2.5, "停利目標 (R)，0＝停用", minval = 0.0, step = 0.25, group = GRP_E)
+useBE      = input.bool(true, "1R 後保本", group = GRP_E)
+maxHold    = input.int(8, "最長持倉 K 棒", minval = 1, group = GRP_E)
+
+GRP_R = "③ 風險與紀律 (Risk)"
+riskPct      = input.float(0.5, "單筆風險 (% 權益)", minval = 0.1, maxval = 5.0, step = 0.1, group = GRP_R)
+useLevCap    = input.bool(true, "啟用名目槓桿上限", group = GRP_R)
+maxLev       = input.float(2.0, "最大名目槓桿（名目 / 權益）", minval = 0.5, step = 0.25, group = GRP_R)
+cooldownBars = input.int(1, "出場後冷卻 K 棒", minval = 0, group = GRP_R)
+maxDD        = input.float(20.0, "最大回撤守門 (%)（0＝停用）", minval = 0.0, step = 1.0, group = GRP_R)
+
+GRP_F = "④ 濾網 (Filters)"
+useDaily   = input.bool(true, "啟用日線 EMA 體制與斜率閘門", group = GRP_F)
+dailyLen   = input.int(200, "日線 EMA 週期", minval = 20, maxval = 500, group = GRP_F)
+useSession = input.bool(false, "啟用進場時段濾網", group = GRP_F)
+sessionStr = input.session("0000-2345", "進場時段", group = GRP_F)
+useEodFlat = input.bool(false, "每日強制平倉", group = GRP_F)
+eodHour    = input.int(15, "平倉小時", minval = 0, maxval = 23, group = GRP_F)
+eodMinute  = input.int(55, "平倉分鐘", minval = 0, maxval = 59, group = GRP_F)
+useRvol    = input.bool(false, "啟用 RVOL 流動性閘門", group = GRP_F)
+rvolMin    = input.float(0.8, "RVOL 下限", minval = 0.1, step = 0.1, group = GRP_F)
+
+GRP_D = "⑤ 顯示 (Display)"
+showFilter  = input.bool(true, "顯示 Laguerre 價格濾線", group = GRP_D)
+showLevels  = input.bool(true, "顯示停損 / 停利線", group = GRP_D)
+showSignals = input.bool(true, "顯示訊號", group = GRP_D)
+showDash    = input.bool(true, "顯示因果儀表板", group = GRP_D)
+useWebhook  = input.bool(false, "啟用 JSON Webhook", group = GRP_D)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  核心量（Laguerre 四階級聯；僅用已收盤值）
+// ─────────────────────────────────────────────────────────────────────────
+var float L0 = 0.0
+var float L1 = 0.0
+var float L2 = 0.0
+var float L3 = 0.0
+
+float ssrc = nz(src, src[1])
+L0 := (1.0 - gamma) * ssrc + gamma * nz(L0[1], ssrc)
+L1 := -gamma * L0 + nz(L0[1], ssrc) + gamma * nz(L1[1], ssrc)
+L2 := -gamma * L1 + nz(L1[1], ssrc) + gamma * nz(L2[1], ssrc)
+L3 := -gamma * L2 + nz(L2[1], ssrc) + gamma * nz(L3[1], ssrc)
+
+float cu = math.max(L0 - L1, 0.0) + math.max(L1 - L2, 0.0) + math.max(L2 - L3, 0.0)
+float cd = math.max(L1 - L0, 0.0) + math.max(L2 - L1, 0.0) + math.max(L3 - L2, 0.0)
+float lrsi = cu + cd > 0.0 ? cu / (cu + cd) : 0.5
+float lagVal = (L0 + 2.0 * L1 + 2.0 * L2 + L3) / 6.0
+
+float atrV = ta.atr(14)
+float dEmaRaw = request.security(syminfo.tickerid, "1D", ta.ema(close, dailyLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float dEma = dEmaRaw[1]
+bool regimeLong  = not useDaily or (not na(dEma) and not na(dEma[1]) and close > dEma and dEma > dEma[1])
+bool regimeShort = not useDaily or (not na(dEma) and not na(dEma[1]) and close < dEma and dEma < dEma[1])
+
+float rvolV = na
+if useRvol
+    float volAvg = ta.sma(volume, 20)
+    rvolV := volAvg > 0 ? volume / volAvg : na
+bool rvolOk = not useRvol or (not na(rvolV) and rvolV >= rvolMin)
+
+float riskDist = math.max(stopAtr * atrV, syminfo.mintick)
+bool ddOk = maxDD <= 0 or strategy.equity >= strategy.initial_capital * (1.0 - maxDD / 100.0)
+
+var int lastExitBar = na
+bool justClosed = strategy.closedtrades > 0 and strategy.closedtrades.exit_bar_index(strategy.closedtrades - 1) == bar_index
+if justClosed
+    lastExitBar := bar_index
+bool inCooldown = cooldownBars > 0 and not na(lastExitBar) and (bar_index - lastExitBar) < cooldownBars
+
+bool sessionOk = not useSession or not na(time(timeframe.period, sessionStr))
+bool baseOk = barstate.isconfirmed and strategy.position_size == 0 and sessionOk and ddOk and rvolOk and not inCooldown
+
+bool longSignal  = baseOk and regimeLong and ta.crossover(lrsi, loLevel) and L0 > L1
+bool shortSignal = allowShort and baseOk and regimeShort and ta.crossunder(lrsi, hiLevel) and L0 < L1
+
+// 風險距離定倉 + 名目槓桿封頂
+float qtyRaw = strategy.equity * riskPct / 100.0 / math.max(riskDist * syminfo.pointvalue, syminfo.mintick)
+int qty = int(math.max(1, math.floor(qtyRaw)))
+if useLevCap
+    int qtyCap = int(math.floor(strategy.equity * maxLev / math.max(close * syminfo.pointvalue, syminfo.mintick)))
+    qty := math.min(qty, math.max(1, qtyCap))
+
+// ─────────────────────────────────────────────────────────────────────────
+//  執行（訊號 K 收盤確認 → 下一根開盤成交）
+// ─────────────────────────────────────────────────────────────────────────
+var float activeStop   = na
+var float activeTarget = na
+
+if longSignal
+    activeStop   := useAtrStop ? close - riskDist : na
+    activeTarget := targetR > 0 ? close + targetR * riskDist : na
+    strategy.entry("LagRsi Long", strategy.long, qty = qty)
+    strategy.exit("LagRsi Long Exit", "LagRsi Long", stop = activeStop, limit = activeTarget)
+if shortSignal
+    activeStop   := useAtrStop ? close + riskDist : na
+    activeTarget := targetR > 0 ? close - targetR * riskDist : na
+    strategy.entry("LagRsi Short", strategy.short, qty = qty)
+    strategy.exit("LagRsi Short Exit", "LagRsi Short", stop = activeStop, limit = activeTarget)
+
+if strategy.position_size != 0
+    float avgPx = strategy.position_avg_price
+    bool beLong  = useBE and strategy.position_size > 0 and high >= avgPx + riskDist
+    bool beShort = useBE and strategy.position_size < 0 and low <= avgPx - riskDist
+    if beLong
+        activeStop := math.max(na(activeStop) ? avgPx : activeStop, avgPx)
+    if beShort
+        activeStop := math.min(na(activeStop) ? avgPx : activeStop, avgPx)
+    if strategy.position_size > 0
+        strategy.exit("LagRsi Long Exit", "LagRsi Long", stop = activeStop, limit = activeTarget)
+    else
+        strategy.exit("LagRsi Short Exit", "LagRsi Short", stop = activeStop, limit = activeTarget)
+
+    int held = bar_index - strategy.opentrades.entry_bar_index(0) + 1
+    if held >= maxHold
+        strategy.close((strategy.position_size > 0 ? "LagRsi Long" : "LagRsi Short"), comment = "Time", immediately = true)
+
+bool eodFlat = useEodFlat and hour == eodHour and minute >= eodMinute and strategy.position_size != 0
+if eodFlat
+    strategy.close_all(comment = "EOD Flat")
+
+// JSON Webhook
+if useWebhook and (longSignal or shortSignal)
+    string side = longSignal ? "BUY" : "SELL"
+    string payload = "{\"strategy\":\"TnSovereignLaguerreRsiRegimeV6\",\"version\":\"v26.1121.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"tf\":\"" + timeframe.period + "\",\"side\":\"" + side + "\",\"lrsi\":" + str.tostring(lrsi, "#.###") + ",\"gamma\":" + str.tostring(gamma, "#.##") + ",\"qty\":" + str.tostring(qty) + "}"
+    alert(payload, alert.freq_once_per_bar_close)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  視覺層
+// ─────────────────────────────────────────────────────────────────────────
+plot(showFilter ? lagVal : na, "Laguerre Filter", color = color.new(#26c6da, 15), linewidth = 2)
+plot(showFilter ? lagVal[1] : na, "Laguerre Trigger", color = color.new(#8a8f98, 40), linewidth = 1)
+plot(showLevels and strategy.position_size != 0 ? activeStop : na, "Active Stop", color = color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLevels and strategy.position_size != 0 ? activeTarget : na, "Active Target", color = color.new(#00e5a0, 0), linewidth = 1, style = plot.style_linebr)
+plotshape(showSignals and longSignal, "LagRsi Long", shape.triangleup, location.belowbar, color = color.new(#00e5a0, 0), size = size.tiny, text = "LRSI")
+plotshape(showSignals and shortSignal, "LagRsi Short", shape.triangledown, location.abovebar, color = color.new(#ff4d6d, 0), size = size.tiny, text = "LRSI")
+bgcolor(longSignal ? color.new(#00e5a0, 94) : shortSignal ? color.new(#ff4d6d, 94) : na)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因果儀表板
+// ─────────────────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 8, border_width = 1, border_color = color.new(#8a8f98, 70))
+if barstate.islast and showDash
+    string sigTxt = longSignal ? "LRSI LONG" : shortSignal ? "LRSI SHORT" : "WAIT"
+    string posTxt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    string holdTxt = strategy.position_size != 0 ? str.tostring(bar_index - strategy.opentrades.entry_bar_index(0) + 1) + "/" + str.tostring(maxHold) : "—"
+    string regimeTxt = not useDaily ? "OFF" : (na(dEma) or na(dEma[1]) ? "N/A" : (dEma > dEma[1] ? "UP" : "DOWN"))
+    table.cell(dash, 0, 0, "版本", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 0, "v26.1121.0630", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 1, "訊號", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 1, sigTxt, text_color = longSignal or shortSignal ? color.new(#00e5a0, 0) : color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "LRSI / Gamma", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 2, str.tostring(lrsi, "#.###") + " / " + str.tostring(gamma, "#.##"), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "級聯斜率 L0−L1", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 3, str.tostring(L0 - L1, "#.####"), text_color = L0 > L1 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "日線體制", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 4, regimeTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "RVOL", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 5, not useRvol ? "OFF" : (na(rvolV) ? "N/A" : str.tostring(rvolV, "#.##")), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "部位 / 持倉", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 6, posTxt + " " + holdTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "淨損益", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 7, str.tostring(strategy.netprofit, format.mintick), text_color = strategy.netprofit >= 0 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA NOTES
+//  · 全庫 grep -il "laguerre|ehlers" strategies/*.pine 為零命中；
+//    既有 RSI 策略使用 Wilder RSI / StochRSI / Connors R2，皆非四階
+//    Laguerre 全通 IIR 級聯，判定為全新信號處理維度。
+//  · 日線 EMA 取 request.security(..., lookahead_on)[1]，即前一根已收盤
+//    日線值，避免盤中重繪；標的無效時 ignore_invalid_symbol 回 na 並 fail-closed。
+//  · 原作者為 indicator() 且無風控；本版為自足 v6 strategy()，
+//    未經獨立回測驗證，不主張任何績效。
+// ═══════════════════════════════════════════════════════════════════════════
