@@ -201,7 +201,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignTopologicalSutureV6` | 拓撲連接性策略 |
 | `TnSovereignSimilarMarketStatesV6` | 歷史相似態 k-NN 交易重播（四維正規化特徵 RSI/動量/EMA 距離/相對波動 → 同設定歷史鄰居 → 以相同停損與持有期重播成 R 倍數 → 均值下界（扣 1 SE）> 成本 + 安全邊際且有利比例達標才進場 + 風險距離定倉 + 槓桿封頂 + JSON Webhook），移植自 casoon/pine-scripts (MIT, WavesUnchained) Similar Market States v1.1.0 |
 
-## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，13）
+## Multi-Agent, Swarm & Macro（多智能體、蜂群與宏觀，14）
 
 | 策略 | 說明 |
 |------|------|
@@ -218,6 +218,7 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 | `TnSovereignSignalForgeV6` | ML 驅動多模型主權 |
 | `tn_pair_corr_divergence_v6` | 配對相關性背離偵測 |
 | `TnSovereignCrowdSentimentConsensusV6` | 群眾情緒共識（9 因子加權投票【EMA/Supertrend/ADX 體制/斜率/WaveTrend/StochRSI/背離/RS/ATR】→ 門禁矩陣【RVOL/波動帶/追價距離】→ CNN 風格 7 組分 Fear & Greed 量表【erf 近似常態 CDF】→ 群眾擁擠阻擋【極度貪婪禁多/極度恐慌禁空】+ VIX 平靜濾網 → 風險距離定倉 + 名目槓桿封頂 + 反向訊號出場 + ATR 停損 + JSON Webhook；原版 invalid symbol 錯誤修補、日頻序列去重繪、FG 時框錯配修正），移植自 kdricha0602/kernal-cipher (MIT) |
+| `TnSovereignDealerGammaDriftV6` | Dealer Gamma 造市者避險體制漂移（前日 CBOE VIX/VIX3M 期限結構代理 dealer 正 gamma + VIX9D/VIX 短期壓力否決 → 13:00 ET 且 RTH VWAP 上方進場 → ATR15 停損 / 2.5R 目標 / 1R 保本 / 持倉上限 / 15:55 ET 平倉；移除原版 FOMC 硬編碼日期表，補風險定倉 + 槓桿封頂 + 日線 EMA + RVOL + JSON Webhook），移植自 Open-Source-Edge/everything (MIT) Shield Battery |
 
 ## Optimization & Portfolio（優化與組合，7）
 
@@ -269,4 +270,4 @@ TeleNexus 旗下所有已實體化的 Pine Script v6 策略，按技術邏輯分
 
 ---
 
-*策略總數：190（v26.1022.0630 更新）*
+*策略總數：194（v26.1124.0630 更新）*

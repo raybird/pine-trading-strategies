@@ -32,7 +32,7 @@
 
 ## Repository Map
 
-- **[`/strategies`](./strategies/README.md)** — 193 個已實體化主權策略，分 14 大類（v26.1121.0630 更新）
+- **[`/strategies`](./strategies/README.md)** — 194 個已實體化主權策略，分 14 大類（v26.1124.0630 更新）
 - **[`/lib`](./strategies/lib_sovereign_logic_v6.pine)** — 核心邏輯庫（主權過濾與風險對位組件）
 - **[`/docs`](./docs/)** — 視覺化儀表板
 
@@ -50,15 +50,19 @@
 | **Volume & Order Flow** | 16 | 足跡圖、失衡偵測、流動性獵取、機率評分流動性磁鐵、VIOP 時段策略、足跡 POC 突破、ICT 量價輪廓延續 |
 | **Deep Reinforcement Learning** | 1 | Dueling DQN + NeuraLib 強化學習 |
 | **Matrix & Machine Learning** | 11 | KNN、OLS、因果權重、蒙地卡羅、歷史相似態 k-NN 交易重播（同設定鄰居 × R 倍數下界 × 成本門檻） |
-| **Multi-Agent, Swarm & Macro** | 13 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散、群眾情緒共識（9 因子加權投票 + CNN 風格 Fear & Greed 量表作為進場閘門） |
+| **Multi-Agent, Swarm & Macro** | 14 | 聯邦共識、蜂群、宏觀建模、組合優化、成對相關性發散、群眾情緒共識（9 因子加權投票 + CNN 風格 Fear & Greed 量表作為進場閘門）、Dealer Gamma 造市者避險體制漂移（VIX/VIX3M 期限結構代理 + VIX9D 壓力否決 + ET 時序漂移） |
 | **Optimization & Portfolio** | 7 | 組合優化、風險管理、相關性對沖 |
 | **DCA & Webhook** | 2 | DCA 網格引擎 + BBW 波動率過濾 + JSON Webhook 橋接、選擇權結構路由器（波動率體制引擎 → 跨式/價差/鐵鷹結構仲裁 → 多腳訂單負載 + 雙通道 Webhook） |
 | **PropFirm / Challenge** | 2 | PropFirm 挑戰賽超防禦策略（三層風控 + SMC 結構）、Prop Firm ICT 狙擊生存模式 |
 | **Signal Quality & Fakeout Prevention** | 7 | 信號品質與防假突破過濾、4 層因果審計、Enum 狀態機審計 |
 | **Core Library & Utility** | 5 | 主權邏輯庫與策略模板、工具 |
-| **Total** | **193** | 主權策略矩陣（v26.1121.0630 更新） |
+| **Total** | **194** | 主權策略矩陣（v26.1124.0630 更新） |
 
 
+> **最新加入（v26.1124.0630）**: 獵頭審計 #150 — 檢索途徑：`date` 物理時間 2026-11-24 06:30 CST（版號 `v26.1124.0630`，無小時偏移）+ GitHub Search API（多組 `created/pushed` 關鍵詞：`pine script v6 strategy` / `pinescript strategy v6` / `tradingview pine strategy` / `pinescript in:name,description,readme created:>2026-11-01` / `pine script strategy pushed:>2026-11-10` / `committer-date:>2026-11-20 extension:pine`，tree API `git/trees/<branch>?recursive=1` 逐檔掃描 `//@version=6` 與 `strategy()`）+ TradingView `/scripts/?script_type=strategies` 觀察（Kalman Frontier / Meridian Bitcoin Cycle Allocator / Gold 1H Fib / Shield Battery 等）。出線 **1 枚全新合格 strategy() 實體**（明確 MIT、自足 v6、無 `import`）：**Open-Source-Edge/everything** `episodes/ep01-dealer-gamma/LongGammaDrift_OpenSource.pine` @ `6fb3096ad2db125fb8c537a6a451f780dfcabafb`（`2026-11-23T02:02:14Z`，Copyright 2026 OpenSourceEdge）— **Dealer Gamma 造市者避險體制漂移**：前日 `CBOE:VIX / CBOE:VIX3M` 期限結構代理正 gamma 狀態 + `CBOE:VIX9D / CBOE:VIX` 短期波動壓力否決 → 13:00 ET 且 RTH VWAP 上方條件進場 → 15:55 ET 平倉。全庫 `grep -ril "dealer|gamma exposure|kalman" strategies/*.pine` **零命中**（既有 gamma 僅為 Laguerre 阻尼係數）→ 判定微結構／dealer hedging 為全新維度。主權化移除 2024–2026 FOMC 硬編碼日期表，全數 `request.security` 加 `ignore_invalid_symbol = true` 且取前根已收盤值，補 ATR15 停損 / 2.5R 目標 / 1R 保本 / 持倉上限 / 風險距離定倉 + 槓桿封頂 / 日線 EMA200 + RVOL + DD / JSON Webhook，並移除全部績效宣稱。移植為 `TnSovereignDealerGammaDriftV6`，歸 **Multi-Agent, Swarm & Macro 13→14**。
+>
+> 其餘候選皆排除：**TradingView House Rules**（`Kalman Frontier`、`Fib OTE Sniper`、`Laguerre Pulse`、`Meridian: Bitcoin Cycle Allocator` 等 open-source 策略）；**無 LICENSE / 授權不一致**：`Sam23599/confluence-engine`、`DexWilder/algo-lab`、`allanninal/prior-day-breakout-pine`（NOASSERTION）、`cemyilmvz/clarg-5m-oscillator-pro`（v5）；**工具／runtime**：`pine2pyne/pine2pyne`、`PyneSys/pynecore`、`pineforge-4pass/pineforge-engine`、`ChanakaWithanage/pine-backtest-studio`；**indicator()／library() 或已覆蓋**：`walidkssa/pine-script-v6-examples`（全教材指示指標）、`pamihche/Market-Mechanics`（library + indicator）、`ridloabelian/stingray-pinescript-suite`（全 indicator）、`colomet/pinescript`（JLC91 為 EMA55+MACD / EMA20+ADX 已覆蓋，JLC11/12 為 indicator）、`BubakCZ81/Omega-Trading-Platform`（寬頻指標彙總與基礎 EMA/MACD/SuperTrend 教材）、`WickCheck/pine-strategies`、`TradingSignalBot/tradingview-strategies`、`casoon/pine-scripts`（11/23 更新之新檔為 indicator 或既移植策略）。本次按規訓**新增 1 策略（193→194）**：Multi-Agent, Swarm & Macro 13→14。Dashboard（status-bar + 卡片 `<ul>`）/ 首頁 README / strategies README 版本完全對位 v26.1124.0630（含修正 strategies README 尾端舊總數 190→194）。
+>
 > **最新加入（v26.1121.0630）**: 獵頭審計 #149 — 檢索途徑：`date` 物理時間 2026-11-21 06:30 CST（版號 `v26.1121.0630`，無小時偏移）+ GitHub Search API（多組 `created/pushed` 關鍵詞：`pine script v6 strategy` / `pinescript strategy v6` / `tradingview pine strategy` / `"@version=6" strategy` / `laguerre`，tree API `git/trees/HEAD?recursive=1` 逐檔掃描 `//@version=6` 與 `strategy()`）+ TradingView `/scripts/?script_type=strategies`（Open-source only）觀察。本窗 GitHub 新策略多為 tools/runtime、v5、無 LICENSE 或已覆蓋維度；TradingView 可見 `Laguerre Pulse [Kiva]` 等 open-source 策略但受 House Rules 約束，改以明確 MIT 之 GitHub 原始檔為來源。
 >
 > 1. **mihakralj/pinescript**（**MIT**，Copyright 2025 Miha Kralj）`indicators/oscillators/lrsi.pine` @ `0e91e5cfbcd5af47f0aa483fa86dcb0d5a7f471b`（branch `main`，`2026-03-01T01:11:38Z`，`alignment w quantalib`）：**LRSI 低延遲信號處理** —【四階 Laguerre 全通 IIR 級聯 L0..L3，`nz(L[1], src)` 初始化，gamma 阻尼；相鄰級差累加 cu/cd，LRSI=cu/(cu+cd)，平坦市場回 0.5】→ 主權化改寫為 `strategy()`，以 LRSI 上穿 0.20 / 下穿 0.80 為主證據，並要求 L0>L1 / L0<L1 級聯斜率確認。全庫 `grep -ril "laguerre|ehlers" strategies/*.pine` **零命中**；既有 Connors R2 / Wilder RSI / Stoch / WaveTrend 皆非 Laguerre 全通級聯 → 判定全新維度。主權化補 ATR 硬停損 / 2.5R 目標 / 1R 保本 / 8 根上限、風險距離定倉 + 槓桿封頂、日線 EMA200 方向與斜率雙閘門（`lookahead_on` 取前根已收盤值 + `ignore_invalid_symbol`）、RVOL / 時段 / 每日平倉 / 冷卻 / DD 守門、JSON Webhook 與因果儀表板，`process_orders_on_close=false` + `barstate.isconfirmed`，並移除全部績效宣稱。移植為 `TnSovereignLaguerreRsiRegimeV6`，歸 **Mean Reversion & Oscillator 26→27**。

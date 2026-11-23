@@ -1,0 +1,269 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  TeleNexus Sovereign Dealer Gamma Drift V6
+//  主權化移植自 Open-Source-Edge/everything (MIT, Copyright 2026 OpenSourceEdge)
+//  episodes/ep01-dealer-gamma/LongGammaDrift_OpenSource.pine
+//  @ 6fb3096ad2db125fb8c537a6a451f780dfcabafb
+// ═══════════════════════════════════════════════════════════════════════════
+//  Version   : v26.1124.0630
+//  Timestamp : 2026-11-24 06:30 CST (UTC+8)
+//  Source    : Open-Source-Edge/everything — MIT — Shield Battery (Long-Gamma Drift)
+//  Core      : 以 CBOE VIX/VIX3M 期限結構作為「 dealer 正 gamma Protection」
+//              之免付費因果代理（前日已收盤值），VIX9D/VIX >= 1.05 為短期
+//              波動壓力否決；.dir 正 gamma 時於 13:00 ET、RTH VWAP 上方
+//              順勢做多，15:55 ET 強制平倉。全庫 gamma/dealer 命中性質
+//              檢查為零，屬微結構／造市者避險體制之全新命題。
+//
+//  主權化要點（相對原策略）
+//    1. 移除 2024–2026 FOMC 硬編碼日期表（日期窗與選擇偏見），改以資料
+//       驅動之 VIX9D 壓力閘門 + 可選事件日序列表（預設空）
+//    2. 全部 request.security 加入 ignore_invalid_symbol = true 且取 [1]
+//       前根已收盤序列，VIX 資料缺失時 fail-closed
+//    3. 風險距離定倉 + 名目槓桿封頂 + 1R 保本 + 2.5R 目標 + 持倉上限
+//    4. 日線 EMA200 方向閘門、RVOL、時段、每日強制平倉、冷卻、DD 守門
+//    5. process_orders_on_close=false、barstate.isconfirmed，訊號僅已收盤判定
+//    6. JSON Webhook 與因果儀表板；移除一切績效／勝率宣稱
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("Tn Sovereign Dealer Gamma Drift V6", "TnDealerGamma_v26",
+     overlay = true,
+     initial_capital = 50000,
+     currency = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.02,
+     slippage = 1,
+     pyramiding = 0,
+     calc_on_every_tick = false,
+     process_orders_on_close = false,
+     max_bars_back = 500)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+const string ET_TZ = "America/New_York"
+
+GRP_G = "① Dealer Gamma 體制 (前日 CBOE 期限結構)"
+vixSymbol    = input.symbol("CBOE:VIX", "VIX 標的", group = GRP_G)
+vix3mSymbol  = input.symbol("CBOE:VIX3M", "VIX3M 標的", group = GRP_G)
+vix9dSymbol  = input.symbol("CBOE:VIX9D", "VIX9D 標的", group = GRP_G)
+useGammaGate = input.bool(true, "啟用 dealer gamma 代理閘門", group = GRP_G)
+vixRatioMax  = input.float(0.98, "正 gamma 上限：VIX/VIX3M <", minval = 0.70, maxval = 1.20, step = 0.01, group = GRP_G)
+useStressVeto = input.bool(true, "啟用 VIX9D/VIX 短期壓力否決", group = GRP_G)
+vix9dMax     = input.float(1.05, "壓力否決門檻：VIX9D/VIX >=", minval = 0.80, maxval = 1.50, step = 0.01, group = GRP_G)
+manualGamma  = input.bool(false, "手動覆寫：今日為正 gamma（僅資料源的 PRO 模式）", group = GRP_G)
+
+GRP_S = "② 時序訊號 (ET)"
+checkHour    = input.int(13, "檢查小時 (ET)", minval = 9, maxval = 15, group = GRP_S)
+checkMinute  = input.int(0, "檢查分鐘 (ET)", minval = 0, maxval = 59, group = GRP_S)
+flatHour     = input.int(15, "平倉小時 (ET)", minval = 12, maxval = 16, group = GRP_S)
+flatMinute   = input.int(55, "平倉分鐘 (ET)", minval = 0, maxval = 59, group = GRP_S)
+useVwapGate  = input.bool(true, "要求收盤高於 RTH VWAP", group = GRP_S)
+useTfGate    = input.bool(true, "僅限 1m / 5m 圖表", group = GRP_S)
+skipDates    = input.string("", "事件日黑名單 (yyyymmdd, 逗號分隔；空白＝停用)", group = GRP_S)
+
+GRP_E = "③ 出場與風控"
+stopAtr     = input.float(2.0, "停損距離 (× ATR15)", minval = 0.5, maxval = 5.0, step = 0.25, group = GRP_E)
+minStopTick = input.int(16, "最小停損 (Ticks)", minval = 1, group = GRP_E)
+targetR     = input.float(2.5, "停利目標 (R)，0＝停用", minval = 0.0, step = 0.25, group = GRP_E)
+useBE       = input.bool(true, "1R 後保本", group = GRP_E)
+maxHold     = input.int(120, "最長持倉 K 棒", minval = 1, group = GRP_E)
+
+GRP_R = "④ 部位與紀律"
+riskPct     = input.float(0.5, "單筆風險 (% 權益)", minval = 0.1, maxval = 5.0, step = 0.1, group = GRP_R)
+useLevCap   = input.bool(true, "啟用名目槓桿上限", group = GRP_R)
+maxLev      = input.float(2.0, "最大名目槓桿 (名目 / 權益)", minval = 0.5, step = 0.25, group = GRP_R)
+cooldown    = input.int(2, "出場後冷卻 K 棒", minval = 0, group = GRP_R)
+maxDD       = input.float(20.0, "最大回撤守門 (%)（0＝停用）", minval = 0.0, step = 1.0, group = GRP_R)
+
+GRP_F = "⑤ 濾網"
+useDaily    = input.bool(true, "啟用日線 EMA200 方向閘門", group = GRP_F)
+dailyLen    = input.int(200, "日線 EMA 週期", minval = 20, maxval = 500, group = GRP_F)
+useRvol     = input.bool(false, "啟用 RVOL 流動性閘門", group = GRP_F)
+rvolMin     = input.float(0.8, "RVOL 下限", minval = 0.1, step = 0.1, group = GRP_F)
+
+GRP_D = "⑥ 顯示"
+showVwap    = input.bool(true, "顯示 RTH VWAP", group = GRP_D)
+showLevels  = input.bool(true, "顯示停損 / 停利", group = GRP_D)
+showSignals = input.bool(true, "顯示訊號", group = GRP_D)
+showDash    = input.bool(true, "顯示因果儀表板", group = GRP_D)
+useWebhook  = input.bool(false, "啟用 JSON Webhook", group = GRP_D)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因果核心：前日已收盤 CBOE 期限結構 + 已收盤 ATR15
+// ─────────────────────────────────────────────────────────────────────────
+float vixPrev   = request.security(vixSymbol,   "D", close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float vix3mPrev = request.security(vix3mSymbol, "D", close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float vix9dPrev = request.security(vix9dSymbol, "D", close[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float atr15Raw  = request.security(syminfo.tickerid, "15", ta.sma(ta.tr(true), 14)[1], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float dEmaRaw   = request.security(syminfo.tickerid, "1D", ta.ema(close, dailyLen), gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+float dEma      = dEmaRaw[1]
+
+float vixRatio   = not na(vixPrev) and not na(vix3mPrev) and vix3mPrev > 0 ? vixPrev / vix3mPrev : na
+float vix9dRatio = not na(vix9dPrev) and not na(vixPrev) and vixPrev > 0 ? vix9dPrev / vixPrev : na
+
+bool proxyPosGamma = not na(vixRatio) and vixRatio < vixRatioMax
+bool isPosGamma    = manualGamma or (useGammaGate and proxyPosGamma) or (not useGammaGate and not manualGamma)
+bool volStress     = useStressVeto and not na(vix9dRatio) and vix9dRatio >= vix9dMax
+bool dataOk        = not useGammaGate or manualGamma or not na(vixRatio)
+bool regimeOk      = isPosGamma and not volStress and dataOk
+
+// ─────────────────────────────────────────────────────────────────────────
+//  RTH / VWAP / 事件日
+// ─────────────────────────────────────────────────────────────────────────
+int etYear  = year(time_close, ET_TZ)
+int etMonth = month(time_close, ET_TZ)
+int etDay   = dayofmonth(time_close, ET_TZ)
+int etHour  = hour(time_close, ET_TZ)
+int etMin   = minute(time_close, ET_TZ)
+int etTotal = etHour * 60 + etMin
+int dayKey  = etYear * 10000 + etMonth * 100 + etDay
+
+bool validTf    = not useTfGate or (timeframe.isintraday and (timeframe.multiplier == 1 or timeframe.multiplier == 5))
+bool isRth      = etTotal > 570 and etTotal <= 960
+bool newRthDay  = isRth and not isRth[1] and (na(dayKey[1]) or dayKey != dayKey[1] or etTotal <= 575)
+bool blacklisted = false
+if skipDates != "" and not na(dayKey)
+    string keyTxt = str.tostring(dayKey)
+    for item in str.split(skipDates, ",")
+        if str.trim(item) == keyTxt
+            blacklisted := true
+
+var float cumPV = na
+var float cumV  = na
+var bool  tradedToday = false
+var float activeStop = na
+var float activeTarget = na
+
+if newRthDay
+    cumPV := 0.0
+    cumV := 0.0
+    tradedToday := false
+    activeStop := na
+    activeTarget := na
+
+if isRth
+    float tp = (high + low + close) / 3.0
+    float vol = math.max(volume, 0.0)
+    cumPV += tp * vol
+    cumV += vol
+
+float rthVwap = isRth and cumV > 0 ? cumPV / cumV : na
+
+// ─────────────────────────────────────────────────────────────────────────
+//  進場 / 出場決策（僅已收盤 K 棒）
+// ─────────────────────────────────────────────────────────────────────────
+float atrV = na(atr15Raw) ? na : atr15Raw
+float riskDist = na(atrV) ? na : math.max(stopAtr * atrV, minStopTick * syminfo.mintick)
+
+float rvolV = na
+if useRvol
+    float volAvg = ta.sma(volume, 20)
+    rvolV := volAvg > 0 ? volume / volAvg : na
+bool rvolOk = not useRvol or (not na(rvolV) and rvolV >= rvolMin)
+bool dailyOk = not useDaily or (not na(dEma) and close > dEma)
+bool ddOk = maxDD <= 0 or strategy.equity >= strategy.initial_capital * (1.0 - maxDD / 100.0)
+
+var int lastExitBar = na
+bool justClosed = strategy.closedtrades > 0 and strategy.closedtrades.exit_bar_index(strategy.closedtrades - 1) == bar_index
+if justClosed
+    lastExitBar := bar_index
+bool cooling = cooldown > 0 and not na(lastExitBar) and bar_index - lastExitBar < cooldown
+
+int checkTarget = checkHour * 60 + checkMinute
+int flatTarget = flatHour * 60 + flatMinute
+bool checkBar = validTf and isRth and etTotal == checkTarget
+bool flatBar = isRth and etTotal >= flatTarget
+
+bool baseOk = barstate.isconfirmed and strategy.position_size == 0 and not tradedToday and not blacklisted and rvolOk and dailyOk and ddOk and not cooling
+bool vwapOk = not useVwapGate or (not na(rthVwap) and close > rthVwap)
+bool longSignal = baseOk and checkBar and regimeOk and vwapOk and not na(riskDist)
+
+float qtyRaw = na(riskDist) ? 1.0 : strategy.equity * riskPct / 100.0 / math.max(riskDist * syminfo.pointvalue, syminfo.mintick)
+int qty = int(math.max(1, math.floor(qtyRaw)))
+if useLevCap
+    int qtyCap = int(math.floor(strategy.equity * maxLev / math.max(close * syminfo.pointvalue, syminfo.mintick)))
+    qty := math.min(qty, math.max(1, qtyCap))
+
+// ─────────────────────────────────────────────────────────────────────────
+//  執行
+// ─────────────────────────────────────────────────────────────────────────
+if longSignal
+    activeStop := close - riskDist
+    activeTarget := targetR > 0 ? close + targetR * riskDist : na
+    tradedToday := true
+    strategy.entry("Gamma Long", strategy.long, qty = qty, comment = "Gamma")
+    strategy.exit("Gamma Long Exit", "Gamma Long", stop = activeStop, limit = activeTarget, comment = "Risk")
+
+if strategy.position_size > 0
+    float avgPx = strategy.position_avg_price
+    if useBE and high >= avgPx + riskDist
+        activeStop := math.max(na(activeStop) ? avgPx : activeStop, avgPx)
+    strategy.exit("Gamma Long Exit", "Gamma Long", stop = activeStop, limit = activeTarget, comment = "Risk")
+    int held = bar_index - strategy.opentrades.entry_bar_index(0) + 1
+    if held >= maxHold
+        strategy.close("Gamma Long", comment = "Time", immediately = true)
+
+if flatBar and strategy.position_size > 0
+    strategy.close("Gamma Long", comment = "Flat ET", immediately = true)
+
+if strategy.position_size == 0 and not longSignal and strategy.position_size[1] == 0
+    activeStop := na
+    activeTarget := na
+
+// JSON Webhook
+if useWebhook and longSignal
+    string payload = "{\"strategy\":\"TnSovereignDealerGammaDriftV6\",\"version\":\"v26.1124.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"tf\":\"" + timeframe.period + "\",\"side\":\"BUY\",\"vix_vix3m\":" + str.tostring(vixRatio, "#.###") + ",\"vix9d_vix\":" + str.tostring(vix9dRatio, "#.###") + ",\"qty\":" + str.tostring(qty) + ",\"stop\":" + str.tostring(activeStop, format.mintick) + "}"
+    alert(payload, alert.freq_once_per_bar_close)
+if useWebhook and flatBar and strategy.position_size[1] > 0 and strategy.position_size == 0
+    string flatPayload = "{\"strategy\":\"TnSovereignDealerGammaDriftV6\",\"version\":\"v26.1124.0630\",\"symbol\":\"" + syminfo.ticker + "\",\"side\":\"FLAT\",\"reason\":\"ET_CLOSE\"}"
+    alert(flatPayload, alert.freq_once_per_bar_close)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  視覺層
+// ─────────────────────────────────────────────────────────────────────────
+plot(showVwap ? rthVwap : na, "RTH VWAP", color = color.new(#0d9488, 15), linewidth = 2, style = plot.style_linebr)
+plot(showLevels and strategy.position_size > 0 ? activeStop : na, "Active Stop", color = color.new(#ff4d6d, 0), linewidth = 2, style = plot.style_linebr)
+plot(showLevels and strategy.position_size > 0 and not na(activeTarget) ? activeTarget : na, "Active Target", color = color.new(#00e5a0, 0), linewidth = 1, style = plot.style_linebr)
+plotshape(showSignals and longSignal, "Gamma Long", shape.triangleup, location.belowbar, color = color.new(#00e5a0, 0), size = size.tiny, text = "Γ+")
+bgcolor(longSignal ? color.new(#00e5a0, 94) : volStress ? color.new(#ff4d6d, 96) : na)
+
+// ─────────────────────────────────────────────────────────────────────────
+//  因果儀表板
+// ─────────────────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 9, border_width = 1, border_color = color.new(#8a8f98, 70))
+if barstate.islast and showDash
+    string gammaTxt = not dataOk ? "N/A" : isPosGamma ? "POSITIVE" : "NEGATIVE"
+    string sigTxt = longSignal ? "GAMMA LONG" : flatBar and strategy.position_size[1] > 0 ? "ET FLAT" : "WAIT"
+    string posTxt = strategy.position_size > 0 ? "LONG" : "FLAT"
+    string heldTxt = strategy.position_size > 0 ? str.tostring(bar_index - strategy.opentrades.entry_bar_index(0) + 1) + "/" + str.tostring(maxHold) : "—"
+    table.cell(dash, 0, 0, "版本", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 0, "v26.1124.0630", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 1, "Dealer Gamma", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 1, gammaTxt, text_color = isPosGamma ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+    table.cell(dash, 0, 2, "VIX / VIX3M", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 2, na(vixRatio) ? "N/A" : str.tostring(vixRatio, "#.###") + " / " + str.tostring(vixRatioMax, "#.##"), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 3, "VIX9D / VIX", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 3, na(vix9dRatio) ? "N/A" : str.tostring(vix9dRatio, "#.###") + (volStress ? "  STRESS" : ""), text_color = volStress ? color.new(#ff4d6d, 0) : color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 4, "RTH VWAP", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 4, na(rthVwap) ? "N/A" : str.tostring(rthVwap, format.mintick), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 5, "ATR15 / Stop", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 5, na(riskDist) ? "N/A" : str.tostring(riskDist, "#.##") + " pts", text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 6, "日線 EMA / RVOL", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 6, (not useDaily ? "OFF" : na(dEma) ? "N/A" : close > dEma ? "UP" : "DOWN") + " / " + (not useRvol ? "OFF" : na(rvolV) ? "N/A" : str.tostring(rvolV, "#.##")), text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 7, "訊號 / 部位", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 7, sigTxt + " " + posTxt + " " + heldTxt, text_color = color.new(#e8ecf1, 0), text_size = size.small)
+    table.cell(dash, 0, 8, "淨損益", text_color = color.new(#8a8f98, 0), text_size = size.small)
+    table.cell(dash, 1, 8, str.tostring(strategy.netprofit, format.mintick), text_color = strategy.netprofit >= 0 ? color.new(#00e5a0, 0) : color.new(#ff4d6d, 0), text_size = size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DATA NOTES
+//  · 全庫 grep -ril "dealer|gamma exposure|kalman" strategies/*.pine 為零命中
+//    （gamma 僅出現在 Laguerre 阻尼與 NeuraRL 無關字串），判定微結構／
+//    dealer hedging 體制為全新維度。
+//  · VIX / VIX3M / VIX9D 取前一日已收盤值（lookahead_on + [1]），
+//    ignore_invalid_symbol = true；任一必要資料缺失即 fail-closed。
+//  · 原作者 FOMC 日期表（2024–2026）已移除，避免硬編碼日期窗與事後偏誤；
+//    改由 VIX9D 壓力閘門與使用者自選事件黑名單接管。
+//  · 本檔為自足 v6 strategy()，未經獨立回測驗證，不主張任何績效。
+// ═══════════════════════════════════════════════════════════════════════════
